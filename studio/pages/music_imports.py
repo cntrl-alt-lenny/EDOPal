@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHeaderView,
     QLineEdit,
-    QSizePolicy,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QVBoxLayout,
@@ -98,7 +97,7 @@ class ImportViews:
         actions = [
             (
                 "Add a folder",
-                "Review tracks and choose their games and scenes.",
+                "Choose an album and a suggested scene for each track.",
                 "folder",
                 self.folder,
             ),
@@ -116,7 +115,7 @@ class ImportViews:
             ),
             (
                 "Export library",
-                "Copy your games and tracks to a folder.",
+                "Copy your albums and tracks to a folder.",
                 "arrow",
                 partial(self.transfer, "export"),
             ),
@@ -136,10 +135,11 @@ class ImportViews:
             tile.clicked.connect(callback)
             grid.addWidget(tile, i // 2, i % 2)
             self.tools[name] = tile
-        layout.addLayout(grid, 1)
+        layout.addLayout(grid)
+        layout.addStretch()
         self.undo_button(layout)
         packs = action("Get more music", p.packs.open, icon="download")
-        layout.addWidget(packs, 0, Qt.AlignmentFlag.AlignRight)
+        p.fixed_actions().addWidget(packs, 0, Qt.AlignmentFlag.AlignRight)
         self.tools["Add a folder"].setFocus()
 
     def new_game(self) -> None:
@@ -151,8 +151,7 @@ class ImportViews:
             "Add tracks to this album after you create it.",
             "music",
         )
-        hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(hero, 1)
+        layout.addWidget(hero)
         panel = Panel()
         panel.body.addWidget(label("Album name", "subheading"))
         self.name = QLineEdit()
@@ -181,6 +180,7 @@ class ImportViews:
         )
         panel.body.addWidget(self.create, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(panel)
+        layout.addStretch()
         self.name.setFocus()
 
     def create_game(self) -> None:
@@ -240,18 +240,18 @@ class ImportViews:
         )
         layout.addWidget(
             label(
-                "Choose a game and a suggested scene for each track. You can use it in any scene later.",
+                "Choose the album that each track belongs to. You can use a track in any playlist later.",
                 "body",
                 True,
             )
         )
-        self.review_table = table(("File", "Game", "Scene", "Match"), "Import assignments")
+        self.review_table = table(("File", "Album", "Scene", "Match"), "Import assignments")
         view = self.review_table
         games = sorted(
             ((a.game.title, a.game.id) for a in p.data.albums.values()),
             key=lambda v: v[0].casefold(),
         )
-        view.setItemDelegateForColumn(1, ChoiceDelegate([("Choose game…", None), *games], view))
+        view.setItemDelegateForColumn(1, ChoiceDelegate([("Choose album…", None), *games], view))
         view.setItemDelegateForColumn(
             2, ChoiceDelegate([(v[0], k) for k, v in SCENES.items()], view)
         )
@@ -268,7 +268,7 @@ class ImportViews:
                 view,
                 (
                     item.path.name,
-                    album.game.title if album else "Choose game…",
+                    album.game.title if album else "Choose album…",
                     SCENES[item.scene][0],
                     match,
                 ),
@@ -278,16 +278,22 @@ class ImportViews:
             file.setFlags(
                 (file.flags() & ~Qt.ItemFlag.ItemIsEditable) | Qt.ItemFlag.ItemIsUserCheckable
             )
-            file.setCheckState(Qt.CheckState.Checked)
+            supported = item.path.suffix.lower() in engine.FORMATS
+            file.setCheckState(Qt.CheckState.Checked if supported else Qt.CheckState.Unchecked)
             view.item(i, 1).setData(Qt.ItemDataRole.UserRole, item.game)
             view.item(i, 2).setData(Qt.ItemDataRole.UserRole, item.scene)
             note = view.item(i, 3)
             note.setFlags(note.flags() & ~Qt.ItemFlag.ItemIsEditable)
             note.setToolTip(item.error or match)
+            if not supported:
+                for column in range(view.columnCount()):
+                    view.item(i, column).setFlags(Qt.ItemFlag.NoItemFlags)
         layout.addWidget(view, 1)
         self.hint = label("", "body", True)
         self.confirm = action("Add selected files", self.commit, "primary", "download")
-        layout.addLayout(row(self.hint, self.confirm))
+        actions = row(self.hint, self.confirm)
+        actions.setStretch(0, 1)
+        p.fixed_actions().addLayout(actions)
         view.itemChanged.connect(self.validate)
         view.cellClicked.connect(
             lambda r, c: view.editItem(view.item(r, c)) if c in (1, 2) else None
@@ -304,18 +310,28 @@ class ImportViews:
                 scene=view.item(i, 2).data(Qt.ItemDataRole.UserRole),
             )
             for i, item in enumerate(self.plan)
-            if view.item(i, 0).checkState() == Qt.CheckState.Checked
+            if item.path.suffix.lower() in engine.FORMATS
+            and view.item(i, 0).checkState() == Qt.CheckState.Checked
         ]
 
     def validate(self) -> None:
         plan = self.choices()
         missing = sum(needs_game(x, bool(self.target)) for x in plan)
         if missing:
-            message = f"Files needing a game: {missing}. Choose a game or uncheck those files."
+            message = (
+                "Choose an album for the selected file, or uncheck it."
+                if missing == 1
+                else f"Choose albums for {missing} selected files, or uncheck them."
+            )
         elif not self.plan:
             message = "The folder contains no tracks."
         else:
-            message = f"{len(plan)} of {len(self.plan)} files selected"
+            available = sum(item.path.suffix.lower() in engine.FORMATS for item in self.plan)
+            message = (
+                f"{len(plan)} of {available} supported files selected"
+                if available
+                else "This folder contains no supported audio files."
+            )
         self.hint.setText(message)
         self.confirm.setEnabled(bool(plan) and not missing)
 
@@ -369,11 +385,16 @@ class ImportViews:
                 ),
             )
             view.item(i, 0).setToolTip(str(result.path))
+        view.setWordWrap(True)
+        view.setTextElideMode(Qt.TextElideMode.ElideNone)
+        view.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(view, 1)
+        footer = p.fixed_actions()
         if self.result_receipt:
-            self.undo_button(layout)
+            self.undo_button(footer)
         done = action("Done", self.manage, "primary", "check")
-        layout.addWidget(done, 0, Qt.AlignmentFlag.AlignRight)
+        footer.addWidget(done, 0, Qt.AlignmentFlag.AlignRight)
         done.setFocus()
 
     def transfer(self, kind: str) -> None:

@@ -99,8 +99,8 @@ class AlbumViews:
     def gallery(self, from_scene: bool = False) -> None:
         self.from_scene = from_scene
         p = self.page
-        body = p.screen("gallery", self.playlist if from_scene else p.home, "Browse games")
-        self.field = SearchField("Find a game or track")
+        body = p.screen("gallery", self.playlist if from_scene else p.home, "Browse albums")
+        self.field = SearchField("Find an album or track")
         self.field.setText(self.search)
         self.only = Button("Has tracks")
         self.only.setCheckable(True)
@@ -139,13 +139,14 @@ class AlbumViews:
         self.grid = AlbumGrid(p.ctx.tasks)
         self.empty = Panel(t.LG)
         no_matches = RecordHero(
-            "Browse games", "No matches", "Try a different game or track title.", "music"
+            "Browse albums", "No matches", "Try a different album or track title.", "music"
         )
         no_matches.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.empty.body.addWidget(no_matches, 1)
+        self.empty.body.addWidget(no_matches)
         self.empty.body.addWidget(
-            action("Clear filters", self.clear_filters), 0, Qt.AlignmentFlag.AlignRight
+            action("Clear filters", self.clear_filters), 0, Qt.AlignmentFlag.AlignLeft
         )
+        self.empty.body.addStretch()
         column.addWidget(self.count)
         column.addWidget(self.empty, 1)
         column.addWidget(self.grid, 1)
@@ -204,16 +205,16 @@ class AlbumViews:
         if a.cover_origin:
             body.addWidget(label("Cover · " + credit_text(a.cover_origin), "muted", True))
         if not a.tracks:
-            hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            body.setStretchFactor(hero, 1)
             panel = Panel(t.LG)
             prompt = label(
                 "No tracks yet. Add files from your collection to this album.", "body", True
             )
             add = action("Add files", partial(p.imports.files, self.key), "primary", "folder")
-            panel.body.addLayout(row(prompt, add))
+            panel.body.addWidget(prompt)
+            panel.body.addWidget(add, 0, Qt.AlignmentFlag.AlignLeft)
             body.addWidget(panel)
             p.imports.undo_creation(body, self.key)
+            body.addStretch()
             add.setFocus()
             return
         head = row(
@@ -221,7 +222,7 @@ class AlbumViews:
             action("Add files", partial(p.imports.files, self.key), icon="folder"),
         )
         head.setStretch(0, 1)
-        whole = action("Replace a playlist with this album", lambda: self.destination(None))
+        whole = action("Use all tracks from this album", lambda: self.destination(None))
         whole.setEnabled(bool(a.tracks))
         head.addWidget(whole)
         body.addLayout(head)
@@ -240,7 +241,7 @@ class AlbumViews:
             btn.setAccessibleName(f"Add {tr.title} to a playlist")
             self.tracks.setCellWidget(i, 2, btn)
         body.addWidget(self.tracks, 1)
-        body.addWidget(p.preview)
+        p.fixed_actions().addWidget(p.preview)
         p.preview.show()
         credit = label("", "muted", True)
         body.addWidget(credit)
@@ -301,7 +302,8 @@ class AlbumViews:
             btn.clicked.connect(partial(self.assign, key, track))
             grid.addWidget(btn, i // 2, i % 2)
             self.destinations[key] = btn
-        layout.addLayout(grid, 1)
+        layout.addLayout(grid)
+        layout.addStretch(1)
         self.destinations[p.scene].setFocus()
 
     def assign(self, scene: str, track: Track | None) -> None:
@@ -365,13 +367,12 @@ class AlbumViews:
         layout = p.screen("playlist", p.home, title, "EDOPRO PLAYLISTS")
         p.feedback(layout)
         panel = Panel(t.LG)
-        head = row(
-            label(track_count(len(scene.tracks)), "subheading"),
-            action("Browse games", partial(self.gallery, True), "primary", "library"),
-        )
-        head.setStretch(0, 1)
-        panel.body.addLayout(head)
-        self.list = table(("Track", "Game"), "Current playlist")
+        browse = action("Browse albums", partial(self.gallery, True), "primary", "library")
+        if scene.tracks:
+            head = row(label(track_count(len(scene.tracks)), "subheading"), browse)
+            head.setStretch(0, 1)
+            panel.body.addLayout(head)
+        self.list = table(("Track", "Album"), "Current playlist")
         for tr in scene.tracks:
             a = p.data.albums.get(tr.game)
             cells(self.list, (tr.title, a.game.title if a else "Your library"))
@@ -379,11 +380,11 @@ class AlbumViews:
             hero = RecordHero(
                 "Playlist",
                 "No tracks in this playlist",
-                "Browse a game and choose a track for this scene.",
+                "Browse an album and choose a track for this scene.",
                 "music",
             )
-            hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            panel.body.addWidget(hero, 1)
+            panel.body.addWidget(hero)
+            panel.body.addWidget(browse, 0, Qt.AlignmentFlag.AlignLeft)
         panel.body.addWidget(self.list, 1)
         self.list.setVisible(bool(scene.tracks))
         self.up = action("Move up", partial(self.edit, -1))
@@ -397,11 +398,10 @@ class AlbumViews:
         if not scene.tracks:
             for button in (self.up, self.down, self.remove, self.clear):
                 button.hide()
-        layout.addWidget(panel, 1)
-        footer = Panel(t.LG)
-        footer.body.addWidget(
-            label("Changes take effect next time you start EDOPro.", "body", True)
-        )
+        layout.addWidget(panel, int(bool(scene.tracks)))
+        if not scene.tracks:
+            layout.addStretch(1)
+        footer = Panel(t.MD)
         self.undo = action("Undo last playlist change", partial(self.recover, False))
         self.restore = action(
             "Restore original music for this playlist", partial(self.recover, True)
@@ -411,22 +411,28 @@ class AlbumViews:
         self.restore.setVisible(scene.restore)
         self.restore.setEnabled(scene.restore)
         footer.body.addLayout(row(self.undo, self.restore))
-        footer.body.addWidget(
-            label(
-                "Undo puts the previous playlist back. Restore returns the original game files for this scene.",
-                "muted",
-                True,
-            )
+        self.undo.setToolTip("Put back the tracks from just before your last playlist change.")
+        self.restore.setToolTip("Put back this scene’s original game files.")
+        hint = label(
+            "Undo puts the previous playlist back. Restore returns the original game files for this scene.",
+            "muted",
+            True,
         )
+        footer.body.addWidget(hint)
+        hint.setHidden(p.window().height() <= TITLE_ROW_HEIGHT)
+        p.compact_changed.connect(hint.setHidden)
         footer.setVisible(scene.undo or scene.restore)
-        layout.addWidget(footer)
+        if scene.undo or scene.restore:
+            p.fixed_actions().addWidget(footer)
+        else:
+            layout.addWidget(footer)
         self.list.currentCellChanged.connect(self.update_actions)
         self.list.setCurrentCell(min(self.selected, len(scene.tracks) - 1), 0)
         self.update_actions()
         if scene.tracks:
             self.list.setFocus()
         else:
-            head.itemAt(1).widget().setFocus()
+            browse.setFocus()
 
     def update_actions(self) -> None:
         i, n = self.list.currentRow(), self.list.rowCount()

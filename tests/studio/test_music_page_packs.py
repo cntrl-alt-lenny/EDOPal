@@ -88,7 +88,7 @@ def test_cache_to_album_and_offline_removal(
     idle(qtbot, p)
     update = messages(p.packs.cards[rows[0].id])
     assert "Update available" in update and "Added to your library." not in update
-    click(p.packs.cards[rows[0].id], "View album")
+    click(p.packs.cards[rows[0].id], "View in collection")
     idle(qtbot, p)
     assert p.albums.key == "dm3"
     assert p.albums.tracks.item(0, 0).text() == "Night in the city"
@@ -166,8 +166,9 @@ def test_cancel_return_and_retry_failure_keep_pack_credits(
     p.packs.progress.cancel.click()
     idle(qtbot, p)
     text = messages(p.packs.cards[pack.id])
-    assert "Download canceled" in text and pack.attribution in text
-    click(p.packs.cards[pack.id], "Resume")
+    assert text.count("Paused") == 1 and "Not downloaded" not in text
+    assert pack.attribution in text
+    click(p.packs.cards[pack.id], "Resume download")
     idle(qtbot, p)
     text = messages(p.packs.cards[pack.id])
     assert "Verification failed" in text and pack.attribution in text
@@ -175,3 +176,25 @@ def test_cancel_return_and_retry_failure_keep_pack_credits(
     p.escape()
     idle(qtbot, p)
     assert p.state == "manage" and p.game == second
+
+
+def test_reopened_catalogs_resume_only_matching_archives(tmp_path: Path) -> None:
+    from content.cache import PackCache
+    from studio.pages.sounds_model import online_sets
+
+    cache = PackCache(tmp_path / "cache")
+    music, _ = demo_pack(tmp_path, "music")
+    sounds = replace(music, kind="sound-effects", id="effects")
+    catalogue = Catalogue(Manifest(1, (music, sounds)), CatalogueSource.CACHED)
+    for pack in (music, sounds):
+        folder = cache.root / f"pack-{pack.id}"
+        folder.mkdir(parents=True)
+        (folder / f"{pack.version}--{pack.sha256}.zip.part").write_bytes(b"partial")
+    assert music_packs.entries(cache, catalogue, "5.5.0")[0].state == "Paused"
+    assert online_sets(cache, "5.5.0", catalogue).packs[0].paused
+    updated = Catalogue(
+        Manifest(1, tuple(replace(pack, version="2.0.0") for pack in (music, sounds))),
+        CatalogueSource.LIVE,
+    )
+    assert music_packs.entries(cache, updated, "5.5.0")[0].state == "Not downloaded"
+    assert not online_sets(cache, "5.5.0", updated).packs[0].paused

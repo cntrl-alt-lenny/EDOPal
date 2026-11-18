@@ -4,23 +4,21 @@ from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QPropertyAnimation, Qt
-from PySide6.QtGui import QResizeEvent
-from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QWidget
 
 import sounds
 from music.settings import GameProcessUnknown
 from studio import theme as t
 from studio.context import AppContext, GameOpenError, Installation
-from studio.pages.base import Page
-from studio.pages.card_views import scroll
-from studio.pages.music_sounds_controls import TITLE_ROW_HEIGHT, AudioGameCheck, confirm_change
+from studio.pages.music_sounds_controls import AudioGameCheck, confirm_change
 from studio.pages.sounds_auditions import SoundAuditions
 from studio.pages.sounds_collections import SoundCollections
 from studio.pages.sounds_event_controls import SoundEvents
+from studio.pages.sounds_layout import SoundWorkspace
 from studio.pages.sounds_model import (
     EVENT_COUNT,
     NEW_MIX,
-    Downloadable,
+    InstallationUnavailable,
     Snapshot,
     Source,
     coverage,
@@ -34,14 +32,12 @@ from studio.pages.sounds_views import (
     Feedback,
     Overview,
     SetCard,
-    add_section,
     empty_layout,
 )
 from studio.tasks import Job
-from studio.widgets import margins
 
 
-class SoundsPage(Page):
+class SoundsPage(SoundWorkspace):
     id, title, icon = "sounds", "Sounds", "sounds"
 
     def __init__(self, context: AppContext) -> None:
@@ -64,55 +60,22 @@ class SoundsPage(Page):
         self.collections = SoundCollections(self)
         self.state = "overview"
         self.name_parent = "overview"
+        self.install_path = context.installation.path
         self.snapshot: Snapshot | None = None
         self.scan_job: Job | None = None
-        self.scan_error = False
+        self.scan_error = ""
         self.generation = 0
         self.bundle_job: Job | None = None
         self.bundled: tuple[sounds.SoundSet, ...] | None = None
         self.draft = sounds.SoundSet(NEW_MIX)
         self.choice_names: dict[str, str] = {}
         self.selected_source = ""
+        self.applied: sounds.SoundSet | None = None
         self.write_job: Job | None = None
         self.retry_action = ""
         self.audio = SoundAuditions(self)
 
-        self.stack = QStackedWidget()
-        widgets = {
-            "overview": self.overview,
-            "mix": self.mixer,
-            "chants": self.chants,
-            "event": self.picker,
-            "saved": self.collections.library,
-            "downloads": self.collections.downloads,
-            "name": self.collections.name,
-        }
-        self.views = {key: scroll(widget) for key, widget in widgets.items()}
-        self.mixer.scroller, self.chants.scroller = self.views["mix"], self.views["chants"]
-        for key, view in self.views.items():
-            self.stack.addWidget(view)
-            if key != "overview":
-                widgets[key].back.clicked.connect(self.escape)
-        body = QVBoxLayout(self)
-        margins(body, 0)
-        body.setSpacing(0)
-        self.messages = QHBoxLayout()
-        self.messages.setContentsMargins(t.XXL, 0, t.XXL, 0)
-        self.messages.addStretch()
-        notices = QVBoxLayout()
-        notices.setSpacing(t.XS)
-        notices.addWidget(self.feedback)
-        notices.addWidget(self.closed)
-        self.messages.addLayout(notices, 1)
-        self.messages.addStretch()
-        body.addLayout(self.messages)
-        body.addWidget(self.stack, 1)
-        self.footer = QHBoxLayout()
-        self.footer.setContentsMargins(t.XXL, t.XS, t.XXL, t.LG)
-        self.footer.addStretch()
-        self.footer.addWidget(self.bar, 1)
-        self.footer.addStretch()
-        body.addLayout(self.footer)
+        self.build_layout()
         self.animation = QPropertyAnimation(self)
         self.animation.setPropertyName(b"pos")
         self.animation.setDuration(t.MOTION_MS)
@@ -136,38 +99,6 @@ class SoundsPage(Page):
         self.closed.retry.clicked.connect(lambda: self.retry())
         self.feedback.dismiss.clicked.connect(self.clear_feedback)
         self.update_controls()
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        extra = int(event.size().width() > t.CONTENT_MAX)
-        for row in (self.footer, self.messages):
-            row.setStretch(0, extra)
-            row.setStretch(1, 100 if extra else 1)
-            row.setStretch(2, extra)
-        self.place_bar()
-        self.size_overview()
-
-    def place_bar(self) -> None:
-        inline = self.state == "overview" and self.height() > t.TALL_HEIGHT + t.HERO_MIN
-        if inline and self.bar.parentWidget() is not self.overview:
-            self.overview.wide_actions.addWidget(self.bar)
-        elif not inline and self.bar.parentWidget() is self.overview:
-            self.footer.insertWidget(1, self.bar, 1)
-        self.bar.setVisible(self.state in ("overview", "mix", "chants"))
-
-    def size_overview(self) -> None:
-        compact = self.width() < t.COMPACT_WIDTH - t.RAIL_COMPACT
-        if self.overview.compact_tools != compact:
-            self.overview.place_tools(compact)
-        columns = 1 if compact else max(1, len(self.cards))
-        if self.overview.columns != columns:
-            self.overview.columns = columns
-            add_section(self.overview.cards, self.cards.values(), columns)
-            for col in range(3):
-                self.overview.cards.setColumnStretch(col, int(col < columns))
-        short = self.window().height() <= TITLE_ROW_HEIGHT
-        self.overview.hero.setVisible(not short)
-        self.overview.compact_title.setVisible(short)
 
     def shown(self) -> None:
         if self.bundled is None and self.bundle_job is None:
@@ -205,11 +136,14 @@ class SoundsPage(Page):
             self.scan_job.cancel()
         self.scan_job = None
         self.snapshot = None
-        self.scan_error = False
-        self.draft = sounds.SoundSet(NEW_MIX)
-        self.selected_source = ""
-        self.choice_names.clear()
-        self.events.reset()
+        self.applied = None
+        self.scan_error = ""
+        if self.install_path != installation.path:
+            self.draft = sounds.SoundSet(NEW_MIX)
+            self.selected_source = ""
+            self.choice_names.clear()
+            self.events.reset()
+        self.install_path = installation.path
         self.stop_audio()
         self.clear_feedback()
         self.open_view("overview")
@@ -220,7 +154,25 @@ class SoundsPage(Page):
 
     def check_again(self) -> None:
         install = self.ctx.installation
-        if install.path and not install.ready:
+        if install.path and not install.ready and self.scan_error:
+            if self.scan_job:
+                return
+            generation = self.generation
+
+            def checked(result: Installation) -> None:
+                if self.generation == generation and result.path:
+                    self.ctx.set_installation(result)
+
+            def finished() -> None:
+                if self.generation == generation:
+                    self.scan_job = None
+                    self.update_controls()
+
+            self.scan_job = job = self.ctx.tasks.start(lambda _: Installation.inspect(install.path))
+            job.result.connect(checked)
+            job.finished.connect(finished)
+            self.update_controls()
+        elif install.path and not install.ready:
             self.ctx.select_installation_requested.emit(install.path)
         else:
             self.refresh()
@@ -239,23 +191,23 @@ class SoundsPage(Page):
         )
         if self.retry_action:
             self.clear_feedback()
-        self.scan_error = False
+        self.scan_error = ""
 
         def show(snapshot: Snapshot) -> None:
             if generation == self.generation:
                 self.snapshot = snapshot
+                if self.applied and not snapshot.matches(self.applied):
+                    self.applied = None
                 self.show_cards()
                 self.sources_changed()
 
         def error(exc: BaseException) -> None:
             if generation == self.generation:
-                self.scan_error = True
+                if isinstance(exc, InstallationUnavailable):
+                    self.ctx.set_installation(Installation(install.path))
+                self.scan_error = str(exc) or "Could not read the selected folder."
                 self.snapshot = None
                 self.show_cards()
-                self.feedback.show_message(
-                    "Could not read the game’s sounds. Check the EDOPro folder and retry.",
-                    details=str(exc),
-                )
 
         def finish() -> None:
             if generation == self.generation:
@@ -315,6 +267,7 @@ class SoundsPage(Page):
         self.retry_action = ""
         self.closed.hide()
         self.feedback.show_message("")
+        self.update_controls()
 
     def retry(self, *, confirmed_closed: bool = False) -> None:
         if self.retry_action:
@@ -365,16 +318,14 @@ class SoundsPage(Page):
         if self.write_job:
             return
         self.clear_feedback()
+        if self.draft != source.sound_set:
+            self.applied = None
         self.draft = source.sound_set
         self.selected_source = source.key
         self.choice_names.clear()
         if self.state in ("saved", "downloads"):
             self.open_view("overview", self.bar.apply)
         self.sources_changed()
-
-    def use_download(self, item: Downloadable) -> None:
-        if item.sound_set:
-            self.use_set(Source(f"pack:{item.pack.id}", item.sound_set, "Downloaded"))
 
     def sources_changed(self) -> None:
         self.events.update()
@@ -414,11 +365,17 @@ class SoundsPage(Page):
         applying = self.write_job is not None
         editing = not (applying or self.events.clip_job or self.collections.local_job)
         can_write = (
-            editing and self.snapshot is not None and not self.scan_job and not self.ctx.busy
+            editing
+            and self.snapshot is not None
+            and not self.scan_job
+            and not self.ctx.busy
+            and not self.retry_action
         )
         self.place_bar()
         self.stack.setEnabled(not applying)
-        self.bar.apply.setEnabled(can_write and bool(self.draft.assignments))
+        applied = self.draft == self.applied
+        self.bar.apply.setText("Applied" if applied else "Apply sound effects")
+        self.bar.apply.setEnabled(can_write and bool(self.draft.assignments) and not applied)
         self.bar.save.setEnabled(editing and bool(self.draft.assignments))
         self.overview.toggle.setEnabled(can_write)
         self.overview.rescan.setEnabled(not self.scan_job)
@@ -459,7 +416,13 @@ class SoundsPage(Page):
         self, action: str, *, retry: bool = False, confirmed_closed: bool = False
     ) -> None:
         snapshot = self.snapshot
-        if not snapshot or self.write_job or self.scan_job or self.ctx.busy:
+        if (
+            not snapshot
+            or self.write_job
+            or self.scan_job
+            or self.ctx.busy
+            or (self.retry_action and not retry)
+        ):
             return
         if (
             action == "undo"
@@ -479,7 +442,7 @@ class SoundsPage(Page):
             )
         ):
             return
-        if action == "apply" and not self.draft.assignments:
+        if action == "apply" and (not self.draft.assignments or self.draft == self.applied):
             return
         game = Path(self.ctx.installation.path)
         generation = self.generation
@@ -500,6 +463,7 @@ class SoundsPage(Page):
                 self.retry_action = action
                 self.feedback.hide()
                 self.closed.explain(exc)
+                self.closed.retry.setFocus()
             else:
                 self.feedback.write_failed(action, exc)
 
@@ -518,6 +482,8 @@ class SoundsPage(Page):
 
         def done(_: object) -> None:
             if generation == self.generation:
+                if action in ("apply", "undo", "restore"):
+                    self.applied = draft if action == "apply" else None
                 result = {
                     "apply": "Sounds applied.",
                     "undo": "Your previous sounds are back.",

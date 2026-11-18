@@ -87,3 +87,14 @@ def test_saved_catalogue_reopens_verified_previous_pack_without_network(tmp_path
     result = online_sets(cache, "5.5.0", stored)
     assert result.packs[0].status.state is PackState.UPDATE_AVAILABLE
     assert result.packs[0].sound_set == data
+
+
+def test_optional_cue_describes_its_duel_event() -> None:
+    from studio.pages.sounds_model import event_description
+
+    assert event_description("token").startswith("A Token is summoned.")
+    assert "revealed" in event_description("reveal")
+    assert "attacks the opponent directly" in event_description("directattack")
+    assert all(
+        "EDOPro version" in event_description(key) for key in ("token", "reveal", "directattack")
+    )

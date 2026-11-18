@@ -139,7 +139,7 @@ def test_installation_states_and_stale_scan(sound_window, qtbot, monkeypatch, tm
     def read(game: Path):
         if game == root:
             begin.set()
-            assert release.wait(5)
+            release.wait()
         return original(game)
 
     monkeypatch.setattr(sounds, "scan_installation", read)
@@ -154,17 +154,23 @@ def test_installation_states_and_stale_scan(sound_window, qtbot, monkeypatch, tm
         assert not page.bar.apply.isEnabled()
         missing = tmp_path / "unavailable"
         page.ctx.set_installation(Installation(str(missing), True))
-        qtbot.waitUntil(lambda: page.scan_error)
+        qtbot.waitUntil(lambda: bool(page.scan_error))
         assert page.overview.rescan.isVisible()
-        assert "Could not read" in page.feedback.copy.text()
+        assert not page.ctx.installation.ready and page.ctx.installation.path == str(missing)
+        assert page.overview.installed.toolTip() == "Game folder unavailable"
+        assert page.overview.rescan.text() == "Retry"
+        assert not page.feedback.isVisible()
+        assert page.overview.backend_info.text()
     finally:
         release.set()
         idle(qtbot, page)
     assert page.snapshot is None
     assert window.current is page
     missing.mkdir()
+    (missing / "cards.cdb").write_bytes((root / "cards.cdb").read_bytes())
     page.overview.rescan.click()
     idle(qtbot, page)
+    assert page.ctx.installation.ready
     assert page.overview.installed.toolTip() == "No sounds installed"
 
 
@@ -206,6 +212,8 @@ def test_apply_retry_busy_drift_undo_and_restore(sound_window, qtbot, monkeypatc
     idle(qtbot, page)
     assert page.closed.retry.isVisible()
     assert "EDOPro is open" in page.closed.detail.text()
+    assert not page.bar.apply.isEnabled()
+    assert page.closed.back.isHidden() and page.closed.proceed.isHidden()
     assert draw.read_bytes() == original
     monkeypatch.setattr("music.settings._game_running", lambda _: False)
     started, release = threading.Event(), threading.Event()
@@ -213,7 +221,7 @@ def test_apply_retry_busy_drift_undo_and_restore(sound_window, qtbot, monkeypatc
 
     def blocking_apply(*args):
         started.set()
-        assert release.wait(5)
+        release.wait()
         real_apply(*args)
 
     monkeypatch.setattr(sounds, "apply_set", blocking_apply)
@@ -228,6 +236,7 @@ def test_apply_retry_busy_drift_undo_and_restore(sound_window, qtbot, monkeypatc
         release.set()
         idle(qtbot, page)
     assert draw.read_bytes() == draft
+    assert page.bar.apply.text() == "Applied" and not page.bar.apply.isEnabled()
     assert page.bar.undo.isVisible() and page.bar.restore.isVisible()
     assert window.change.isEnabled()
 
@@ -395,10 +404,15 @@ def test_offline_catalogue_download_cancel_retry_and_use(sound_window, qtbot, mo
     card.progress.cancel.click()
     idle(qtbot, page)
     assert card.download.text() == "Resume download"
+    assert card.status.text() == "Paused"
+    assert card.notice.isHidden()
     card.download.click()
     idle(qtbot, page)
     card = page.collections.pack_cards["night"]
     assert "Downloaded" in card.status.text()
+    click_text(card, "View in collection")
+    assert page.state == "saved"
+    card = page.collections.downloaded_cards["night"]
     click_text(card, "Preview set")
     assert page.audio.player.calls[-1] == ("sampler", "Night duel")
     click_text(card, "Select set")
@@ -455,7 +469,7 @@ def test_escape_during_clip_read_keeps_event_unchanged(
 
     def read(_: Path) -> sounds.Clip:
         entered.set()
-        assert release.wait(5)
+        release.wait()
         return clip
 
     monkeypatch.setattr(sounds, "load_clip", read)

@@ -155,10 +155,10 @@ def demo_pack(root: Path, kind: str) -> tuple[Pack, Path]:
         "A new recording for Dark Duel Stories."
         if kind == "music"
         else "Alternate album artwork for Dark Duel Stories.",
-        "Studio demo",
+        "Demo audio team",
         "CC0-1.0",
-        f"{title} by Studio demo.",
-        "https://example.test/studio",
+        f"{title} by Demo audio team.",
+        "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/tools/music_screenshots.py",
         "1.0.0",
         f"https://example.test/{kind}.zip",
         path.stat().st_size,
@@ -208,7 +208,14 @@ def render_packs(p: MusicPage, root: Path, shot: Callable[[str], None]) -> None:
         return await make_available(*args, phase=show, **kwargs)
 
     def click(text: str) -> None:
-        next(b for b in p.scroll.widget().findChildren(Button) if b.text() == text).click()
+        button = next(
+            button
+            for view in (p.scroll.widget(), p.footer)
+            if view
+            for button in view.findChildren(Button)
+            if button.text() == text
+        )
+        button.click()
 
     def idle() -> None:
         settle(lambda: packs.job is None)
@@ -241,7 +248,7 @@ def render_packs(p: MusicPage, root: Path, shot: Callable[[str], None]) -> None:
             idle()
         shot("27-pack-cancelled")
         outcome = "error"
-        click("Resume")
+        click("Resume download")
         idle()
         shot("31-pack-error")
         outcome = "success"
@@ -260,7 +267,7 @@ def render_packs(p: MusicPage, root: Path, shot: Callable[[str], None]) -> None:
                 gate.set()
         idle()
         shot("28-pack-installed")
-        click("View album")
+        click("View in collection")
         settle(lambda: p.state == "album")
         shot("29-pack-album")
         p.escape()

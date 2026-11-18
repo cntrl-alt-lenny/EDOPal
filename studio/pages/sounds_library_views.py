@@ -5,6 +5,7 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout
 
+import config
 from content.catalogue import PackState
 from content.download import Progress
 from studio import theme as t
@@ -24,7 +25,9 @@ DOWNLOAD_LABELS = {
 
 class LibraryView(InlineView):
     def __init__(self) -> None:
-        super().__init__("Saved sets", "Keep favorite mixes and share them in a single file.")
+        super().__init__(
+            "Sound collection", "Find your saved mixes and downloaded sound sets here."
+        )
         self.import_button = Button("Import a set", "primary", "folder")
         self.actions.addWidget(self.import_button)
         self.hint = Notice()
@@ -32,6 +35,8 @@ class LibraryView(InlineView):
         self.cards = QGridLayout()
         self.cards.setSpacing(t.MD)
         self.body.addLayout(self.cards)
+        self.downloaded = QGridLayout()
+        self.body.addLayout(self.downloaded)
         self.body.addStretch(1)
 
 
@@ -45,6 +50,7 @@ class DownloadsView(InlineView):
         self.hint = Notice()
         self.body.addWidget(self.hint)
         self.empty = Hero("Sound sets", "Catalog offline", "", "sounds")
+        self.empty.setFixedHeight(t.TILE_LARGE)
         self.body.addWidget(self.empty)
         self.empty.hide()
         self.browse_local = Button("Browse built-in sets", "secondary", "back")
@@ -67,6 +73,10 @@ class DownloadCard(Panel):
         title.set_value(pack.title)
         copy.addWidget(title, 1)
         status, action = DOWNLOAD_LABELS[item.status.state]
+        if item.status.state is PackState.INCOMPATIBLE:
+            status = f"Requires {config.APP_NAME} {pack.min_app_version}"
+        if item.paused:
+            status, action = "Paused", "Resume download"
         if item.error:
             status, action = item.error, "Retry download"
         self.status = label(f"{status}  ·  {pack_size(pack.size_bytes)}", "small", True)
@@ -96,6 +106,7 @@ class DownloadCard(Panel):
         self.download.hide()
         self.status.hide()
         self.progress.begin("Downloading…")
+        self.progress.cancel.setText("Pause download")
         self.progress.show()
 
     def advance(self, progress: Progress) -> None:
@@ -111,7 +122,9 @@ class DownloadCard(Panel):
 
     def interrupted(self, message: str, retry: str) -> None:
         self.progress.hide()
-        self.status.show()
+        self.status.setVisible(not message)
+        if not message:
+            self.status.setText("Paused")
         self.notice.show_message(message)
         self.download.setText(retry)
         self.download.show()

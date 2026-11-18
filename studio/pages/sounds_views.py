@@ -104,10 +104,15 @@ class Overview(QWidget):
         self.technical.toggled.connect(self.backend_info.setVisible)
         self.current.body.addWidget(self.technical, 0, Qt.AlignmentFlag.AlignLeft)
         self.current.body.addWidget(self.backend_info)
+        self.summary = Button("", "secondary")
+        self.summary.setCheckable(True)
+        self.summary.setToolTip("Show installed sounds and audio settings")
+        self.summary.toggled.connect(self.current.setVisible)
+        body.addWidget(self.summary)
         body.addWidget(self.current)
 
         self.mix = Button("Mix your own", "secondary", "settings")
-        self.saved = Button("Saved sets", "quiet", "library")
+        self.saved = Button("Collection", "quiet", "library")
         self.downloads = Button("Downloads", "quiet", "download")
         self.chants = Button("Card chants", "quiet", "sounds")
         self.sets_heading = SectionHeader("Pick a set")
@@ -143,22 +148,22 @@ class Overview(QWidget):
             self.tools.addWidget(self.tool_strip, 0, 1)
 
     def show_status(
-        self, install: Installation, snapshot: Snapshot | None, title: str, failed: bool
+        self, install: Installation, snapshot: Snapshot | None, title: str, failed: str
     ) -> None:
         self.choose.setVisible(not install.path)
         self.choose.setText("Change folder" if install.path else "Choose folder")
         instructions = "Preview and save sounds here. Choose a game folder to use them in EDOPro."
-        if install.path and not install.ready:
+        if failed:
+            title = "Game folder unavailable" if not install.ready else "Could not read sounds"
+            instructions = "Check that the selected folder is available."
+        elif install.path and not install.ready:
             title = "Finish setting up EDOPro"
             instructions = "Open EDOPro and let its updates finish, then choose Check again."
         elif install.ready and snapshot is None:
-            title = "Could not read sounds" if failed else "Reading game sounds…"
-            instructions = (
-                "Check that the selected folder is available."
-                if failed
-                else "Looking at the selected installation."
-            )
-        self.rescan.setVisible(failed or bool(install.path and not install.ready))
+            title = "Reading game sounds…"
+            instructions = "Looking at the selected installation."
+        self.rescan.setText("Retry" if failed else "Check again")
+        self.rescan.setVisible(bool(failed or (install.path and not install.ready)))
         self.toggle.hide()
         warnings = {}
         if snapshot:
@@ -188,10 +193,11 @@ class Overview(QWidget):
             self.toggle.setToolTip("Changes the effects switch and preserves your volume.")
         self.installed.set_value(title, display_text(title))
         self.settings.setText(instructions)
+        self.summary.setText(f"Installed sounds · {display_text(title)} · {instructions}")
         backend = snapshot.settings.backend if snapshot else None
-        self.technical.setVisible(bool(backend))
-        self.backend_info.setText(f"Audio backend: {backend}" if backend else "")
-        self.backend_info.setVisible(bool(backend) and self.technical.isChecked())
+        self.technical.setVisible(bool(backend or failed))
+        self.backend_info.setText(f"Audio backend: {backend}" if backend else failed)
+        self.backend_info.setVisible(bool(backend or failed) and self.technical.isChecked())
         for warning in (
             self.effects_warning,
             self.volume_warning,
@@ -376,12 +382,12 @@ class NameView(InlineView):
     def __init__(self) -> None:
         super().__init__("Save sound set", "Give this mix a name so you can find it again.")
         form = Panel(t.XL)
-        name_label = label("Sound set name", "subheading")
+        self.name_label = name_label = label("Mix name", "subheading")
         self.name = QLineEdit()
         self.name.setMinimumHeight(t.BUTTON_H)
         self.name.setMaxLength(120)
         self.name.setPlaceholderText("For example, Saturday night duels")
-        self.name.setAccessibleName("Sound set name")
+        self.name.setAccessibleName(name_label.text())
         name_label.setBuddy(self.name)
         form.body.addWidget(name_label)
         form.body.addWidget(self.name)

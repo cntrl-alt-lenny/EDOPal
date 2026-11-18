@@ -54,7 +54,7 @@ def test_stale_playlist_and_cancelled_staging_leave_originals(tmp_path: Path) ->
 
 def test_reviewable_assignments_and_duplicate_scope(tmp_path: Path) -> None:
     item = ImportItem(tmp_path / "Take.wav")
-    assert match_description(item, False) == "Check game" and needs_game(item, False)
+    assert match_description(item, False) == "Check album" and needs_game(item, False)
     duplicate = replace(item, in_library=True, duplicate=True)
     assert match_description(duplicate, False) == "Found in library"
     assert not needs_game(duplicate, False) and needs_game(duplicate, True)
