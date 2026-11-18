@@ -57,6 +57,7 @@ class SavedDeck:
     modified_ns: int
     preview: Preview | None
     error: str = ""
+    file_id: tuple[int, int] | None = None
 
     @property
     def name(self) -> str:

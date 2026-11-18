@@ -8,6 +8,7 @@ from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 
 from .sources import Sources, bounded_text
 
@@ -108,7 +109,7 @@ class Catalog:
     issues: tuple[str, ...]
 
 
-def _load_cards(path: Path, labels: dict[int, str]) -> dict[int, Card]:
+def _load_cards(path: Path, labels: dict[int, str], cancel: Event | None) -> dict[int, Card]:
     # Immutable also prevents SQLite from creating journal/shm sidecars on live installations.
     if any(Path(str(path) + suffix).exists() for suffix in ("-wal", "-journal")):
         raise ValueError("Database has a pending journal; rescan after EDOPro closes")
@@ -120,6 +121,8 @@ def _load_cards(path: Path, labels: dict[int, str]) -> dict[int, Card]:
         selected = ", ".join("datas." + k if k in columns else "NULL" for k in fields)
         query = f"SELECT datas.id, texts.name, {selected} FROM datas JOIN texts USING(id)"
         for code, name, alias, scope, flags, race, attr, level, sets in db.execute(query):
+            if cancel is not None and cancel.is_set():
+                raise InterruptedError("Card scan cancelled.")
             if not passcode(code) or not isinstance(name, str):
                 continue
             flags = flags if isinstance(flags, int) else 0
@@ -155,7 +158,7 @@ def _load_cards(path: Path, labels: dict[int, str]) -> dict[int, Card]:
     return cards
 
 
-def load_catalog(sources: Sources) -> Catalog:
+def load_catalog(sources: Sources, *, cancel: Event | None = None) -> Catalog:
     issues = list(sources.issues)
     labels: dict[int, str] = {}
     for path in sources.strings:
@@ -173,7 +176,7 @@ def load_catalog(sources: Sources) -> Catalog:
         try:
             if path.stat().st_size == 0:
                 continue
-            for code, card in _load_cards(path, labels).items():
+            for code, card in _load_cards(path, labels, cancel).items():
                 previous = cards.get(code)
                 if previous and (previous.name, previous.alias, previous.scope, previous.type) != (
                     card.name,
@@ -183,6 +186,10 @@ def load_catalog(sources: Sources) -> Catalog:
                 ):
                     conflicts.add(code)
                 cards[code] = card
+        except InterruptedError:
+            if cancel is not None and cancel.is_set():
+                raise
+            issues.append(f"{path}: Card data read interrupted.")
         except (OSError, ValueError, sqlite3.Error, TypeError) as exc:
             issues.append(f"{path}: {exc}")
 

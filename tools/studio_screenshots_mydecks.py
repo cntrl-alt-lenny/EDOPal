@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractItemView, QApplication
 
 import main
-from config import Config
+from config import APP_NAME, Config
 from decks import DeckIndexer, Sections, encode_ydke
 from decks.sharing import MAX_CODE
 from studio import theme
@@ -22,7 +22,10 @@ from studio.context import AppContext, Installation
 from studio.pages.decks_contents import CardList
 from studio.pages.mydecks import MyDecksPage
 from studio.pages.mydecks_checks import Comparison, FormatCheck
+from studio.pages.mydecks_duplicates import DuplicatesScreen
+from studio.pages.mydecks_history import HistoryScreen
 from studio.pages.mydecks_library import Collection
+from studio.pages.mydecks_odds import OddsScreen
 from studio.shell import StudioWindow
 from studio.widgets import Button
 from tools.studio_screenshots import DemoSync, create_demo, settle
@@ -65,6 +68,29 @@ SPELLS = {7, 8, 10, 11, 12, 14, 15, 20, 21, 27}
 TRAPS = {9, 13, 16, 17}
 
 
+def write_demo_deck(path: Path, sections: Sections) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(
+            marker + "\n" + "".join(f"{c}\n" for c in cards)
+            for marker, cards in zip(("#main", "#extra", "!side"), sections, strict=True)
+        ),
+        encoding="utf-8",
+    )
+
+
+def seed_five_matches(game: Path, deck: Sections) -> None:
+    folder = game / "deck/Goat"
+    variants = {
+        "Locals": Sections(deck.main[:-1] + (1001,), deck.extra, deck.side),
+        "Spring": Sections(tuple(reversed(deck.main)), deck.extra, tuple(reversed(deck.side))),
+        "Summer": Sections(deck.main[:-2] + (1000, 1001), deck.extra, deck.side),
+        "Winter": Sections(deck.main[1:], deck.extra, deck.side + deck.main[:1]),
+    }
+    for name, sections in variants.items():
+        write_demo_deck(folder / f"Empty Jar - {name}.ydk", sections)
+
+
 def seed_game(root: Path, *, archive_size: int = 0) -> Config:
     cfg = create_demo(root)
     game = Path(cfg.edopro_path)
@@ -100,14 +126,7 @@ def seed_game(root: Path, *, archive_size: int = 0) -> Config:
 
     def add(relative: str, sections: Sections, days: int) -> None:
         path = folder / f"{relative}.ydk"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            "".join(
-                marker + "\n" + "".join(f"{c}\n" for c in cards)
-                for marker, cards in zip(("#main", "#extra", "!side"), sections, strict=True)
-            ),
-            encoding="utf-8",
-        )
+        write_demo_deck(path, sections)
         timestamp = 1794700800 - days * 86400
         os.utime(path, (timestamp, timestamp))
 
@@ -143,6 +162,7 @@ def seed_game(root: Path, *, archive_size: int = 0) -> Config:
 
 def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     app = QApplication.instance()
+    app.setApplicationName(APP_NAME)
     theme.apply(app)
     cfg = seed_game(root, archive_size=48)
     ctx = AppContext(cfg, main.VERSION, DemoSync(), main._apply_gui_choices)
@@ -319,9 +339,9 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         gate.clear()
         scan = DeckIndexer.scan
 
-        def delayed(index: DeckIndexer) -> object:
+        def delayed(index: DeckIndexer, *, cancel: threading.Event | None = None) -> object:
             gate.wait(8)
-            return scan(index)
+            return scan(index, cancel=cancel)
 
         with patch.object(DeckIndexer, "scan", delayed):
             ctx.set_installation(selected)
@@ -335,6 +355,84 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         page.view.refresh.click()
         collection().issue_btn.click()
         shot("28-scan-warning")
+        lib_view = page.view
+        deck = page.lib.search("Empty Jar - Athens")[0]
+        old = deck.preview.sections
+        open_named(deck.name)
+        next(b for b in page.view.findChildren(Button) if b.text() == "History").click()
+        shot("31-history-empty")
+        page.escape()
+        page.escape()
+
+        older = Sections(tuple(reversed(old.main)), old.extra, old.side)
+        write_demo_deck(deck.path, older)
+        timestamp = (deck.modified_ns / 1e9) + 86400
+        os.utime(deck.path, (timestamp, timestamp))
+        lib_view.refresh.click()
+        lib_view = collection()
+        main_cards = list(old.main)
+        main_cards.remove(1026)
+        main_cards.remove(1025)
+        main_cards.extend((1022, 1022))
+        updated = Sections(tuple(main_cards), old.extra, old.side + (1026,))
+        seed_five_matches(page.lib.game, updated)
+        write_demo_deck(deck.path, updated)
+        lib_view.refresh.click()
+        lib_view = collection()
+        current = page.lib.search(deck.name)[0]
+        open_named(current.name)
+        next(b for b in page.view.findChildren(Button) if b.text() == "History").click()
+        assert isinstance(page.view, HistoryScreen)
+        shot("32-history")
+        page.escape()
+        next(b for b in page.view.findChildren(Button) if b.text() == "Opening odds").click()
+        odds = page.view
+        assert isinstance(odds, OddsScreen)
+        shot("33-odds-empty")
+
+        def add_tags(name: str, codes: tuple[int, ...]) -> None:
+            odds.name.setText(name)
+            odds.add.click()
+            settle(lambda: not odds.saving and odds.group.currentText() == name)
+            for i, (code, _) in enumerate(odds.model.rows):
+                if code in codes:
+                    odds.model.setData(
+                        odds.model.index(i, 0),
+                        Qt.CheckState.Checked,
+                        Qt.ItemDataRole.CheckStateRole,
+                    )
+            settle(lambda: not odds.saving)
+
+        add_tags("Bricks", (1008, 1014, 1027))
+        add_tags("Starters", (1022, 1024, 1007))
+        odds.avoid.setCurrentText("Avoid Bricks")
+        odds.hits.setValue(2)
+        shot("34-opening-odds")
+        page.escape()
+        next(b for b in page.view.findChildren(Button) if b.text() == "Similar decks").click()
+        duplicates = page.view
+        assert isinstance(duplicates, DuplicatesScreen)
+        duplicates.search.setText("Empty Jar")
+        duplicates.base.setCurrentText("Goat/Empty Jar - Athens")
+        duplicates.files.setCurrentRow(
+            next(i for i, member in enumerate(duplicates.members) if member.name.endswith("Winter"))
+        )
+        shot("35-duplicates")
+        duplicates.files.setCurrentRow(
+            next(i for i, member in enumerate(duplicates.members) if member.name.endswith("Spring"))
+        )
+        shot("36-duplicates-identical")
+        page.escape()
+        page.escape()
+        lib_view.search.setText("Empty Jar")
+        shot("37-duplicates-in-library")
+        deck.path.unlink()
+        lib_view.refresh.click()
+        lib_view = collection()
+        lib_view.missing.click()
+        shot("38-missing-decks")
+        page.view.rows.itemActivated.emit(page.view.rows.currentItem())
+        shot("39-history-missing")
     finally:
         settle(lambda: not ctx.tasks.jobs)
         win.close()

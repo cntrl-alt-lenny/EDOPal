@@ -173,7 +173,10 @@ class RowModel(QAbstractListModel):
         row = self.rows[index.row()]
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.AccessibleTextRole):
             return ", ".join(
-                filter(None, (row.deck.name, row.folder, row.counts, row.changed, row.problem))
+                filter(
+                    None,
+                    (row.deck.name, row.folder, row.counts, row.changed, row.problem, row.match),
+                )
             )
         if role == Qt.ItemDataRole.ToolTipRole:
             return f"{row.deck.path}\n{breakdown(row.deck.preview) if row.deck.preview else row.deck.error}"
@@ -214,13 +217,15 @@ class DeckDelegate(QStyledItemDelegate):
             True,
         )
         folder = row.folder + (f"   ·   {row.problem}" if row.problem else "")
+        if row.match:
+            folder = f"{row.match}   ·   {folder}"
         if title_end == stats:
             folder += f"   ·   {row.changed}"
         paint_text(
             p,
             QRect(left, top + t.XXL, title_end - left - t.SM, t.XL),
             folder,
-            t.RED if row.problem else t.MUTED,
+            t.GOLD if row.match else t.RED if row.problem else t.MUTED,
             t.SMALL,
         )
         if title_end != stats:

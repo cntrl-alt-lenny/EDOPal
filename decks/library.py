@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 
 from tournament_decks import MAX_YDK, read_ydk
 
@@ -35,12 +35,15 @@ class Library:
         catalog: Catalog,
         banlists: tuple[Banlist, ...],
         issues: tuple[str, ...],
+        *,
+        deck_scan_complete: bool = True,
     ) -> None:
         self.game = game
         self.decks = decks
         self.catalog = catalog
         self.banlists = banlists
         self.issues = issues
+        self.deck_scan_complete = deck_scan_complete
         self._postings: defaultdict[int, list[tuple[int, Counts]]] = defaultdict(list)
         for index, deck in enumerate(decks):
             if deck.preview:
@@ -137,12 +140,15 @@ class DeckIndexer:
         """Submit to a thread executor. on_deck runs on that worker as entries become ready."""
         return executor.submit(self.scan, on_deck)
 
-    def scan(self, on_deck: Callable[[SavedDeck], None] | None = None) -> Library:
+    def scan(
+        self, on_deck: Callable[[SavedDeck], None] | None = None, *, cancel: Event | None = None
+    ) -> Library:
         """Blocking CLI/worker entry point. Concurrent scans of this index serialize."""
         with self._lock:
-            return self._scan(on_deck)
+            return self._scan(on_deck, cancel)
 
-    def _scan(self, on_deck: Callable[[SavedDeck], None] | None) -> Library:
+    def _scan(self, on_deck: Callable[[SavedDeck], None] | None, cancel: Event | None) -> Library:
+        _check_cancelled(cancel)
         game = self.game.resolve()
         if not game.is_dir():
             raise ValueError("The selected installation is unavailable")
@@ -160,7 +166,7 @@ class DeckIndexer:
             ),
         )
         if self._catalog_key != catalog_key or self._catalog.issues:
-            self._catalog = load_catalog(sources)
+            self._catalog = load_catalog(sources, cancel=cancel)
             self._catalog_key = catalog_key
             self._decks.clear()
 
@@ -168,6 +174,7 @@ class DeckIndexer:
         if self._list_key != list_key or self._list_errors:
             lists, errors = [], []
             for path in sources.lists:
+                _check_cancelled(cancel)
                 try:
                     lists.extend(parse_lists(path))
                 except (ValueError, OSError) as exc:
@@ -176,9 +183,11 @@ class DeckIndexer:
 
         folder = game / "deck"
         issues = [*dict.fromkeys((*sources.issues, *self._catalog.issues, *self._list_errors))]
+        deck_issues: list[str] = []
         updated: dict[Path, tuple[tuple, SavedDeck]] = {}
         decks: list[SavedDeck] = []
-        for path in _deck_paths(folder, issues):
+        for path in _deck_paths(folder, deck_issues):
+            _check_cancelled(cancel)
             relative = path.parent.relative_to(folder)
             stamp = ()
             try:
@@ -191,8 +200,19 @@ class DeckIndexer:
                 else:
                     try:
                         raw = read_ydk(bounded_text(path, MAX_YDK), allow_empty_main=True)
+                        if identity(path) != stamp:
+                            raise OSError("The deck changed during scanning. Refresh to try again.")
                         sections = Sections(*(tuple(map(int, section)) for section in raw))
-                        deck = SavedDeck(path, relative, stamp[3], preview(sections, self._catalog))
+                        file_id = (
+                            (stamp[0], stamp[1]) if stamp[1] and not path.is_symlink() else None
+                        )
+                        deck = SavedDeck(
+                            path,
+                            relative,
+                            stamp[3],
+                            preview(sections, self._catalog),
+                            file_id=file_id,
+                        )
                     except ValueError as exc:
                         deck = SavedDeck(path, relative, stamp[3], None, str(exc))
                 updated[path] = (stamp, deck)
@@ -201,5 +221,18 @@ class DeckIndexer:
             decks.append(deck)
             if on_deck:
                 on_deck(deck)
+        _check_cancelled(cancel)
         self._decks = updated
-        return Library(game, tuple(decks), self._catalog, self._lists, tuple(issues))
+        return Library(
+            game,
+            tuple(decks),
+            self._catalog,
+            self._lists,
+            (*issues, *deck_issues),
+            deck_scan_complete=not deck_issues,
+        )
+
+
+def _check_cancelled(cancel: Event | None) -> None:
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError("Deck scan cancelled.")
