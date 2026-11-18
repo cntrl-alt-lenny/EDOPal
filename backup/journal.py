@@ -9,7 +9,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from extras import _atomic_write
+from durable_write import durable_write
 from state_lock import appearance_lock, locked
 
 from . import collection
@@ -111,7 +111,7 @@ def _record(tx: Path, status: str, changes: list[Change]) -> None:
     ).encode()
     if len(data) > MAX_MANIFEST:
         raise ValueError("Restore journal is too large")
-    _atomic_write(safe(tx, "journal.json"), data)
+    durable_write(safe(tx, "journal.json"), data)
 
 
 def _changes(tx: Path) -> tuple[str, list[Change]]:

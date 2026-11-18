@@ -110,14 +110,16 @@ class AppContext(QObject):
             return
         self.set_busy(True)
         path = self.cfg.config_path
-        job = self.tasks.start(lambda _: config.save_settings(path, values))
+        changes = {key: value for key, value in values.items() if value != getattr(self.cfg, key)}
+        job = self.tasks.start(lambda _: not changes or config.save_settings(path, changes))
 
         def saved(success: bool) -> None:
             self.set_busy(False)
             if success:
-                for key, value in values.items():
+                for key, value in changes.items():
                     setattr(self.cfg, key, value)
-                self.cfg.saved_original_text = self.cfg.original_text
+                if "original_text" in changes:
+                    self.cfg.saved_original_text = self.cfg.original_text
                 self.preferences_changed.emit()
                 done()
             else:
