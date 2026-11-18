@@ -165,11 +165,16 @@ def test_preview_case_policy_confirmation_and_undo(
     open_preview(page, qtbot)
     assert page.plan.policy == "keep_mine"
     assert "letter case" in words(page)
+    assert "Nothing has been changed yet" in words(page)
     groups = page.screen.grouped
     conflict = groups.list.rows.rows[0]
     assert "Here · 4 B" in conflict.detail and "Backup · 13 B" in conflict.detail
     assert "date unavailable" not in conflict.detail
     assert "Blue.ydk" in conflict.tooltip and "BLUE.ydk" in conflict.tooltip
+    groups.details_button.click()
+    assert groups.details.isVisible() and "BLUE.ydk" in groups.details.text()
+    qtbot.keyClick(groups.details_button, Qt.Key.Key_Escape)
+    assert page.screen.grouped is groups and groups.details.isHidden()
     groups.tabs["identical"].click()
     assert groups.list.rows.rows[0].title == "Decks / Identical"
     groups.tabs["add"].click()
@@ -184,6 +189,7 @@ def test_preview_case_policy_confirmation_and_undo(
     page.screen.restore.click()
     assert local.read_bytes() == b"mine" and not new_copy.exists()
     assert "reviewed changes" in confirmations[0][1]
+    assert "Nothing has been changed yet" in confirmations[0][1]
     page.screen.restore.click()
     qtbot.waitUntil(lambda: "Restore complete" in words(page))
     assert local.read_bytes() == b"mine"
@@ -200,6 +206,52 @@ def test_preview_case_policy_confirmation_and_undo(
         )
     )
     assert not button(page, "Undo selected restore").isEnabled()
+
+
+def test_restore_preview_without_conflicts(
+    page: BackupPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    empty_game = tmp_path / "Steam Deck"
+    empty_game.mkdir()
+    page.ctx.set_installation(Installation(str(empty_game)))
+    qtbot.waitUntil(lambda: isinstance(page.screen, HomeScreen) and page.screen.restore.isEnabled())
+    choose(monkeypatch, snapshot(tmp_path))
+    open_preview(page, qtbot)
+    assert page.screen.policy.isHidden()
+    assert page.screen.restore.isEnabled()
+    assert "Restore to Steam Deck" in words(page)
+    assert "Nothing has been changed yet" in words(page) and not list(empty_game.iterdir())
+    assert page.escape()
+    assert isinstance(page.screen, ArchiveScreen)
+
+
+def test_leaving_while_opening_an_archive_discards_the_previous_selection(
+    page: BackupPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    archive = snapshot(tmp_path)
+    choose(monkeypatch, archive)
+    inspect = backup.inspect
+    started, release = Event(), Event()
+
+    def delayed(path: Path) -> backup.Manifest:
+        started.set()
+        assert release.wait(5)
+        return inspect(path)
+
+    monkeypatch.setattr(backup, "inspect", delayed)
+    button(page, "Restore").click()
+    try:
+        qtbot.waitUntil(started.is_set)
+        assert page.ctx.navigate("cards")
+        game = tmp_path / "Other installation"
+        game.mkdir()
+        page.ctx.set_installation(Installation(str(game)))
+        assert page.ctx.navigate("backup")
+        qtbot.waitUntil(lambda: isinstance(page.screen, HomeScreen) and page.job is None)
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not page.ctx.tasks.jobs)
+    assert isinstance(page.screen, HomeScreen) and page.archive is None
 
 
 def test_compare_and_unknown_format(

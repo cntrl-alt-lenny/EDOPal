@@ -35,11 +35,10 @@ def test_paging_and_selection_capture(tmp_path: Path) -> None:
     standings = flow.StandingsSelection()
     standings.open(GOAT)
     standings.populate(DECKS)
-    assert standings.preview == DECKS[0]
+    assert standings.selected == DECKS[:1]
     assert standings.can_select_all
     standings.select({3, 1, 999})
     batch = standings.capture(tmp_path, True)
-    assert standings.preview is None
     assert batch == flow.ImportBatch(tmp_path, GOAT, (DECKS[0], DECKS[2]), True)
     standings.open(None)
     assert standings.capture(tmp_path, False) is None

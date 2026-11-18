@@ -311,7 +311,13 @@ def test_pack_download_cancel_resume_apply_highlight_restore(
 
     path = "skin/Monokai Moon/skin.xml"
     with ZipFile(extras.PACKS / "moon.zip") as z:
-        skin_bytes = archive((path, z.read(path)))
+        skin_cover = "skin/Monokai Moon/textures/cover.png"
+        lib = sleeves.Library(page.store.root / "sleeves")
+        original, chosen = lib.entries()[:2]
+        skin_bytes = archive(
+            (path, z.read(path)), (skin_cover, lib.image_path(original.id).read_bytes())
+        )
+        sleeves.apply(lib, page.game, page.store.config, mine=chosen.id)
     # The engine only accepts a shared pack that carries both Inter fonts.
     shared_bytes = archive(
         ("fonts/Inter-Medium.ttf", b"sample font"),
@@ -366,6 +372,8 @@ def test_pack_download_cancel_resume_apply_highlight_restore(
     qtbot.waitUntil(lambda: page.look.active)
     assert extras.current_skin(str(page.game)) == "Monokai Moon"
     assert (page.game / path).exists() and info.restore.isVisible()
+    assert (page.game / skin_cover).read_bytes() == lib.image_path(chosen.id).read_bytes()
+    assert sleeves.status(lib, page.game)["mine"].matches
     assert page.data.highlights["Moon"]
     info.highlight.click()
     info.apply.click()
@@ -399,3 +407,130 @@ def test_pack_dependency_gates_action(
     assert not page.view.inspector.apply.isEnabled()
     page.view.inspector.edit.click()
     assert page.mode == "maker" and page.maker.name.text() == "Ristretto remix"
+
+
+def test_dirty_maker_survives_every_exit_and_async_folder_change(
+    page: SkinsPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = page.window()
+    page.gallery.create.click()
+    page.maker.name.setText("Keep this draft")
+    confirm = Mock(return_value=False)
+    monkeypatch.setattr(page.ctx, "confirm", confirm)
+    for leave in (
+        page.view.back.click,
+        lambda: qtbot.keyClick(page.maker.name, Qt.Key.Key_Escape),
+        window.nav["sleeves"].click,
+        window.change.click,
+        window.close,
+        lambda: page.ctx.set_installation(Installation()),
+    ):
+        before = confirm.call_count
+        leave()
+        assert confirm.call_count == before + 1
+        assert window.isVisible() and window.current is page and not window.picker.isVisible()
+        assert page.mode == "maker" and page.maker.name.text() == "Keep this draft"
+    confirm.return_value = True
+    page.view.back.click()
+    assert page.mode == "gallery"
+
+
+@pytest.mark.parametrize("size", [(960, 600), (1280, 800), (1600, 1000), (2560, 1440)])
+def test_fine_tuning_fits_beside_preview(
+    page: SkinsPage, qtbot: QtBot, size: tuple[int, int]
+) -> None:
+    from PySide6.QtCore import QPoint, QRect
+
+    window, view = page.window(), page.view
+    window.resize(*size)
+    page.gallery.create.click()
+    page.maker.fine.click()
+    page.maker.swatches["opponent_lp"].click()
+    qtbot.waitUntil(
+        lambda: (
+            view.preview.completed is not None
+            and page.motion.currentTime() == page.motion.duration()
+        )
+    )
+    assert window.size().toTuple() == size
+    canvas = view.preview.canvas
+    assert canvas.width() >= 300 and canvas.height() >= 210
+    assert not canvas.pix.isNull()
+    view.scroll.ensureWidgetVisible(page.maker.resets["opponent_lp"])
+    button = page.maker.resets["opponent_lp"]
+    assert (
+        view.scroll.viewport()
+        .rect()
+        .contains(QRect(button.mapTo(view.scroll.viewport(), QPoint()), button.size()))
+    )
+    assert view.scroll.horizontalScrollBar().maximum() == 0
+    assert not view.scroll.geometry().intersects(view.preview.geometry())
+
+
+def test_retry_only_reapplies_sleeves_after_successful_theme_change(
+    page: SkinsPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    select(page, qtbot, "Deep Current")
+    lib = sleeves.Library(page.store.root / "sleeves")
+    entry = lib.add_image("Lake sleeve", page.game / "pics/1001.jpg")
+    sleeves.apply(lib, page.game, page.store.config, mine=entry.id)
+    original = themes.install_theme
+    install = Mock(wraps=original)
+    monkeypatch.setattr(themes, "install_theme", install)
+    with monkeypatch.context() as patch:
+        patch.setattr(sleeves, "reapply", Mock(side_effect=OSError("Sleeve file in use")))
+        page.view.inspector.apply.click()
+        qtbot.waitUntil(lambda: page.look.active and "Sleeve file in use" in page.message.text())
+    page.retry_button.click()
+    qtbot.waitUntil(lambda: "back in game" in page.message.text())
+    assert sleeves.status(lib, page.game)["mine"].matches
+    assert install.call_count == 1
+
+
+def test_two_pages_share_effective_sleeves_and_active_look(page: SkinsPage, qtbot: QtBot) -> None:
+    window = page.window()
+    window.navigate("sleeves")
+    desk = window.current
+    qtbot.waitUntil(lambda: desk.snapshot is not None and not desk.loading)
+    desk.gallery.search.setText("Vortex")
+    desk.gallery.choose(desk.gallery.grid.model().index(0))
+    desk.same.click()
+    desk.apply.click()
+    qtbot.waitUntil(lambda: not desk.writing and not desk.loading)
+    window.navigate("skins")
+    qtbot.waitUntil(lambda: "Opponent · Vortex" in page.gallery.info.text())
+    select(page, qtbot, "Deep Current")
+    page.view.inspector.apply.click()
+    qtbot.waitUntil(lambda: page.look.active)
+    window.navigate("sleeves")
+    qtbot.waitUntil(lambda: "Deep Current" in desk.status.text())
+    assert all(slot.state.text() == "Matches game" for slot in desk.banner.slots.values())
+    desk.gallery.search.setText("1998 OCG")
+    desk.banner.slots["opponent"].click()
+    desk.gallery.choose(desk.gallery.grid.model().index(0))
+    desk.apply.click()
+    qtbot.waitUntil(lambda: not desk.writing and not desk.loading)
+    assert desk.snapshot.slots["opponent"].choice.name == "1998 OCG"
+    assert desk.snapshot.slots["mine"].choice.name == "Vortex"
+    window.navigate("skins")
+    qtbot.waitUntil(lambda: "Deep Current" in page.gallery.info.text())
+    assert "Your sleeve · Vortex" in page.gallery.info.text()
+    assert "Opponent · 1998 OCG" in page.gallery.info.text()
+
+
+def test_missing_game_and_unreadable_sleeves_leave_the_gallery_usable(
+    page: SkinsPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    lib = sleeves.Library(page.store.root / "sleeves")
+    lib.entries()
+    monkeypatch.setattr(sleeves, "status", Mock(side_effect=ValueError("Unreadable library")))
+    page.reload()
+    qtbot.waitUntil(lambda: "Could not read assigned sleeves" in page.gallery.info.text())
+    assert len(page.data.looks) == 16
+    missing = tmp_path / "Disconnected game"
+    page.ctx.set_installation(Installation(str(missing), True))
+    qtbot.waitUntil(lambda: page.data is not None)
+    select(page, qtbot, "Deep Current")
+    page.view.inspector.apply.click()
+    qtbot.waitUntil(lambda: page.retry_button.isVisible() and not page.job)
+    assert "no longer ready" in page.message.text() and not missing.exists()

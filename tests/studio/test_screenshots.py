@@ -1,11 +1,28 @@
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
+from pytestqt.qtbot import QtBot
 
-from tools.studio_screenshots import ROOT
+from studio.shell import StudioWindow
+from tools.studio_screenshots import ROOT, grab_window
+
+
+def test_small_window_capture_settles_the_music_grid(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot
+) -> None:
+    window = make_window()
+    window.resize(960, 600)
+    window.navigate("music")
+    page = window.current
+    qtbot.waitUntil(lambda: page.state == "home")
+    assert grab_window(window).size() == window.size()
+    # Whether the page overflows depends on its content; what must hold after a
+    # settled capture is that no scene button is squeezed below its minimum.
+    assert all(b.height() >= b.minimumSizeHint().height() for b in page.scene_buttons.values())
 
 
 def test_screenshot_cli_writes_all_views_at_requested_size(tmp_path: Path) -> None:
@@ -49,6 +66,15 @@ def test_screenshot_cli_writes_all_views_at_requested_size(tmp_path: Path) -> No
         "awaiting-databases",
     ]
     assert {f"{i:02}-{name}" for i, name in enumerate(shell, 1)} <= names
+    assert {
+        "19-close-game",
+        "35-about",
+        "38-restored-artwork",
+        "41-pack-in-use",
+        "42-picker-empty",
+        "43-picker-invalid",
+        "44-shortcut-name-in-use",
+    } <= names
     skins = [
         "active-gallery",
         "applied",

@@ -11,10 +11,10 @@ from content.cache import PackCache
 from content.catalogue import Catalogue, CatalogueSource, PackState, PackStatus
 from content.download import Progress, download_pack
 from content.manifest import Pack
-from music.settings import _game_running
 from sounds.archive import SavedSet
 from sounds.sets import InstalledCue
 from sounds.settings import SoundSettings
+from studio.context import AppContext
 
 EVENT_KEYS = tuple(event.stem for event in sounds.EVENTS)
 EVENT_COUNT = len(EVENT_KEYS)
@@ -55,10 +55,6 @@ class OnlineSets:
     packs: tuple[Downloadable, ...]
 
 
-class GameRunning(Exception):
-    """The player can retry the same action once the game has closed."""
-
-
 class FilesChanged(Exception):
     """The player needs a fresh look at the files before applying a choice."""
 
@@ -95,8 +91,7 @@ def write_game(
     draft: sounds.SoundSet,
     snapshot: Snapshot,
 ) -> None:
-    if _game_running(game):
-        raise GameRunning
+    AppContext.require_game_closed(game)
     if action == "apply":
         current = {row.key: row for row in sounds.scan_installation(game)}
         for key in draft.assignments:
@@ -108,8 +103,7 @@ def write_game(
             ) != (prior and prior.sha256):
                 raise FilesChanged
         # The game may have been opened during the scan.
-        if _game_running(game):
-            raise GameRunning
+        AppContext.require_game_closed(game)
         sounds.apply_set(game, config_path, draft)
     elif action == "undo":
         sounds.undo(game, config_path)

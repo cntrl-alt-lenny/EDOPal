@@ -181,7 +181,7 @@ def valid_decks(selected_path: str, game: Path, paths: tuple[Path, ...]) -> bool
             path.is_file()
             and path.suffix.lower() == ".ydk"
             and not path.is_symlink()
-            and path.resolve().parent == deck
+            and path.resolve().is_relative_to(deck)
             for path in paths
         )
     )
@@ -227,11 +227,19 @@ def coverage_summary(data: dict) -> Summary:
         ("Field art on disk", f"{data['fields_have']:,} of {data['fields_total']:,}"),
         ("Disk usage", format_size(data["disk_bytes"])),
     ]
+    if data.get("fields_derived"):
+        rows.append(("Derived from card faces", f"{data['fields_derived']:,}"))
+    optional = data["cards_total"] - data.get("cards_expected", data["cards_total"])
+    if optional:
+        rows.append(("Optional tokens without art", f"{optional:,}"))
     if data["known_missing"]:
         rows.append(("Known-missing (cached)", f"{data['known_missing']:,}"))
     return Summary(
         "Artwork coverage",
-        (pct(data["cards_have"], data["cards_total"]), "Card art on disk"),
+        (
+            pct(data["cards_have"], data.get("cards_expected", data["cards_total"])),
+            "Card art on disk",
+        ),
         (pct(data["fields_have"], data["fields_total"]), "Field art on disk"),
         tuple(rows),
         location=("Images folder", data["pics_path"]),
@@ -271,10 +279,11 @@ def sync_summary(
     rows = (
         ("Card artwork", stats.total_ok),
         ("Field Spell artwork", stats.field_ok),
+        ("Copied from installed field art", stats.field_local),
         ("Queued downloads skipped (file already present)", stats.skipped),
         ("Rush Duel (no art yet)", stats.rush_failures),
         ("Anime / custom (no art yet)", stats.unofficial_failures),
-        ("Tokens / placeholders", len(stats.token_failures)),
+        ("Derived from card faces", stats.field_derived),
         ("Official cards unavailable", len(stats.official_failures)),
         ("Field art unavailable", stats.field_failed),
         ("Network errors (will retry)", stats.transient_failures + len(stats.field_transient_ids)),
@@ -295,7 +304,10 @@ def sync_summary(
             failures.append(f"{name}   ·   {kind}{suffix}")
     return Summary(
         "Sync cancelled" if cancelled else "Sync complete",
-        (f"{downloaded:,}", "Downloaded"),
+        (
+            f"{downloaded:,}",
+            "Artwork installed" if stats.field_local or stats.field_derived else "Downloaded",
+        ),
         (f"{unavailable:,}", "Unavailable"),
         tuple((label, f"{value:,}") for label, value in rows if value),
         " ".join(notes),

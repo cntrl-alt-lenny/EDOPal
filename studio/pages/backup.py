@@ -14,15 +14,14 @@ from backup.core import Progress
 from music.settings import _game_running
 from studio import theme as t
 from studio.context import AppContext, Installation
-from studio.pages.backup_data import (
-    Mode,
-    Review,
-    check_destination,
-    comparison_rows,
-    history,
-    restore_review,
+from studio.pages.backup_data import Mode, Review, history
+from studio.pages.backup_jobs import (
+    WriteError,
+    create_archive,
+    prepare_comparison,
+    prepare_restore,
+    run_write,
 )
-from studio.pages.backup_jobs import WriteError, run_write
 from studio.pages.backup_results import BusyScreen, ErrorScreen, RestoredScreen, SavedScreen
 from studio.pages.backup_screens import (
     UNDO_DESCRIPTION,
@@ -34,6 +33,7 @@ from studio.pages.backup_screens import (
     Screen,
 )
 from studio.pages.base import Page
+from studio.pages.health_layout import tool_margins
 from studio.tasks import Job, WorkerContext
 from studio.widgets import margins
 
@@ -42,7 +42,7 @@ BACKUP_FILTER = "EDOPro backups (*.zip);;All files (*)"
 
 
 class BackupPage(Page):
-    id, title, icon = "backup", "Backup && transfer", "backup"
+    id, title, icon = "backup", "Backup & transfer", "backup"
 
     def __init__(self, context: AppContext) -> None:
         super().__init__(context)
@@ -84,6 +84,11 @@ class BackupPage(Page):
     def escape(self) -> bool:
         if self.writing:
             self._cancel()
+        elif (
+            isinstance(self.screen, (PreviewScreen, CompareScreen))
+            and self.screen.grouped.close_details()
+        ):
+            return True
         elif self.back:
             self.back()
         else:
@@ -97,7 +102,7 @@ class BackupPage(Page):
     def _size_screen(self) -> None:
         compact = self.height() < t.MIN_SIZE[1]
         if self.screen:
-            margins(self.screen.body, t.LG if compact else t.XXL)
+            tool_margins(self.screen.body, self.width())
             self.screen.body.setSpacing(t.MD if compact else t.LG)
         if isinstance(self.screen, (PreviewScreen, CompareScreen)):
             self.screen.grouped.compact(compact)
@@ -224,21 +229,11 @@ class BackupPage(Page):
             path = path.with_suffix(".zip")
         install = self._install()
 
-        def create(worker: WorkerContext, report: Progress) -> backup.Manifest:
-            target = install()
-            return backup.create(
-                target,
-                check_destination(path, target),
-                categories,
-                progress=report,
-                cancel=worker.cancel.is_set,
-            )
-
         self._write(
             "Saving your backup",
             "Copying and checking the selected items. Your EDOPro files stay in place.",
-            create,
-            lambda manifest: self._saved(path, manifest),
+            lambda worker, report: create_archive(install(), path, categories, worker, report),
+            lambda saved: self._saved(*saved),
             "Couldn’t save your backup",
             self.show_save,
             lambda: self.save(categories),
@@ -255,7 +250,8 @@ class BackupPage(Page):
             self.ctx.notify("Couldn’t open the backup folder. Its location is shown above.")
 
     def choose_backup(self, compare: bool) -> None:
-        filename, _ = QFileDialog.getOpenFileName(self, "Choose a backup", "", BACKUP_FILTER)
+        title = "Choose a backup to compare" if compare else "Choose the backup to restore"
+        filename, _ = QFileDialog.getOpenFileName(self, title, "", BACKUP_FILTER)
         if filename:
             self.inspect_backup(Path(filename), compare)
 
@@ -299,7 +295,11 @@ class BackupPage(Page):
     def show_preview(self, policy: backup.Policy = "keep_mine") -> None:
         assert self.archive is not None
         screen = PreviewScreen(
-            str(self.archive), self.show_archive, self._plan, self.confirm_restore
+            str(self.archive),
+            self.ctx.installation.path,
+            self.show_archive,
+            self._plan,
+            self.confirm_restore,
         )
         self._show(screen, self.show_archive)
         if policy == "keep_mine":
@@ -312,22 +312,16 @@ class BackupPage(Page):
         assert archive is not None and isinstance(self.screen, PreviewScreen)
         screen = self.screen
         expected = self.manifest
+        assert expected is not None
         self.plan = None
         screen.set_loading()
-
-        def read(worker: WorkerContext) -> tuple[backup.Plan, Review]:
-            cancel = worker.cancel.is_set
-            plan = backup.plan_restore(archive, install(), policy, cancel=cancel)
-            if plan.manifest != expected:
-                raise ValueError("Backup changed after preview")
-            return plan, restore_review(plan, cancel)
 
         def ready(value: tuple[backup.Plan, Review]) -> None:
             self.plan, review = value
             screen.show_review(review)
 
         self._start(
-            read,
+            lambda worker: prepare_restore(install(), archive, expected, policy, worker),
             ready,
             lambda error: self._error(
                 WriteError(error),
@@ -344,18 +338,11 @@ class BackupPage(Page):
     def show_comparison(self) -> None:
         install, archive = self._install(), self.archive
         expected = self.manifest
-        assert archive is not None
+        assert archive is not None and expected is not None
         self._loading("Compare with a backup", "Comparing your files…", self.show_archive)
 
-        def compare(worker: WorkerContext) -> Review:
-            cancelled = worker.cancel.is_set
-            differences = backup.compare(install(), archive, cancel=cancelled)
-            if backup.inspect(archive) != expected:
-                raise ValueError("Backup changed during comparison")
-            return comparison_rows(differences, cancelled)
-
         self._start(
-            compare,
+            lambda worker: prepare_comparison(install(), archive, expected, worker),
             lambda review: self._show(
                 CompareScreen(str(archive), review, self.show_archive), self.show_archive
             ),
@@ -375,8 +362,8 @@ class BackupPage(Page):
         change = "1 reviewed change" if count == 1 else f"{count:,} reviewed changes"
         if count and self.ctx.confirm(
             "Restore to this installation?",
-            f"Apply {change} to {plan.install.game.name}? "
-            "Any files you chose to replace can be put back using Undo this restore.",
+            f"Nothing has been changed yet. Apply {change} to {plan.install.game.name}? "
+            "You can undo this restore when it finishes.",
         ):
             self.run_restore(plan)
 

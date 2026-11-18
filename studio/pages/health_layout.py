@@ -1,4 +1,4 @@
-"""Scroll surface and background-read lifecycle for the two installation tools."""
+"""Layout and background-read lifecycle for the installation tools."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -26,6 +26,11 @@ def row() -> QHBoxLayout:
     layout = QHBoxLayout()
     layout.setSpacing(t.MD)
     return layout
+
+
+def tool_margins(body: QLayout, width: int) -> None:
+    inset = max(t.XL, (width - t.CONTENT_MAX) // 2)
+    body.setContentsMargins(inset, t.XL, inset, t.XL)
 
 
 def editor(name: str, *, readonly: bool = False) -> QPlainTextEdit:
@@ -74,8 +79,7 @@ class ToolPage(Page):
         return self.body
 
     def _fit_width(self) -> None:
-        inset = max(t.XL, (self.width() - t.CONTENT_MAX) // 2)
-        self.body.setContentsMargins(inset, t.XL, inset, t.XL)
+        tool_margins(self.body, self.width())
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -83,7 +87,9 @@ class ToolPage(Page):
             self._fit_width()
 
     def banner(self, headline: str, description: str, *, large: bool = False) -> Hero:
-        hero = Hero(self.title, headline, description, self.mood)
+        hero = Hero(
+            "Tools" if headline == self.title else self.title, headline, description, self.mood
+        )
         hero.setMinimumHeight(t.HERO_MIN if large else t.TILE_LARGE)
         if large:
             hero.setMaximumHeight(t.HERO_MAX)
@@ -98,22 +104,26 @@ class ToolPage(Page):
         message: str,
         action: str = "",
         callback: Callable[[], None] | None = None,
+        *,
+        back: Callable[[], None] | None = None,
     ) -> None:
         self.surface(state)
+        if back:
+            self.back_button(back)
         self.banner(self.title, self.introduction, large=True)
         panel = Panel()
         line = row()
-        line.addWidget(glyph("warning" if state == "error" else self.icon, t.ICON_BIG))
+        line.addWidget(glyph("warning" if state.endswith("error") else self.icon, t.ICON_BIG))
         copy = QVBoxLayout()
         copy.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         copy.addWidget(label(headline, "heading", True))
         copy.addWidget(label(message, "body", True))
         line.addLayout(copy, 1)
+        panel.body.addLayout(line)
         if action and callback:
             button = Button(action, "primary")
             button.clicked.connect(callback)
-            line.addWidget(button)
-        panel.body.addLayout(line)
+            panel.body.addWidget(button, 0, Qt.AlignmentFlag.AlignRight)
         self.body.addWidget(panel)
         if action and callback:
             button.setFocus()

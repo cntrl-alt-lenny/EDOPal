@@ -1,131 +1,125 @@
-<p align="center">
-  <img src="assets/github-banner.jpg" alt="EDOPro HD Cards Downloader banner" width="100%">
-</p>
+# EDOPal
 
-<h1 align="center">EDOPro HD Cards Downloader</h1>
+**Your unofficial companion for EDOPro.**
 
-<p align="center"><b>Every card in HD. One double-click.</b></p>
+Sync HD card art, customize your game, and manage decks and replays in one resizable desktop window. EDOPal was formerly EDOPro HD Sync / EDOPro HD Cards Downloader.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/github/license/cntrl-alt-lenny/edopro-hd-cards" alt="License">
-  <img src="https://img.shields.io/github/v/release/cntrl-alt-lenny/edopro-hd-cards" alt="Release">
-  <img src="https://img.shields.io/github/downloads/cntrl-alt-lenny/edopro-hd-cards/total?color=2ea44f&label=downloads" alt="Downloads">
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform">
-</p>
+**[Download EDOPal](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest)** · [Screenshot gallery](docs/gallery.md) · [Documentation](docs/index.md)
 
-<p align="center">
-  A fast, automatic HD artwork downloader for <a href="https://github.com/edo9300/edopro">EDOPro</a>.
-  It scans your card databases, finds every missing image, and fetches the best available artwork —
-  official, Rush Duel, anime/custom, GOAT, Pre-Errata, and alternate arts included.
-</p>
+<!-- Hero screenshot placeholder: docs/screenshots/edopal-overview.png
+Show the EDOPal sidebar, selected demo installation and HD Cards with My decks selected.
+Render the remaining shots in the order listed in docs/gallery.md. -->
 
-<p align="center">
-  <img src="assets/app-window.png" alt="EDOPro HD Cards Downloader main window" width="760">
-</p>
+## Download and first run
 
-## Download
+You’ll need an existing [EDOPro installation](https://projectignis.github.io/). If it’s new, open EDOPro once and let it finish downloading its card databases. Then get the ZIP for your platform from [GitHub Releases](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest).
 
-[View the skin, soundtrack and tournament screenshots](docs/gallery.md)
+| Platform | Release ZIP | Open after extracting |
+| --- | --- | --- |
+| Windows | `EDOPal-Windows-v<VERSION>.zip` | Right-click the ZIP, choose **Extract All**, then double-click `EDOPal.exe`. |
+| macOS 14.4 or later | `EDOPal-macOS-v<VERSION>.zip` | Double-click the ZIP in Finder, then open `EDOPal.app`. The universal build targets Apple Silicon and Intel. |
+| Linux x86-64 | `EDOPal-Linux-v<VERSION>.zip` | Open `EDOPal` from your file manager, or run `./EDOPal` in the extracted folder. The build targets glibc 2.35 or newer. |
+| Steam Deck | The Linux ZIP | Choose **Steam → Power → Switch to Desktop**, then extract and open the Linux app. Game Mode is untested. [Valve’s Desktop Mode guide](https://help.steampowered.com/en/faqs/view/671A-4453-E8D2-323C) |
 
-Download the portable app for your platform from the [Releases page](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest). The Windows and Linux archives include the executable and a ReadMe. The macOS archive contains one app. Settings, artwork retry caches, optional reports and imported soundtracks live in your per-user application-data folder.
+EDOPal runs directly from the extracted app. Windows and Linux include a short ReadMe. The macOS ZIP contains one Finder app.
 
-| Platform | Download | Then |
-|---|---|---|
-| **Windows** | [`EDOPro-HD-Sync-Windows.zip`](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest) | Unzip, double-click **EDOPro-HD-Sync.exe**. If SmartScreen warns, choose **More info → Run anyway**. |
-| **macOS** | [`EDOPro-HD-Sync-macOS.zip`](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest) | Unzip and open **EDOPro HD Sync**. It runs natively on Apple Silicon and Intel. If macOS blocks the first launch, follow [Apple’s Open Anyway steps](https://support.apple.com/en-gb/102445). |
-| **Linux** | [`EDOPro-HD-Sync-Linux.zip`](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest) | Unzip, double-click **EDOPro-HD-Sync** (or run `./EDOPro-HD-Sync`). |
+- **Windows SmartScreen** may warn about an unfamiliar download. If you trust the copy you downloaded from this project’s Releases page and Windows offers the option, choose **More info → Run anyway**. [Microsoft’s SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
+- **macOS Gatekeeper** may block the first launch. If the warning is about an unidentified developer and you trust the download, try opening the app once, then choose **System Settings → Privacy & Security → Open Anyway** if offered. [Apple’s Gatekeeper guidance](https://support.apple.com/en-us/102445)
+- **Linux or Steam Deck** may need the execute permission restored after extraction. Run `chmod +x EDOPal` in the extracted folder, then run `./EDOPal`.
 
-**It finds your EDOPro folder for you.** The window shows the current installation. **Change folder** lists nearby copies, including portable installations, and lets you browse to another location. The app remembers your choice.
+Check the game folder at the top of the window. Use **Change folder** if you have a different copy. In **HD Cards**, choose **My decks** to start with the cards you play, or **Full library** to cover the installed databases. Close EDOPro before applying appearance or audio changes, then reopen it to load the changes.
 
-## Features
+## What you can do
 
-- **One file, nothing to install** — unzip the app anywhere and open it. Settings and retry caches live in your user profile.
-- **Finds your EDOPro folder** — it checks the usual install locations and shows you what it found; you just confirm it.
-- **One simple window** — choose Full library or My decks, press **Sync HD cards**, and watch the live progress and results right in the window. Same experience on Windows, macOS, and Linux.
-- **Every card type covered** — official, Rush Duel, and anime/custom cards are all fetched directly by the same IDs EDOPro uses.
-- **Field Spell playmat art** — the cropped artwork EDOPro displays on the board is downloaded into `pics/field/` automatically.
-- **GOAT / Pre-Errata artwork choice** uses the base card’s sharp artwork by default. Turn off *HD GOAT / Pre-Errata artwork* (or use `--original-text`) for the card’s historical wording at lower resolution. Changing this setting refreshes affected cards once replacements download successfully.
-- **Deck-first sync** — choose *My decks* (or use `--my-decks`) and a fresh install is playable in minutes instead of hours.
-- **Coverage at a glance** — *Sync settings → Show coverage* (or `--stats`) tells you how complete your artwork is without downloading a thing.
-- **Repair mode** — tick *Repair broken images* (or use `--repair`) to find and re-fetch corrupt or half-downloaded files.
-- **Customize EDOPro** previews Abyss, Moon, Nebula, and Ristretto in the game menu, deck editor, and duel field. Set your sleeve and your opponent’s independently using the original Vortex and 1998 OCG artwork. Compare the original duel field with **Highlight the turn player** to see whose turn it is at a glance. Preview the duel sound effects, then close EDOPro to apply your changes. Restoring the previous skin also restores its fonts.
-- **Music library** has separate selections for the deck editor and regular duels. Browse 25 game covers, preview and seek through a track, then apply it to the selected installation. Dates refer to the pictured edition. Restore the previous playlist at any time. The gallery spans the *Power of Chaos* trilogy, *World Championship*, *Tag Force*, and *Legacy of the Duelist*. It uses audio already in EDOPro and recordings you import. **Manage library** can read original *Power of Chaos* audio and import a personal soundtrack folder copied from another device. If game music is muted, use **Enable game music** after closing EDOPro. This keeps your volume setting. [Cover art from LaunchBox Games Database](https://gamesdb.launchbox-app.com/)
-- **Tournament decks** lets you browse results by format or event, preview published lists, and save one or more directly into EDOPro’s `deck` folder. After importing, you can sync HD artwork just for those decks. Existing edits are preserved. Event standings, card lists, and deck downloads come from [Format Library](https://formatlibrary.com/events).
-- **Update notices** — it tells you when a newer version is out; download it and replace the one file.
-- **Safe and resumable** — verified downloads, a 14-day failure cache so known-missing cards aren't hammered, and optional timestamped sync reports.
+Some of the features below have working engines and sidebar pages still in development. The [gallery](docs/gallery.md) marks the pending captures.
 
-The importer keeps supported passcodes, counts, and section order. If an event uses an alternate printing absent from your installation, it checks the published card details against your local databases before using a supported printing. The app reports card IDs it could not resolve. In Goat events, **Use installed GOAT card versions** saves a separate historical copy and lets you review the matched cards. To host with this copy, set **Forbidden List** to **2005.4 GOAT**, **Rule** to **GOAT**, and **Allowed Cards** to **Anything goes**. Keep both deck checks enabled. The whitelist enforces the format while allowing EDOPro’s historical card IDs.
+| Section | What it does |
+| --- | --- |
+| **HD Cards** | Download missing card images and Field Spell playmat art. Check coverage, repair broken files, or choose the original artwork for GOAT and Pre-Errata wording where available. Resolution and availability vary by card. |
+| **Skins** | Start from 16 editable presets. Choose colours, generate a wallpaper or bring a photo, preview the menu, deck editor and duel field as you edit, and share your theme as an `.edotheme` file. [Theme reference](themes/README.md) |
+| **Sleeves** | Design a card back from 24 patterns and 16 palettes, use cropped artwork for an installed card when available, or bring your own image. Choose your sleeve and your opponent’s independently. |
+| **Sounds** | Audition cues, apply a set, or mix, match and silence individual slots. The engine covers 24 duel and interface sound slots, plus card-specific chants. [Sound reference](docs/sounds.md) |
+| **Music** | Browse a catalogue of 69 games, import tracks or a folder of your own recordings, and build playlists for seven moments from the main menu to victory or defeat. The playable tracks depend on your installed and imported audio. |
+| **Tournament decks** | Browse public events and standings by format, preview lists, save copies to EDOPro and sync their artwork. For Goat events you can also save a separate copy using installed historical cards. Review any unresolved cards before playing. [Format Library](https://formatlibrary.com/events) |
+| **My decks** | Search your saved decks by card, check them against an installed banlist, compare versions and preview or copy `ydke://` sharing codes. Legality checks use your installed card data and the chosen list. |
+| **Replays** | Find recordings by player, label, notes or tags. Save a copy of a rolling last replay and export a replay with its notes. |
+| **Backup & transfer** | Make a local ZIP of decks and replays, with optional categories, for a backup or a move between installations such as a PC and a Steam Deck. Preview conflicts before restoring. A physical PC ↔ Steam Deck transfer is untested. [Backup reference](docs/backup.md) |
+| **Health check** | Check local databases, banlists, storage, skin files and audio. Copy a support summary with the findings and no personal details. [Health check reference](docs/doctor-replays.md) |
 
-## How it works
+### On-demand content packs
 
-0. **Find** — looks for your EDOPro folder in the places it's normally installed, then shows it for you to confirm.
-1. **Scan** — reads every `.cdb` card database in your EDOPro folder (root, `expansions/`, and repository deltas).
-2. **Diff** — compares the cards your installed databases know about against the images already in `pics/` and only queues what's missing.
-3. **Fetch** — 50 async workers try each card on [YGOProDeck](https://ygoprodeck.com), with a waterfall for tricky cases: manual overrides, GOAT / Pre-Errata suffix matching, an ID-offset fallback, and ProjectIgnis's own image server as the final backup (so even brand-new Rush Duel sets download).
-4. **Extras** — Field Spell playmat art lands in `pics/field/`, definitive misses are cached for 14 days, and a sync report can be saved when it's done.
+The pack engine keeps optional downloads separate so the app can stay small. The catalogue records each pack’s author, licence, attribution and size. Previews can load separately. When you choose a downloadable pack, the engine verifies the file and keeps a local copy for reuse. Music, covers, wallpapers and sleeves can be added to their local libraries. The bundled catalogue starts empty, and available packs depend on what has been published with redistribution permission. [Content pack guide](docs/content-packs.md)
 
-## CLI reference
+## FAQ and troubleshooting
 
-The packaged app needs no flags — the options window covers the common choices. Power users get the full set:
+**The folder is right, but I can’t sync.** Open EDOPro and let its databases finish updating. Return to EDOPal and select the folder again if needed.
+
+**Some cards are missing or blurry.** **Show coverage** reports what’s on disk. Use **Repair broken images first** in **Sync settings** for damaged files. The artwork hosts can have different versions of a card or no image for it. The command-line flag `--recheck-missing` retries cards that providers previously reported missing.
+
+**Music previews here but is silent in EDOPro.** Check the scene and game volume. If music is disabled, close the game and enable it. EDOPal’s music switch preserves the volume setting.
+
+**How do I update?** Download the new platform ZIP and open the extracted app in place of your old companion. Update any shortcut to the old executable. The packaged app still uses the `EDOPro HD Sync` per-user data folder for your settings and library.
+
+**Can I undo changes?** Skins, sleeves, sounds, playlists and backup restores have their own recovery options. Imported decks and preserved replays are separate files you can remove. Keep a copy of existing artwork or textures you plan to refresh, repair or prune. Those operations have no built-in undo. [What EDOPal writes and how to undo it](docs/safety.md)
+
+## Privacy and network use
+
+| Host | Why EDOPal contacts it |
+| --- | --- |
+| `images.ygoprodeck.com` and `pics.projectignis.org:2096` | Card and Field Spell artwork. Sleeve art requests use the YGOProDeck image host. |
+| `api.github.com`, `github.com` and GitHub’s release asset hosts | Update notices, pack catalogue and downloads, and the older curated texture downloads. |
+| `formatlibrary.com` and `cdn.formatlibrary.com` | Public tournament formats, event searches, standings, deck previews, thumbnails and downloads. |
+
+EDOPal has no account or telemetry. It keeps your files, settings and support summary on your device. The services receive ordinary connection details such as your IP address, plus the requested public IDs or tournament search text. A deck-only art sync requests the individual card IDs it needs. Configured sources and download redirects can add hosts. Opening a cover credit or source link uses your browser. [Full network inventory and data locations](docs/privacy.md)
+
+## Help and development
+
+For a bug, include the Health check’s **support summary** if available. [Open an issue](https://github.com/cntrl-alt-lenny/edopro-hd-cards/issues/new/choose)
+
+See [Contributing](CONTRIBUTING.md) for source setup, tests and screenshots, and the [documentation index](docs/index.md) for engine references.
 
 <details>
-<summary><b>All flags</b></summary>
+<summary>Command-line reference</summary>
+
+Run `python main.py --help` for help from source. A normal source launch runs the console sync. A normal packaged launch opens EDOPal.
 
 | Flag | What it does |
-|---|---|
-| `--force` / `--no-force` | Re-download **all** images for a full refresh (default: only missing). |
-| `--dry-run` | Preview what would be downloaded without downloading. |
-| `--my-decks` | Only sync cards used in your EDOPro deck folder (much faster). |
-| `--deck PATH` | Only sync cards in one `.ydk` file (repeat to combine decks). |
-| `--decks-folder PATH` | Only sync cards in every `.ydk` inside a folder. |
-| `--stats` | Show artwork coverage and disk usage, then exit. |
-| `--repair` | Re-download images that are missing, corrupt, or not valid JPEGs. |
-| `--field-art` / `--no-field-art` | Field Spell playmat art into `pics/field/` (default: on). |
-| `--original-text` / `--no-original-text` | GOAT/Pre-Errata cards use their **own** artwork instead of the modern reprint's — era-correct wording, lower resolution (default: off). |
-| `--textures` / `--no-textures` | Also download the curated texture pack into `textures/`. |
-| `--textures-pack NAME` | Pick a specific texture pack. |
-| `--gui` / `--no-gui` | Force or skip the tick-box options window. |
-| `--recheck-missing` | Retry cards in the failure cache (useful after new sets hit YGOProDeck). |
-| `--prune` | After the sync, delete images whose IDs are no longer in any database. |
-| `--edopro-path PATH` | Point at a specific EDOPro/ProjectIgnis folder. |
-| `--save-report` / `--no-save-report` | Write a timestamped `.txt` sync report. |
-| `--quiet` | Minimal output — just the progress bar and summary. |
-| `--concurrency N` | Max simultaneous downloads (default: 50). |
-| `--max-retries N` | Retry failed downloads N times after the initial attempt (default: 3). |
-| `--timeout N` | HTTP timeout in seconds (default: 30). |
-| `--config PATH` | Use a custom config file. |
-| `--generate-config` | Write a default `config.json` and exit. |
-| `--health-check` | Run quick offline sanity checks and exit. |
-| `--no-pause` | Windows packaged builds: close immediately instead of waiting for Enter. |
+| --- | --- |
+| `-h` / `--help` | Show argument help. |
+| `--gui` / `--no-gui` | Open the Qt window or run in the console. |
+| `--legacy-gui` | Open the original Tk window during the migration. Mutually exclusive with `--gui` and `--no-gui`. |
+| `--edopro-path PATH` | Select a game folder and skip auto-detection. |
+| `--config PATH` | Use a specific config file. |
+| `--generate-config` | Write a default config file and exit. |
+| `--dry-run` | Preview the artwork queue without downloading. |
+| `--my-decks` | Sync cards from your EDOPro deck folder. |
+| `--deck PATH` | Sync cards from a `.ydk` file. Repeat for several decks. |
+| `--decks-folder PATH` | Sync cards from the `.ydk` files in a folder. |
+| `--stats` | Show artwork coverage and disk usage without downloading. |
+| `--force` / `--no-force` | Enable or disable refreshing existing images. |
+| `--repair` | Fetch missing or damaged images. |
+| `--field-art` / `--no-field-art` | Enable or disable Field Spell playmat art. On by default. |
+| `--original-text` / `--no-original-text` | Prefer original GOAT and Pre-Errata artwork or use the default sharper matching policy. |
+| `--recheck-missing` | Retry artwork that’s in the missing-image cache. |
+| `--prune` | Delete orphaned JPEGs in `pics/` after a full-index sync. Back up existing images first. |
+| `--textures` / `--no-textures` | Enable or disable legacy curated texture downloads into `textures/`. |
+| `--textures-pack NAME` | Choose a legacy curated pack. |
+| `--save-report` / `--no-save-report` | Enable or disable a timestamped sync report beside the config file. |
+| `--quiet` | Use minimal console output. |
+| `--concurrency N` | Set the maximum simultaneous downloads. Default 50. |
+| `--max-retries N` | Set retries per download. Default 3. |
+| `--timeout N` | Set the artwork HTTP timeout in seconds. Default 30. |
+| `--health-check` | Run quick offline checks of the companion and exit. For the detailed game report from source, run `python -m doctor PATH` with your game folder. |
+| `--no-pause` | Skip the exit prompt in an interactive Windows packaged console session. |
 
 </details>
 
-## From source
+## Credits and licences
 
-This checkout opens **EDOPro Studio** with `python main.py --gui`. HD Cards runs inside the resizable sidebar window. The original customization, music and tournament tools are available with `python main.py --legacy-gui` while their Studio pages are being ported. See the [Studio developer guide](studio/README.md) for local demos, tests and screenshots.
+- NiiMiyo created the original downloader that inspired this project. [EDOPro-Hd-Downloader](https://github.com/NiiMiyo/EDOPro-Hd-Downloader)
+- YGOProDeck and Project Ignis serve card images. Format Library supplies public tournament data and deck lists. [YGOProDeck](https://ygoprodeck.com/) · [Project Ignis](https://projectignis.github.io/) · [Format Library](https://formatlibrary.com/events)
+- The music catalogue records editions and sources for game covers, including the LaunchBox Games Database. [Music catalogue](assets/music/catalog.json) · [LaunchBox Games Database](https://gamesdb.launchbox-app.com/)
+- Thonk draws on Kenney’s CC0 audio. Inter is distributed under the SIL Open Font License. Pack credits and third-party assets carry their own terms. [Appearance credits](assets/appearance/README.md) · [Inter licence](assets/window/fonts/Inter-OFL.txt) · [Kenney Audio](https://kenney.nl/assets/category:Audio)
+- EDOPal’s source code uses the [MIT License](LICENSE).
 
-```bash
-git clone https://github.com/cntrl-alt-lenny/edopro-hd-cards.git
-cd edopro-hd-cards
-pip install -r requirements.txt
-
-python main.py                 # normal sync
-python main.py --my-decks      # deck-first sync
-python main.py --health-check  # quick offline sanity check
-```
-
-For networks that require a proxy, the app honors `HTTP_PROXY`, `HTTPS_PROXY`,
-and `NO_PROXY`. If your network uses a private certificate authority, point
-`EDOPRO_CA_BUNDLE` at a PEM bundle. `--config PATH` remains available when you
-want all settings and caches beside a portable copy of the script.
-
-## Contributing
-
-Contributions are welcome — open an issue or send a pull request. Please run `python main.py --health-check` and the test suite before submitting.
-
-## Credits
-
-- Original concept: [EDOPro-Hd-Downloader](https://github.com/NiiMiyo/EDOPro-Hd-Downloader) by NiiMiyo
-- Card artwork hosted by [YGOProDeck](https://ygoprodeck.com) and [ProjectIgnis](https://github.com/ProjectIgnis)
-- Licensed under the [MIT License](LICENSE)
+EDOPal is an independent fan-made companion for EDOPro, a Project Ignis project. EDOPal has no affiliation with or endorsement from Project Ignis, Konami or Shueisha. Yu-Gi-Oh! and related marks belong to their respective rights holders.

@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 )
 
 from studio import theme as t
+from studio.context import AppContext
 from studio.icons import icon
-from studio.tasks import TaskRunner
 from studio.widgets import Button, ImageTileGrid, SearchField, Tile, glyph, label, margins
 
 from .sleeves_collection import FAMILIES, SOURCES, Choice, filtered
@@ -78,10 +78,11 @@ class PrintDelegate(QStyledItemDelegate):
 class Gallery(QWidget):
     picked = Signal(object)
     opened = Signal(str)
-    colours_needed = Signal()
 
-    def __init__(self, tasks: TaskRunner, thumbs: Thumbnails) -> None:
+    def __init__(self, ctx: AppContext, thumbs: Thumbnails) -> None:
         super().__init__()
+        self.ctx, self.thumbs = ctx, thumbs
+        self.measuring = False
         self.items: list[Choice] = []
         self.visible: list[Choice] = []
         self.measured: dict[Path, str] = {}
@@ -93,6 +94,9 @@ class Gallery(QWidget):
         self.count = label("", "muted")
         header.addWidget(self.count)
         header.addStretch()
+        self.more = Button("Get more", "quiet", "download")
+        self.more.setAccessibleName("Get more sleeves")
+        header.addWidget(self.more)
         self.actions = {}
         for key, title in (
             ("design", "Design"),
@@ -115,6 +119,7 @@ class Gallery(QWidget):
                 "Recently used",
                 "Ready-made",
                 "Saved sleeves",
+                "Pack sleeve",
                 *SOURCES.values(),
             ),
         )
@@ -125,7 +130,7 @@ class Gallery(QWidget):
         filters.addWidget(self.colour, 2)
         filters.addWidget(self.surprise)
         body.addLayout(filters)
-        self.grid = PrintGrid(tasks, thumbs)
+        self.grid = PrintGrid(ctx.tasks, thumbs)
         self.grid.setAccessibleName("Sleeve collection")
         self.grid.setStyleSheet(
             f"QListView {{ background:{t.CANVAS}; padding:0; border:0; }} QListView:focus {{border:{t.HAIR}px solid {t.PALE};}}"
@@ -170,10 +175,17 @@ class Gallery(QWidget):
         if self.visible:
             idx = self.grid.model().index(random.randrange(len(self.visible)), 0)
             self.grid.setCurrentIndex(idx)
-            self.grid.scrollTo(idx)
+            self.grid.scrollTo(idx, self.grid.ScrollHint.PositionAtCenter)
+            self.grid.setFocus()
             self.choose(idx)
 
     def set_items(self, items: list[Choice]) -> None:
+        previous = {item.key: item.entry.image for item in self.items if item.entry}
+        self.measured = {
+            item.key: self.measured[item.key]
+            for item in items
+            if item.key in self.measured and previous.get(item.key) == item.entry.image
+        }
         self.items = [*items, *PRINTS.values()]
         self.filter()
 
@@ -185,12 +197,38 @@ class Gallery(QWidget):
             self.colour.currentText(),
             self.measured,
         )
-        self.grid.set_tiles(
-            [Tile(c.name, c.key, c.full_name + " · " + c.detail) for c in self.visible]
-        )
+        self.grid.set_tiles([Tile(c.name, c.key, tooltip=c.tooltip) for c in self.visible])
         self.count.setText(str(len(self.visible)))
         self.grid.setVisible(bool(self.visible))
         self.empty.setVisible(not self.visible)
         self.surprise.setEnabled(bool(self.visible))
         if self.colour.currentIndex() > 0:
-            self.colours_needed.emit()
+            self.measure()
+
+    def measure(self) -> None:
+        if self.measuring:
+            return
+        missing = [item for item in self.items if not item.family and item.key not in self.measured]
+        if not missing:
+            return
+        self.measuring = True
+        job = self.ctx.tasks.start(lambda worker: self.thumbs.colours(missing, worker))
+
+        def ready(colours: dict[Path, str]) -> None:
+            self.measuring = False
+            current = {item.key: item for item in self.items if item.entry}
+            self.measured.update(
+                {
+                    item.key: colours.get(item.key, "")
+                    for item in missing
+                    if current.get(item.key) == item
+                }
+            )
+            self.filter()
+
+        def failed(_: Exception) -> None:
+            self.measuring = False
+            self.ctx.notify("Could not read a saved sleeve’s colours.")
+
+        job.result.connect(ready)
+        job.error.connect(failed)

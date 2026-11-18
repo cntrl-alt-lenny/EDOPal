@@ -69,11 +69,14 @@ def details_line(entry: ReplayEntry) -> str:
 
 def last_to_save(entries: tuple[ReplayEntry, ...]) -> ReplayEntry | None:
     archived = {e.replay_id for e in entries if not e.is_last and e.replay_id}
-    pending = [e for e in entries if e.is_last and e.replay_id not in archived]
+    pending = [
+        entry
+        for entry in entries
+        if entry.is_last and entry.details and entry.replay_id and entry.replay_id not in archived
+    ]
     return max(
         pending,
         key=lambda e: (
-            bool(e.details),
             e.header.timestamp if e.header else 0,
             e.path.suffix.casefold(),
         ),

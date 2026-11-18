@@ -19,7 +19,7 @@ from studio.shell import StudioWindow
 from studio.widgets import Button
 
 
-def seed_replays(game: Path, profile: Path) -> None:
+def seed_replays(game: Path, profile: Path, *, extra: int = 0) -> None:
     folder = game / "replay"
     folder.mkdir(exist_ok=True)
     store = AnnotationStore(profile)
@@ -61,6 +61,11 @@ def seed_replays(game: Path, profile: Path) -> None:
             note = "Watch turn seven again before the next round." if i == 1 else ""
             store.set(hashlib.sha256(data).hexdigest(), ReplayNotes(title, note, tags))
     (folder / "Interrupted recording.yrp").write_bytes(b"yrp")
+    if extra:
+        template = bytearray((folder / "First practice.yrpX").read_bytes())
+        for index in range(extra):
+            struct.pack_into("<I", template, 12, 1794000000 - index * 3600)
+            (folder / f"League duel {index + 1:03}.yrpX").write_bytes(template)
 
 
 @contextmanager
@@ -116,9 +121,15 @@ def render_tools(
             shot("health-loading")
         settle(lambda: page.state == "overview")
         shot("health-overview")
-        toggle = next(
-            b for b in page.findChildren(Button) if b.accessibleName() == "Active skin is missing"
-        )
+
+        def finding_button(name: str) -> Button:
+            return next(
+                b
+                for b in page.scroll.widget().findChildren(Button)
+                if name in (b.text(), b.accessibleName())
+            )
+
+        toggle = finding_button("Active skin is missing")
         toggle.click()
         shot("health-expanded")
         page.support.click()
@@ -138,23 +149,25 @@ def render_tools(
         (bot / "WindBot.exe").touch()
         (bot / "ExecutorBase.dll").touch()
         (bot / "bots.json").write_text('[{"deck": "Spellcasters"}]', encoding="utf-8")
-        codes = range(1000, 1024)
-        (bot / "Decks/AI_Spellcasters.ydk").write_text("#main\n" + "".join(f"{i}\n" for i in codes))
-        (game / "lflist.conf").write_text("!Practice cup\n" + "".join(f"{i} 0\n" for i in codes))
+        codes = range(1000, 1032)
+        names = [f"Practice {i + 1}" for i in range(8)]
+        for name in names:
+            (bot / f"Decks/AI_{name}.ydk").write_text("#main\n" + "".join(f"{i}\n" for i in codes))
+        (bot / "bots.json").write_text(
+            "[" + ", ".join(f'{{"deck": "{name}"}}' for name in names) + "]", encoding="utf-8"
+        )
+        (game / "lflist.conf").write_text(
+            "".join(f"!Cup {i + 1}\n" + "".join(f"{code} 0\n" for code in codes) for i in range(8))
+        )
         page.rerun.click()
         settle(lambda: page.state == "overview")
         shot("health-passed")
-        toggle = next(
-            b
-            for b in page.scroll.widget().findChildren(Button)
-            if b.accessibleName() == "Some practice decks exceed installed card limits"
-        )
+        finding_button("Notes").click()
+        toggle = finding_button("Some practice decks exceed installed card limits")
         toggle.click()
-        details = next(
-            b
-            for b in page.scroll.widget().findChildren(Button)
-            if b.text() == "Details · See all 24"
-        )
+        details = finding_button("Review card limit matches")
+        page.scroll.ensureWidgetVisible(details)
+        shot("health-practice-notes")
         details.click()
         shot("health-evidence")
         page.escape()
@@ -225,4 +238,9 @@ def render_tools(
         shot("replays-saving")
         settle(lambda: page.state == "library")
         shot("replays-preserved")
+    seed_replays(game, Path(ctx.cfg.config_path).parent, extra=320)
+    page.refresh()
+    settle(lambda: page.state == "library")
+    page.list.scrollToBottom()
+    shot("replays-large-library")
     QApplication.processEvents()

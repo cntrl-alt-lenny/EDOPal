@@ -150,7 +150,7 @@ the small licence file from `assets/appearance/`, which packaging needs
 to retain if it removes the ZIPs.
 
 ```powershell
-$py = 'C:/Users/leona/Dev/edopro-agents/venv/Scripts/python.exe'
+$py = 'python'
 & $py tools/build_content_release.py assets/appearance --preview-root assets/window/gallery --out build/content-proof --draft
 ```
 
@@ -247,8 +247,9 @@ from content.libraries import installed_origins, make_available, remove_pack
 cache = PackCache.for_config(cfg)
 # status comes from Catalogue.list_packs(...), version is the running app version.
 cancel = Event()
-changes = await make_available(cache, status, app_version=version,
-                               progress=on_bytes, phase=on_phase, cancel=cancel)
+changes = await make_available(
+    cache, status, app_version=version, progress=on_bytes, phase=on_phase, cancel=cancel
+)
 # A separate Remove action on a worker:
 changes = remove_pack(cache, status)
 ```

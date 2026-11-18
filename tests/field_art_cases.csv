@@ -1,0 +1,158 @@
+field_id,name,type_hex,alias,donor_id,donor_name,expected_source
+150000000,Earthbound Tundra,0x80002,0,,,Crop installed face
+151000001,Acidic Downpour (Action Field),0x10080002,35956022,35956022,Acidic Downpour,Installed donor JPG
+151000002,Acrobatic Circus,0x10080002,0,,,Crop installed face
+151000003,Amazoness Village (Action Field),0x10080002,712559,712559,Amazoness Village,Installed donor JPG
+151000004,Bamboo Battleground,0x10080002,0,,,Crop installed face
+151000005,Brain Research Lab (Action Field),0x10080002,85668449,85668449,Brain Research Lab,Installed donor JPG
+151000006,Calamity Cove,0x10080002,0,,,Crop installed face
+151000007,Canyon (Action Field),0x10080002,28120197,28120197,Canyon,Installed donor JPG
+151000008,Castle of Chaos,0x10080002,0,,,Crop installed face
+151000009,Chaos Kitchen,0x10080002,0,,,Crop installed face
+151000010,Closed Forest (Action Field),0x10080002,78082039,78082039,Closed Forest,Installed donor JPG
+151000011,Cosmic Sanctuary,0x10080002,0,,,Crop installed face
+151000012,Crossover,0x10080002,0,,,Crop installed face
+151000013,Crossover Acceleration,0x10080002,0,,,Crop installed face
+151000014,Crystal Corridor,0x10080002,0,,,Crop installed face
+151000015,Dragon Ravine (Action Field),0x10080002,62265044,62265044,Dragon Ravine,Installed donor JPG
+151000016,Forest (Action Field),0x10080002,87430998,87430998,Forest,Installed donor JPG
+151000017,Fortuneterror,0x10080002,0,,,Crop installed face
+151000018,Gaia Power (Action Field),0x10080002,56594520,56594520,Gaia Power,Installed donor JPG
+151000019,The Gates of Dark World (Action Field),0x10080002,33017655,33017655,The Gates of Dark World,Installed donor JPG
+151000020,Geartown (Action Field),0x10080002,37694547,37694547,Geartown,Installed donor JPG
+151000021,Ghostrick Museum (Action Field),0x10080002,7617062,7617062,Ghostrick Museum,Installed donor JPG
+151000022,Harpies' Hunting Ground (Action Field),0x10080002,75782277,75782277,Harpies' Hunting Ground,Installed donor JPG
+151000023,Infinite Bridges,0x10080002,0,,,Crop installed face
+151000024,Jurassic World (Action Field),0x10080002,10080320,10080320,Jurassic World,Installed donor JPG
+151000025,Karakuri Showdown Castle (Action Field),0x10080002,22751868,22751868,Karakuri Showdown Castle,Installed donor JPG
+151000026,A Legendary Ocean (Action Field),0x10080002,22702055,295517,A Legendary Ocean,Installed donor JPG
+151000027,Madolche Chateau (Action Field),0x10080002,14001430,14001430,Madolche Chateau,Installed donor JPG
+151000028,Mausoleum of the Emperor (Action Field),0x10080002,80921533,80921533,Mausoleum of the Emperor,Installed donor JPG
+151000029,Morphtronic Map (Action Field),0x10080002,56074358,56074358,Morphtronic Map,Installed donor JPG
+151000030,Mountain (Action Field),0x10080002,50913601,50913601,Mountain,Installed donor JPG
+151000031,Mystic Plasma Zone (Action Field),0x10080002,18161786,18161786,Mystic Plasma Zone,Installed donor JPG
+151000032,Neo Heartland City,0x10080002,0,,,Crop installed face
+151000033,Pandemonium (Action Field),0x10080002,94585852,94585852,Pandemonium,Installed donor JPG
+151000034,Performance Coliseum,0x10080002,0,,,Crop installed face
+151000035,Pier of Peril,0x10080002,0,,,Crop installed face
+151000036,Plain Plain,0x10080002,0,,,Crop installed face
+151000037,Prison Tower of Darkville,0x10080002,0,,,Crop installed face
+151000038,Quartet of Quandry,0x10080002,0,,,Crop installed face
+151000039,Quiz Quest,0x10080002,0,,,Crop installed face
+151000040,Rising Air Current (Action Field),0x10080002,45778932,45778932,Rising Air Current,Installed donor JPG
+151000041,Savage Colosseum (Action Field),0x10080002,32391631,32391631,Savage Colosseum,Installed donor JPG
+151000042,Showtime Street,0x10080002,0,,,Crop installed face
+151000043,Shrine of Mist Valley (Action Field),0x10080002,4215636,4215636,Shrine of Mist Valley,Installed donor JPG
+151000044,Sogen (Action Field),0x10080002,86318356,86318356,Sogen,Installed donor JPG
+151000045,Sun Valley,0x10080002,0,,,Crop installed face
+151000046,Sunset Stronghold,0x10080002,0,,,Crop installed face
+151000047,Sweets Island,0x10080002,0,,,Crop installed face
+151000048,Sword's Cemetery,0x10080002,0,,,Crop installed face
+151000049,Umi (Action Field),0x10080002,22702055,22702055,Umi,Installed donor JPG
+151000050,Umiiruka (Action Field),0x10080002,82999629,82999629,Umiiruka,Installed donor JPG
+151000051,Vampire Kingdom (Action Field),0x10080002,62188962,62188962,Vampire Kingdom,Installed donor JPG
+151000052,Venom Swamp (Action Field),0x10080002,54306223,54306223,Venom Swamp,Installed donor JPG
+151000053,Wasteland (Action Field),0x10080002,23424603,23424603,Wasteland,Installed donor JPG
+151000054,Wetlands (Action Field),0x10080002,2084239,2084239,Wetlands,Installed donor JPG
+151000055,The Wildest West,0x10080002,0,,,Crop installed face
+151000056,Xyz Territory (Action Field),0x10080002,4545854,4545854,Xyz Territory,Installed donor JPG
+151000057,Yami (Action Field),0x10080002,59197169,59197169,Yami,Installed donor JPG
+151000058,Zombie World (Action Field),0x10080002,4064256,4064256,Zombie World,Installed donor JPG
+160003048,Shining City Nights,0x80002,0,,,Crop installed face
+160003050,Big Umi,0x80002,0,,,Crop installed face
+160003052,Umi (Rush),0x80002,22702055,,,Crop installed face
+160003053,Forest (Rush),0x80002,87430998,,,Crop installed face
+160004042,Peaks of Blisstopia,0x80002,0,,,Crop installed face
+160004050,Sogen (Rush),0x80002,0,,,Crop installed face
+160005042,Royal Rebel's Arena,0x80002,0,,,Crop installed face
+160005045,Prison Island - Cell Block 5 & 6,0x80002,0,,,Crop installed face
+160005054,Wasteland (Rush),0x80002,23424603,,,Crop installed face
+160006045,Following World,0x80002,0,,,Crop installed face
+160006050,Wild Kitchen,0x80002,0,,,Crop installed face
+160006051,Beast Battlefield Barrier,0x80002,0,,,Crop installed face
+160006056,Berserker Colosseum,0x80002,0,,,Crop installed face
+160007042,Supreme Marine Fortress Magnum Overbase,0x80002,0,,,Crop installed face
+160007047,Feverous Spirit Stadium,0x80002,0,,,Crop installed face
+160007054,Stream,0x80002,0,,,Crop installed face
+160008059,Jurassic Oasis,0x80002,0,,,Crop installed face
+160009049,Sunny Forest,0x80002,0,,,Crop installed face
+160010048,Rainapolis,0x80002,0,,,Crop installed face
+160010049,Kingdom of Bubbles,0x80002,0,,,Crop installed face
+160010053,Area 33,0x80002,0,,,Crop installed face
+160013056,The Emperor Realm,0x80002,0,,,Crop installed face
+160014053,Dark Battle Grounds,0x80002,0,,,Crop installed face
+160015053,Autumn Leaves of Blisstopia,0x80002,0,,,Crop installed face
+160015055,Raging Waves,0x80002,0,,,Crop installed face
+160018053,Destructor Integration Scrap Gate,0x80002,0,,,Crop installed face
+160018055,Constructor Arsenal Wyrmyard,0x80002,0,,,Crop installed face
+160018057,Freshberry Garden,0x80002,0,,,Crop installed face
+160022042,OuTerverSe Reverse Domain,0x80002,0,,,Crop installed face
+160024052,The Eternal Land -Spectrika-,0x80002,0,,,Crop installed face
+160025047,Galactica Fusion Space,0x80002,0,,,Crop installed face
+160027060,Forest of the Beautiful Dark Queen,0x80002,0,,,Crop installed face
+160202046,Outer Space,0x80002,0,,,Crop installed face
+160203015,Jurassic World (Rush),0x80002,10080320,10080320,Jurassic World,Installed donor JPG
+160203030,Silvermountain of Blisstopia,0x80002,0,,,Crop installed face
+160204012,Imaginary Arc Tower,0x80002,0,,,Crop installed face
+160204046,Yami (Rush),0x80002,0,,,Crop installed face
+160209078,Apocalypse - Beast Over World,0x80002,0,,,Crop installed face
+160212014,Gear Section,0x80002,0,,,Crop installed face
+160217030,Sparkhearts Studio,0x80002,0,,,Crop installed face
+160218021,Home of the Charmers,0x80002,0,,,Crop installed face
+160218075,Departure Zone,0x80002,0,,,Crop installed face
+160219037,Feverous Colorful Ball Park,0x80002,0,,,Crop installed face
+160220045,Lostream - The Circulating Sea of Clouds,0x80002,0,,,Crop installed face
+160309027,Evergreen of Blisstopia,0x80002,0,,,Crop installed face
+160319028,Sanctum of Legend,0x80002,0,,,Crop installed face
+160320032,Skyscraper (Rush),0x80002,63035430,63035430,Skyscraper,Installed donor JPG
+160428020,Darkness Lode,0x80002,0,,,Crop installed face
+160428081,Zombie Carnival,0x80002,0,,,Crop installed face
+160451004,Dream Live,0x80002,0,,,Crop installed face
+300101002,Straight to the Grave,0x8080002,0,23424603,Wasteland,Installed donor JPG
+300101005,Tomb of the Pharaoh,0x8080002,0,47355498,Necrovalley,Installed donor JPG
+300102002,Mythic Depths,0x8080002,0,22702055,Umi,Installed donor JPG
+300103001,Heavy Metal Raiders (Skill Card),0x8080002,0,3113667,Heavy Metal Raiders,Installed donor JPG
+300201001,Power of Dark,0x8080002,0,59197169,Yami,Installed donor JPG
+300202001,Peak Performance,0x8080002,0,50913601,Mountain,Installed donor JPG
+300203001,Dinosaur Kingdom,0x8080002,0,10080320,Jurassic World,Installed donor JPG
+300304003,Land of the Ojamas,0x8080002,0,90011152,Ojama Country,Installed donor JPG
+300304020,Consumed By Darkness,0x8080002,0,12644061,Advanced Dark,Installed donor JPG
+300305012,Small Roid Big City,0x8080002,0,44139064,Megaroid City,Installed donor JPG
+300309007,Royal Temple of the Kings,0x8080002,0,,,Crop installed face
+504700165,Pandemonium (GOAT),0x80002,94585852,94585852,Pandemonium,Installed donor JPG
+511003218,Ectoplasmer (Anime),0x80002,97342942,97342942,Ectoplasmer,YGOProDeck donor JPEG
+511009314,Wire Mesh - Chain Deathmatch,0x80002,0,,,Crop installed face
+511009919,Salamangreat Sanctuary (Anime),0x80002,1295111,1295111,Salamangreat Sanctuary,Installed donor JPG
+511015131,Doll House (Manga),0x80002,67331360,,,Crop installed face
+511027109,Sacred Defense Barrier,0x80002,0,511000129,Sacred Defense Barrier (Anime),Installed donor PNG
+511030025,Armatos Colosseum,0x80002,0,,,Crop installed face
+511030054,Appliancer Electrilyrical World (Anime),0x80002,3875465,,,Crop installed face
+511310023,Edge of Darkness,0x80002,0,,,Crop installed face
+511310036,Allure Palace (Anime),0x80002,31322640,,,Crop installed face
+511369006,Stormrider Blast,0x80002,0,,,Crop installed face
+511600073,Trickstar Light Arena (Anime),0x80002,63492244,63492244,Trickstar Light Arena,Installed donor JPG
+511600176,Trickstar Live Stage (Anime),0x80002,51208046,51208046,Trickstar Live Stage,Installed donor JPG
+511600232,Stormrider Turbulence,0x80002,0,,,Crop installed face
+511600268,Marincess Battle Ocean (Anime),0x80002,91027843,91027843,Marincess Battle Ocean,Installed donor JPG
+511600282,Salamangreat Shrine (Anime),0x80002,0,,,Crop installed face
+511600295,Ignister A.I.Land (Anime),0x80002,59054773,59054773,Ignister A.I.Land,Installed donor JPG
+511600373,Speed World (Anime),0x80002,511600371,511600371,Speed World,Installed donor PNG
+511600374,Speed World 2 (Anime),0x80002,511600372,511600372,Speed World 2,Installed donor PNG
+511756002,Mausoleum of the Emperor (Anime),0x80002,80921533,,,Crop installed face
+513000125,Fog Castle (Anime),0x80002,111215001,111215001,Fog Castle,Installed donor PNG
+101402095,Angelechy Endgame Problem,0x80002,0,,,Crop after face download
+100458006,Pere-Zenet Em Heru,0x80002,0,,,Crop after face download
+100458039,Trirealm Rift Territory - Valvols,0x80002,0,,,Crop after face download
+101403056,Reindsurm Carnation,0x80002,0,,,Crop after face download
+101403059,The Deep Forest of the White Crow,0x80002,0,,,Crop after face download
+101403061,Ars Magna Academic Arcane Apparition Acropolis,0x80002,0,,,Crop after face download
+101403062,Salamangreat Shrine,0x80002,1295111,19832229,Salamangreat Shrine,YGOProDeck donor JPEG
+101403071,Autumn,0x80002,0,,,Crop after face download
+101404049,Endless Darkness,0x80002,0,,,Crop after face download
+100460005,Cubic Dimension,0x80002,0,,,Crop after face download
+100460053,Ghostrick Garden,0x80002,0,,,Crop after face download
+100459016,Field Power Bonus,0x80002,0,,,Crop after face download
+2906939,Ashtrashen - Gateway to the Worlds Beyond,0x80002,0,,,YGOProDeck own JPEG
+4663194,Dark City at Midnight,0x80002,0,,,YGOProDeck own JPEG
+38391684,"Atlantis, City of the Sea Dragon",0x80002,0,,,YGOProDeck own JPEG
+39513225,Seventh Barian's,0x80002,0,,,YGOProDeck own JPEG

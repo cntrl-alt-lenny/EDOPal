@@ -1,19 +1,21 @@
-"""Inventory personal files by metadata. Only small configuration/index files need opening."""
+"""Inventory personal files and resolve editable library assets from bounded metadata."""
 
 import io
 import json
 import os
-from collections.abc import Iterable, Iterator
+from collections.abc import Collection, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from music_library import FORMATS
+from music.audio import FORMATS
+from music.catalogue import CUSTOM, SCENES
 
-from . import preferences
+from . import collection, preferences
 from .core import (
     CATEGORIES,
     MAX_FILES,
+    MAX_TOTAL,
     Cancel,
     Installation,
     check,
@@ -43,22 +45,64 @@ SUFFIXES = {
 }
 
 
-def category(name: str) -> str:
+def album_metadata(parts: list[str]) -> bool:
+    return (
+        len(parts) == 4
+        and parts[:2] == ["studio", "soundtracks"]
+        and bool(CUSTOM.fullmatch(parts[2]))
+        and parts[3] == "game.json"
+    )
+
+
+def track_path(parts: list[str]) -> bool:
+    return (
+        len(parts) == 5
+        and parts[:2] == ["studio", "soundtracks"]
+        and parts[3] in SCENES
+        and Path(parts[4]).suffix.lower() in FORMATS
+    )
+
+
+def validate_index(tracks: object) -> None:
+    if not isinstance(tracks, list) or len(tracks) > MAX_FILES:
+        raise ValueError("Invalid soundtrack index")
+    for track in tracks:
+        if not isinstance(track, str) or not track_path(("studio/soundtracks/" + track).split("/")):
+            raise ValueError("Invalid soundtrack index entry")
+        portable("studio/soundtracks/" + track)
+
+
+def file_limit(name: str) -> int:
+    if name == INDEX or album_metadata(name.split("/")):
+        return preferences.LIMIT
+    return collection.size_limit(name)
+
+
+def category(name: str, selected: Collection[str] = CATEGORIES) -> str:
     portable(name)
     parts = name.split("/")
     if len(parts) == 2 and parts[0] == "preferences" and parts[1] in preferences.KEYS:
         return "preferences"
-    if name == INDEX or (
-        name.startswith(("studio/sleeves/", "studio/themes/"))
-        and Path(name).suffix.lower()
-        in (IMAGES | {".json"} if parts[1] == "sleeves" else {".json"})
+    if album_metadata(parts):
+        # A named album belongs to the collection as well as a standalone audio export.
+        return "studio" if "studio" in selected else "audio"
+    if track_path(parts):
+        return "audio"
+    if (
+        name == INDEX
+        or collection.asset_digest(name)
+        or (
+            name.startswith(("studio/sleeves/", "studio/themes/"))
+            and Path(name).suffix.lower()
+            in (IMAGES | {".json"} if parts[1] == "sleeves" else {".json"})
+        )
     ):
         return "studio"
     for key, folder in FOLDERS.items():
         if name.startswith(folder + "/") and Path(name).suffix.lower() in SUFFIXES[key]:
             if key == "puzzles" and folded(parts[2]) == "canon collection":
                 break
-            if key == "audio" and (len(parts) != 5 or parts[3] not in {"deck", "duel"}):
+            if key == "audio":
                 break
             return key
     raise ValueError(f"Path outside portable categories: {name}")
@@ -112,6 +156,9 @@ class Source:
             size, digest = transfer(stream, output, self.size, cancel)
             if size != self.size:
                 raise ValueError(f"File changed during read: {self.name}")
+            expected = collection.asset_digest(self.name)
+            if expected and expected != digest:
+                raise ValueError(f"Collection asset checksum mismatch: {self.name}")
             if initial is not None:
                 current = install.target(self.name).stat()
                 if (
@@ -159,6 +206,14 @@ def walk(
                 ):
                     continue
                 if child.is_dir(follow_symlinks=False):
+                    if name in {
+                        "studio/themes/images",
+                        "studio/sleeves/originals",
+                        "studio/sleeves/card-art",
+                        "studio/sleeves/thumbnails",
+                        "studio/soundtracks/pack-media",
+                    }:
+                        continue
                     if folder == "game/puzzles" and (path / ".git").exists():
                         continue
                     stack.append((path, name))
@@ -174,7 +229,8 @@ def sources(
     if "studio" in selected:
         folders.update(sleeves="studio/sleeves", themes="studio/themes")
     result = []
-    tracks = []
+    tracks: set[str] = set()
+    required: set[str] = set()
     for key, folder in folders.items():
         if key not in selected and not (
             "studio" in selected and key in {"sleeves", "themes", "audio"}
@@ -183,33 +239,48 @@ def sources(
         excluded = managed_puzzles(install) if key == "puzzles" else set()
         for file in walk(install, folder, excluded, cancel):
             suffixes = SUFFIXES.get(key, IMAGES | {".json"} if key == "sleeves" else {".json"})
-            if Path(file.name).suffix.lower() not in suffixes:
-                continue
             if key == "audio":
                 parts = file.name.split("/")
-                if len(parts) != 5 or parts[3] not in {"deck", "duel"}:
+                if track_path(parts):
+                    tracks.add("/".join(parts[2:]))
+                elif not album_metadata(parts):
                     continue
-                tracks.append("/".join(parts[2:]))
-            category(file.name)
-            if key != "audio" or key in selected:
+            elif Path(file.name).suffix.lower() not in suffixes:
+                continue
+            cat = category(file.name, selected)
+            if collection.recipe(file.name) or file.name in collection.CATALOGUES:
+                # Keep the exact recipe used for dependency discovery, even if the editor
+                # saves it again while the archive is being written.
+                path = install.target(file.name)
+                data = read_small(path, collection.size_limit(file.name))
+                required.update(collection.references(file.name, data))
+                file = Source(file.name, len(data), data, int(path.stat().st_mtime))
+            if cat in selected:
                 result.append(file)
-            if max(len(result), len(tracks)) > MAX_FILES:
+            if max(len(result), len(tracks), len(required)) > MAX_FILES:
                 raise ValueError("Too many personal files")
     if "studio" in selected:
+        for name in sorted(required - {f.name for f in result}):
+            check(cancel)
+            path = install.target(name)
+            if not path.is_file():
+                raise ValueError(f"Missing collection asset: {name}")
+            result.append(Source(name, path.stat().st_size))
         index = install.target(INDEX)
         if index.exists():
             stored = json.loads(read_small(index, preferences.LIMIT))
-            if not isinstance(stored, list) or len(stored) > MAX_FILES:
-                raise ValueError("Invalid soundtrack index")
-            for track in stored:
-                if not isinstance(track, str) or category("studio/soundtracks/" + track) != "audio":
-                    raise ValueError("Invalid soundtrack index entry")
-            tracks.extend(stored)
+            validate_index(stored)
+            tracks.update(stored)
+            if len(tracks) > MAX_FILES:
+                raise ValueError("Too many soundtrack files")
         if tracks or index.exists():
-            data = json.dumps(sorted(set(tracks)), ensure_ascii=False).encode()
-            if len(data) > preferences.LIMIT:
-                raise ValueError("Soundtrack index too large")
-            result.append(Source(INDEX, len(data), data))
+            encoded = bytearray()
+            for part in json.JSONEncoder(ensure_ascii=False).iterencode(sorted(tracks)):
+                block = part.encode()
+                if len(encoded) + len(block) > preferences.LIMIT:
+                    raise ValueError("Soundtrack index too large")
+                encoded.extend(block)
+            result.append(Source(INDEX, len(encoded), bytes(encoded)))
     if "preferences" in selected:
         path = install.target(CONF)
         if path.exists():
@@ -231,8 +302,15 @@ def inventory(install: Installation, *, cancel: Cancel = None) -> dict[str, Tota
     return {cat: Total(counts[cat], sizes[cat]) for cat in CATEGORIES}
 
 
+def bounded_files(install: Installation, categories: Iterable[str], cancel: Cancel) -> list[Source]:
+    files = sources(install, categories, cancel)
+    if sum(f.size for f in files) > MAX_TOTAL or any(f.size > file_limit(f.name) for f in files):
+        raise ValueError("Selection exceeds the archive size limit")
+    return files
+
+
 def hashes(install: Installation, categories: Iterable[str], cancel: Cancel) -> dict[str, str]:
     return {
         file.name: file.copy_to(install, None, cancel)[0]
-        for file in sources(install, categories, cancel)
+        for file in bounded_files(install, categories, cancel)
     }

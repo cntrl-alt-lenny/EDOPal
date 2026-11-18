@@ -12,6 +12,7 @@ from .sleeves_widgets import Slider
 
 class Inks(QWidget):
     changed = Signal()
+    editing = Signal(QWidget)
 
     def __init__(self) -> None:
         super().__init__()
@@ -28,7 +29,7 @@ class Inks(QWidget):
             btn.setCheckable(True)
             btn.setAccessibleName(f"Adjust {name.lower()} colour")
             btn.clicked.connect(
-                lambda checked=False, index=i: self.choose(index if checked else -1)
+                lambda checked=False, index=i: self.choose(index if checked else -1, focus=checked)
             )
             row.addWidget(btn)
             self.buttons.append(btn)
@@ -57,7 +58,7 @@ class Inks(QWidget):
             btn.setToolTip(value)
         self.choose(self.active)
 
-    def choose(self, index: int) -> None:
+    def choose(self, index: int, *, focus: bool = False) -> None:
         self.active = index
         self.details.setVisible(index >= 0)
         for i, btn in enumerate(self.buttons):
@@ -67,6 +68,9 @@ class Inks(QWidget):
             for slider, value in zip(self.sliders, (hue, sat, light), strict=True):
                 with QSignalBlocker(slider):
                     slider.setValue(max(0, value))
+            if focus:
+                self.sliders[0].setFocus()
+                self.editing.emit(self.sliders[0])
 
     def edit(self) -> None:
         if self.active < 0:

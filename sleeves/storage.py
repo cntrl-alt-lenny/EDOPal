@@ -14,6 +14,7 @@ from uuid import uuid4
 from zipfile import ZipFile
 
 import extras
+from config import APP_NAME
 from content.media import Origin
 from state_lock import locked
 
@@ -100,7 +101,7 @@ def _parse(raw: bytes) -> dict:
     if not isinstance(obj, dict):
         raise ValueError("Damaged catalogue.")
     if isinstance(obj.get("version"), int) and obj["version"] > 1:
-        raise _NewerCatalogue("This collection needs a newer version of EDOPro Studio.")
+        raise _NewerCatalogue(f"This collection needs a newer version of {APP_NAME}.")
     if obj.get("version") != 1:
         raise ValueError("Unrecognised catalogue.")
     return obj

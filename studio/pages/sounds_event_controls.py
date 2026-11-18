@@ -97,6 +97,7 @@ class SoundEvents:
             self.page.views[key].ensureWidgetVisible(row)
 
     def fill_picker(self) -> None:
+        self.page.stop_audio()
         self.picker.clear_options()
         key = self.event
         event = sounds.event_for(key)
@@ -182,7 +183,8 @@ class SoundEvents:
 
         def current() -> bool:
             return (
-                self.page.state == "event"
+                job is self.clip_job
+                and self.page.state == "event"
                 and self.event == key
                 and generation == self.page.generation
             )
@@ -196,7 +198,7 @@ class SoundEvents:
                 self.page.feedback.show_message(import_message(exc, clip=True))
 
         def finish() -> None:
-            if generation == self.page.generation:
+            if self.clip_job is job:
                 self.clip_job = None
                 self.page.update_controls()
 

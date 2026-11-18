@@ -15,6 +15,7 @@ from pathlib import Path
 
 from music.audio import _digest
 from music.catalogue import atomic_json, library_root
+from music.storage import sync_directory
 from state_lock import locked
 
 _LIMIT = 8192
@@ -71,21 +72,42 @@ def _stamp(path: Path) -> list[int]:
     return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, _change_time(path, info)]
 
 
-def _read(path: Path) -> dict:
+def _valid_row(key: str, row: object) -> bool:
+    if not _HEX.fullmatch(key) or not isinstance(row, list) or len(row) != 3:
+        return False
+    stamp, digest, seal = row
+    return (
+        isinstance(stamp, list)
+        and len(stamp) == 5
+        and all(type(value) is int for value in stamp)
+        and isinstance(digest, str)
+        and _HEX.fullmatch(digest) is not None
+        and seal == _seal(key, stamp, digest)
+    )
+
+
+def _read(path: Path) -> dict | None:
+    """None means corrupt. I/O errors must never authorize replacing unreadable state."""
     try:
         with path.open("rb") as stream:
             raw = stream.read(_MAX_BYTES + 1)
         if len(raw) > _MAX_BYTES:
-            return {}
+            return None
         rows = json.loads(raw)
-        if isinstance(rows, dict) and len(rows) <= _LIMIT:
+        if (
+            isinstance(rows, dict)
+            and len(rows) <= _LIMIT
+            and all(_valid_row(key, row) for key, row in rows.items())
+        ):
             return rows
-    except (OSError, ValueError, RecursionError):
+    except FileNotFoundError:
+        return {}
+    except (ValueError, RecursionError):
         pass
-    return {}
+    return None
 
 
-def _merge(path: Path, changes: dict) -> None:
+def _merge(path: Path, changes: dict) -> dict:
     # Only the short merge/promotion holds the cross-process lock. A busy or
     # read-only profile can still browse using the digests it just computed.
     deadline = time.monotonic() + 1
@@ -93,14 +115,22 @@ def _merge(path: Path, changes: dict) -> None:
         try:
             with locked(path.parent, ".music-digests.lock"):
                 rows = _read(path)
+                if rows is None:
+                    # Recheck under the writer lock before moving anything. Keep one
+                    # diagnostic copy so repeated corruption cannot grow the cache forever.
+                    path.replace(path.with_suffix(".json.corrupt"))
+                    sync_directory(path.parent)
+                    rows = {}
+                if not changes:
+                    return rows
                 for key, row in changes.items():
                     rows.pop(key, None)
                     rows[key] = row
                 atomic_json(path, dict(list(rows.items())[-_LIMIT:]))
-            return
+            return rows
         except OSError as exc:
             if exc.errno not in (errno.EACCES, errno.EAGAIN) or time.monotonic() >= deadline:
-                return
+                return {}
             time.sleep(0.02)
 
 
@@ -110,7 +140,12 @@ def browsing_digests(
 ) -> Iterator[Callable[[Path], str]]:
     profile = root.parent if root.name == "soundtracks" else library_root().parent
     path = profile / "music-digests-v1.json"
-    known = _read(path)
+    try:
+        known = _read(path)
+    except OSError:
+        known = {}
+    if known is None:
+        known = _merge(path, {})
     changes: dict = {}
 
     def lookup(recording: Path) -> str:
@@ -123,14 +158,8 @@ def browsing_digests(
             if not stamp[1] or not stamp[-1]:
                 return _digest(recording)
             row = changes.get(key, known.get(key))
-            if isinstance(row, list) and len(row) == 3 and row[0] == stamp:
-                digest = row[1]
-                if (
-                    isinstance(digest, str)
-                    and _HEX.fullmatch(digest)
-                    and row[2] == _seal(key, stamp, digest)
-                ):
-                    return digest
+            if row is not None and row[0] == stamp:
+                return row[1]
             digest = _digest(recording)
             if _stamp(recording) == stamp:
                 changes[key] = [stamp, digest, _seal(key, stamp, digest)]

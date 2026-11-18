@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt
 from PySide6.QtGui import QImage, QResizeEvent
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 from sleeves import Entry, Layout, Library
 from studio import theme as t
@@ -14,6 +14,7 @@ from studio.pages.base import Page
 from studio.widgets import Button, label, margins
 
 from . import sleeves_work as work
+from .skins_packs import PackBrowser
 from .sleeves_collection import Choice, saved
 from .sleeves_design import Designer
 from .sleeves_editor import Editor
@@ -44,7 +45,6 @@ class SleevesPage(Page):
         self.editor: Editor | None = None
         self.message = ""
         self.retry_action: Callable[[], None] | None = None
-        self.measuring = False
         QApplication.instance().applicationStateChanged.connect(self.activation_changed)
         body = QVBoxLayout(self)
         margins(body, t.XL)
@@ -59,13 +59,18 @@ class SleevesPage(Page):
         self.slide.setDuration(t.MOTION_MS)
         self.slide.setEasingCurve(QEasingCurve.Type.OutCubic)
         body.addWidget(self.stack, 1)
-        self.gallery = Gallery(context.tasks, self.thumbs)
+        self.gallery = Gallery(context, self.thumbs)
         self.stack.addWidget(self.gallery)
+        self.packs = PackBrowser(context, "sleeves")
+        self.stack.addWidget(self.packs)
+        self.packs.back.clicked.connect(self.close_packs)
+        self.gallery.more.clicked.connect(self.open_packs)
         self.gallery.opened.connect(self.open_editor)
         self.gallery.picked.connect(self.stage)
-        self.gallery.colours_needed.connect(self.measure)
         self.status = label("", "small", True)
-        self.controls = QHBoxLayout()
+        self.footer = QWidget()
+        self.controls = QHBoxLayout(self.footer)
+        margins(self.controls, 0)
         self.controls.addWidget(self.status, 1)
         self.retry = Button("Retry")
         self.retry.clicked.connect(self.run_retry)
@@ -80,19 +85,23 @@ class SleevesPage(Page):
         self.apply.clicked.connect(self.apply_pressed)
         for btn in (self.retry, self.reset, self.same, self.undo, self.apply):
             self.controls.addWidget(btn)
-        body.addLayout(self.controls)
+        body.addWidget(self.footer)
         self.update_controls()
 
     def shown(self) -> None:
         self.opened = True
         self.message = ""
-        self.refresh()
-        self.gallery.search.setFocus()
+        if self.stack.currentWidget() is self.packs:
+            self.packs.setFocus()
+        else:
+            self.refresh()
+            self.gallery.search.setFocus()
 
     def activation_changed(self, state: Qt.ApplicationState) -> None:
         if (
             state == Qt.ApplicationState.ApplicationActive
             and self.opened
+            and self.stack.currentWidget() is self.gallery
             and not (self.loading or self.writing or self.saving or self.retry_action)
         ):
             self.message = ""
@@ -120,10 +129,27 @@ class SleevesPage(Page):
         self.snapshot = None
         self.message = ""
         self.retry_action = None
+        if self.stack.currentWidget() is self.packs:
+            return
         if self.opened:
             self.refresh()
         else:
             self.update_controls()
+
+    def open_packs(self) -> None:
+        self.stack.setCurrentWidget(self.packs)
+        self.banner.hide()
+        self.footer.hide()
+        self.packs.load(online=True)
+        self.packs.back.setFocus()
+
+    def close_packs(self) -> None:
+        if self.stack.currentWidget() is self.packs and not self.packs.job:
+            self.stack.setCurrentWidget(self.gallery)
+            self.banner.show()
+            self.footer.show()
+            if self.opened:
+                self.refresh()
 
     def refresh(self) -> None:
         self.generation += 1
@@ -149,7 +175,7 @@ class SleevesPage(Page):
                 if slot in self.pending:
                     self.load_pick(slot)
             self.update_controls()
-            if self.opened and not self.editor:
+            if self.opened and self.stack.currentWidget() is self.gallery:
                 self.gallery.search.setFocus()
 
         def failed(exc: Exception) -> None:
@@ -163,31 +189,6 @@ class SleevesPage(Page):
         job = self.ctx.tasks.start(lambda _: work.inspect(lib, game, config))
         job.result.connect(ready)
         job.error.connect(failed)
-
-    def measure(self) -> None:
-        if not self.snapshot or self.measuring:
-            return
-        missing = [
-            item
-            for item in self.snapshot.items
-            if not item.family and item.key not in self.gallery.measured
-        ]
-        if not missing:
-            return
-        self.measuring = True
-        thumbs = self.thumbs
-        job = self.ctx.tasks.start(lambda worker: thumbs.colours(missing, worker))
-
-        def ready(colours: dict[Path, str]) -> None:
-            self.gallery.measured.update(colours)
-            self.gallery.filter()
-
-        def done() -> None:
-            self.measuring = False
-
-        job.result.connect(ready)
-        job.error.connect(lambda _: self.ctx.notify("Could not read a saved sleeve’s colours."))
-        job.finished.connect(done)
 
     def update_controls(self) -> None:
         available = bool(self.snapshot and not (self.writing or self.saving or self.loading))
@@ -238,7 +239,11 @@ class SleevesPage(Page):
         elif not caption and changed:
             caption = "Game files changed. Reapply your saved sleeves to restore them."
         elif not caption:
-            caption = "Changes take effect next time you start EDOPro."
+            caption = (
+                f"Current look · {self.snapshot.active_name}"
+                if self.snapshot and self.snapshot.active_name
+                else "Changes take effect next time you start EDOPro."
+            )
         self.status.setText(caption)
         self.retry.setVisible(
             not self.loading and (bool(self.retry_action) or not self.install.ready)
@@ -382,7 +387,10 @@ class SleevesPage(Page):
         self.slide.start()
 
     def escape(self) -> bool:
-        if self.saving or self.writing:
+        if self.saving or self.writing or self.packs.job:
+            return True
+        if self.stack.currentWidget() is self.packs:
+            self.close_packs()
             return True
         if self.editor:
             self.close_editor()

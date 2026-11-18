@@ -92,7 +92,12 @@ def test_fresh_bundle_game_root_passes_installation_inspection(
 
 @pytest.mark.parametrize("filename", ["release-betb.cdb", "prerelease-cards-rush.cdb"])
 def test_release_database_is_discovered_and_scannable(tmp_path: Path, filename: str) -> None:
-    db = tmp_path / "repositories/beta" / filename
+    other = tmp_path / "repositories/beta" / filename
+    other.parent.mkdir(parents=True)
+    other.touch()
+    assert not config.folder_has_card_databases(str(tmp_path))
+    assert get_db_files(str(tmp_path)) == []
+    db = tmp_path / "repositories/delta-bagooska" / filename
     db.parent.mkdir(parents=True)
     db.touch()
     assert config.folder_has_card_databases(str(tmp_path))

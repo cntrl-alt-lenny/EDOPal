@@ -7,8 +7,10 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 
 from decks import Change, Counts, Finding, Library, Preview, SavedDeck
+from studio.pages.decks_preview_data import PreviewCard, PreviewSection, local_artwork
 
 
 def quantity(n: int, noun: str) -> str:
@@ -27,8 +29,10 @@ def changed_date(stamp: int) -> str:
 
 
 def file_problem(reason: str) -> str:
-    return reason.replace("YDK section or passcode", "deck section or card number").replace(
-        "Binary data in a text file", "The file does not contain a readable list of cards"
+    return (
+        reason.replace("YDK section or passcode", "deck section or card number")
+        .replace("Binary data in a text file", "The file does not contain a readable list of cards")
+        .replace("YDK has no main deck", "The file has no Main Deck")
     )
 
 
@@ -42,6 +46,39 @@ def section_counts(counts: Counts) -> str:
 
 def card_name(preview: Preview, code: int) -> str:
     return preview.cards[code].name if code in preview.cards else f"Unknown card #{code}"
+
+
+def saved_sections(game: Path, preview: Preview, cancel: Event) -> tuple[PreviewSection, ...]:
+    pictures = game / "pics"
+    sections = []
+    for codes in preview.sections:
+        cards: dict[str, PreviewCard] = {}
+        for code, copies in Counter(codes).items():
+            if cancel.is_set():
+                return ()
+            card = preview.cards.get(code)
+            name = card_name(preview, code)
+            existing = cards.get(name)
+            types = Counter(dict(existing.types)) if existing else Counter()
+            types[card.kind.title() if card else "Unknown type"] += copies
+            artwork = (existing.artwork if existing else None) or local_artwork(pictures, (code,))
+            detail = "Missing from game data"
+            if card:
+                rating = (
+                    f"{card.rating_kind} {card.rating}"
+                    if card.rating_kind and card.rating is not None
+                    else ""
+                )
+                detail = " · ".join(filter(None, (card.type_line, rating, card.attribute.title())))
+            cards[name] = PreviewCard(
+                name,
+                copies + (existing.copies if existing else 0),
+                artwork,
+                tuple(types.items()),
+                existing.detail if existing else detail,
+            )
+        sections.append(PreviewSection(tuple(cards.values())))
+    return tuple(sections)
 
 
 def breakdown(preview: Preview) -> str:
@@ -121,7 +158,17 @@ def finding_text(finding: Finding) -> str:
         return file_problem(finding.reason)
     reason = re.sub(r" \(\d+\)", "", finding.reason)
     if finding.rule == "unresolved":
-        return f"The game has no card information for printed number {finding.ids[0]}."
+        return f"Card #{finding.ids[0]} is missing from this installation’s card data."
+    if finding.rule == "format":
+        return "Check Rush Duel or Speed Duel deck sizes, special cards and room rules in EDOPro."
+    if finding.rule in {"forbidden", "limited", "semi-limited"} and (
+        limit := re.fullmatch(r"(.+) reached copy (\d+), above the (.+) limit of (-?\d+)\.", reason)
+    ):
+        name, copies, banlist, allowed = limit.groups()
+        if int(allowed) <= 0:
+            return f"{name} is forbidden by the {banlist} list."
+        copies_allowed = "1 copy" if allowed == "1" else f"{allowed} copies"
+        return f"{name} has at least {copies} copies. The {banlist} list allows {copies_allowed}."
     return (
         reason.replace("is absent from the whitelist", "is outside this list’s allowed cards")
         .replace(
@@ -132,7 +179,16 @@ def finding_text(finding: Finding) -> str:
         .replace("is incomplete or chained", "could not be confirmed")
         .replace("different alias identities", "conflicting links between printings")
         .replace("Installed IDs with the name", "Printings named")
-        .replace("need client verification", "must be checked in EDOPro")
+        .replace(
+            "Their order affects the client check", "EDOPro applies those limits in deck order"
+        )
+        .replace("the room's allowed pool", "the cards allowed in the room")
+        .replace("The room's allowed pool", "The cards allowed in the room")
+        .replace(
+            "in Extra requires a room allowing Rituals there",
+            "can only go in the Extra Deck if the room allows Ritual Monsters there",
+        )
+        .replace("across sections", "across the Main, Extra and Side Decks")
     )
 
 

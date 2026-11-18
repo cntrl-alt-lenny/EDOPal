@@ -6,7 +6,7 @@ import argparse
 from collections import defaultdict
 from pathlib import Path
 
-from music.audio import FORMATS
+from music.audio import FORMATS, _digest
 from music.catalogue import LOCAL, SCENES, catalog, library_root
 from music.discovery import physical_tracks
 
@@ -18,7 +18,7 @@ def report(installation: Path, root: Path) -> str:
     }
     unassigned = []
     for scene in SCENES:
-        for row in physical_tracks(installation, scene, root, games):
+        for row in physical_tracks(installation, scene, root, games, digest_file=_digest):
             if row.game not in seen:
                 seen[row.game] = {s: set() for s in SCENES}
             seen[row.game][scene].add(row.digest)

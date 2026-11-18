@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QPixmap, QResizeEvent
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
@@ -21,12 +21,18 @@ SCENES = {"Main menu": "menu", "Deck editor": "deck", "Duel field": "duel"}
 
 
 class Canvas(QWidget):
+    resized = Signal()
+
     def __init__(self) -> None:
         super().__init__()
         self.pix = QPixmap()
         self.message = "Preparing preview…"
         self.setMinimumSize(1, t.TILE_H)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.resized.emit()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         p = QPainter(self)
@@ -92,7 +98,8 @@ class Preview(QWidget):
         self.turn.toggled.connect(self._turn)
         turn.addWidget(self.turn)
         self.caption = label("", "muted", True)
-        turn.addWidget(self.caption, 1)
+        turn.addWidget(self.caption)
+        turn.addStretch()
         body.addLayout(turn)
         self.palette = Panel(t.MD)
         line = QHBoxLayout()
@@ -111,6 +118,7 @@ class Preview(QWidget):
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self._start)
+        self.canvas.resized.connect(self.refresh)
 
     def _turn(self, on: bool) -> None:
         self.turn.setText("Opponent’s turn" if on else "Your turn")
@@ -152,7 +160,8 @@ class Preview(QWidget):
             if self.theme.wallpaper == "inherit"
             else "Theme preview"
         )
-        self.palette.setVisible(not pack)
+        self.palette.setVisible(not pack and not self.maker)
+        self.caption.setVisible(not self.maker or self.theme.wallpaper == "inherit")
         for chip, key in zip(self.chips, BASE, strict=True):
             chip.setStyleSheet(f"background:{getattr(self.theme, key)}; border-radius:{t.XS}px;")
         width = max(320, min(1600, self.canvas.width(), self.canvas.height() * 8 // 5))
@@ -167,7 +176,7 @@ class Preview(QWidget):
             self.highlight,
             width,
         )
-        self.timer.start(t.SM)
+        self.timer.start(0)
 
     def _render(self, frame: Frame, worker: WorkerContext) -> QImage:
         if frame.look.pack and not frame.maker:
@@ -206,13 +215,19 @@ class Preview(QWidget):
 
     def _finish(self, frame: Frame, image: QImage, message: str) -> None:
         self.running = False
-        if frame == self.wanted:
+        current = self.wanted
+        if frame == current or (
+            current
+            and frame.maker
+            and current.maker
+            and frame.look == current.look
+            and frame.game == current.game
+            and frame.scene == current.scene
+            and not image.isNull()
+        ):
+            # Continuous colour drags should still paint completed frames between edits.
             self.completed = frame
             self.canvas.message = message
             self.canvas.pix = QPixmap.fromImage(image)
             self.canvas.update()
         self._start()
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        self.refresh()

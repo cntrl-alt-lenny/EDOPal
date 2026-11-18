@@ -92,7 +92,7 @@ class Overview(QWidget):
 
         self.mix = Button("Mix your own", "secondary", "settings")
         self.saved = Button("Saved sets", "quiet", "library")
-        self.downloads = Button("Browse downloads", "quiet", "download")
+        self.downloads = Button("Downloads", "quiet", "download")
         self.chants = Button("Card chants", "quiet", "sounds")
         self.sets_heading = SectionHeader("Pick a set")
         self.tools = QGridLayout()
@@ -102,6 +102,7 @@ class Overview(QWidget):
         shortcuts = button_row(self.saved, self.downloads, self.chants)
         shortcuts.insertStretch(0, 1)
         self.tool_strip.setLayout(shortcuts)
+        self.columns = 0
         self.compact_tools = False
         self.place_tools(False)
         body.addLayout(self.tools)
@@ -321,16 +322,14 @@ class Feedback(Panel):
         row.setSpacing(t.SM)
         self.copy = label("", "notice", True)
         row.addWidget(self.copy, 1)
-        self.retry = Button("Retry", "secondary")
         self.dismiss = Button("Dismiss", "quiet")
-        row.addLayout(button_row(self.retry, self.dismiss))
+        row.addWidget(self.dismiss)
         self.body.addLayout(row)
         self.hide()
 
-    def show_message(self, message: str, retry: bool = False, pending: bool = False) -> None:
+    def show_message(self, message: str, pending: bool = False) -> None:
         self.copy.setText(message)
         self.copy.setToolTip("")
-        self.retry.setVisible(retry)
         self.dismiss.setVisible(not pending)
         self.setVisible(bool(message))
 
@@ -349,7 +348,7 @@ class NameView(InlineView):
         form.body.addWidget(name_label)
         form.body.addWidget(self.name)
         self.submit = Button("Save mix", "primary", "check")
-        form.body.addWidget(self.submit, 0, Qt.AlignmentFlag.AlignLeft)
+        form.body.addWidget(self.submit, 0, Qt.AlignmentFlag.AlignRight)
         self.body.addWidget(form)
         self.body.addStretch(1)
         self.summary = label("", "body", True)

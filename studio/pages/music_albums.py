@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 import music_library as engine
+from content.media import Origin
 from music.discovery import Track
 from studio import theme as t
 from studio.tasks import WorkerContext
@@ -38,6 +39,10 @@ if TYPE_CHECKING:
     from .music import MusicPage
 
 
+def credit_text(origin: Origin) -> str:
+    return f"{origin.author} · {origin.license}\n{origin.attribution}\n{origin.source_url}"
+
+
 class AlbumHero(RecordHero):
     def __init__(self, page: MusicPage, album: Album) -> None:
         super().__init__(
@@ -47,8 +52,8 @@ class AlbumHero(RecordHero):
             "music",
         )
         self.album, self.pix = album, QPixmap()
-        if album.game.cover_page:
-            path = t.ASSETS / "music/detail" / (album.game.id + ".png")
+        if album.cover or album.game.cover_page:
+            path = album.cover or t.ASSETS / "music/detail" / (album.game.id + ".png")
 
             def read(_: WorkerContext) -> QImage:
                 reader = QImageReader(str(path))
@@ -187,9 +192,12 @@ class AlbumViews:
             return
         body = p.screen("album", self.album_back)
         hero = AlbumHero(p, a)
+        body.addWidget(hero)
+        if a.cover_origin:
+            body.addWidget(label("Cover · " + credit_text(a.cover_origin), "muted", True))
         if not a.tracks:
             hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            body.addWidget(hero, 1)
+            body.setStretchFactor(hero, 1)
             panel = Panel(t.LG)
             prompt = label(
                 "No recordings yet. Add files from your collection to this album.", "body", True
@@ -200,7 +208,6 @@ class AlbumViews:
             p.imports.undo_creation(body, self.key)
             add.setFocus()
             return
-        body.addWidget(hero)
         head = row(
             label("Recordings", "subheading"),
             action("Add files", partial(p.imports.files, self.key), icon="folder"),
@@ -221,9 +228,17 @@ class AlbumViews:
         body.addWidget(self.tracks, 1)
         body.addWidget(p.preview)
         p.preview.show()
-        self.tracks.currentCellChanged.connect(
-            lambda i, *_: p.preview.select(a.tracks[i].path if i >= 0 else None)
-        )
+        credit = label("", "muted", True)
+        body.addWidget(credit)
+
+        def selected(i: int) -> None:
+            track = a.tracks[i] if i >= 0 else None
+            origin = track.origin if track else None
+            credit.setText(credit_text(origin) if origin else "")
+            credit.setVisible(origin is not None)
+            p.preview.select(track.path if track else None)
+
+        self.tracks.currentCellChanged.connect(selected)
         self.tracks.cellActivated.connect(lambda *_: p.preview.toggle())
         index = next(
             (
@@ -368,9 +383,11 @@ class AlbumViews:
         footer.body.addWidget(
             label("Changes take effect next time you start EDOPro.", "body", True)
         )
-        self.undo = action("Undo last edit", partial(self.recover, False))
+        self.undo = action("Undo last change", partial(self.recover, False))
         self.restore = action("Restore original music", partial(self.recover, True))
+        self.undo.setVisible(scene.undo)
         self.undo.setEnabled(scene.undo)
+        self.restore.setVisible(scene.restore)
         self.restore.setEnabled(scene.restore)
         footer.body.addLayout(row(self.undo, self.restore))
         footer.body.addWidget(
@@ -380,6 +397,7 @@ class AlbumViews:
                 True,
             )
         )
+        footer.setVisible(scene.undo or scene.restore)
         layout.addWidget(footer)
         self.list.currentCellChanged.connect(self.update_actions)
         self.list.setCurrentCell(min(self.selected, len(scene.tracks) - 1), 0)

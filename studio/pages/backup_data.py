@@ -146,6 +146,20 @@ def version_text(size: int, stamp: int | None) -> str:
     return f"{size:,} B, {date_text(stamp)}"
 
 
+def collision_note(item: backup.Item) -> str:
+    if not item.detail:
+        return ""
+    if item.detail == "incoming names collide":
+        return "Two items in the backup would get the same name here"
+    if item.detail.startswith("ambiguous destination names: "):
+        names = item.detail.removeprefix("ambiguous destination names: ")
+        return f"Several names here match the backup name ({names})"
+    if item.existing_path and item.existing_path != item.source:
+        name = display_name(item.existing_path).split(" / ", 1)[-1]
+        return f"Name spelling differs (here: {name})"
+    return "Folder or file spelling differs"
+
+
 def restore_review(plan: backup.Plan, cancel: Cancel = None) -> Review:
     groups: dict[str, list[Row]] = {key: [] for key in RESTORE_GROUPS}
     entries = {entry.path: entry for entry in plan.manifest.entries}
@@ -155,15 +169,12 @@ def restore_review(plan: backup.Plan, cancel: Cancel = None) -> Review:
     for item in plan.items:
         check(cancel)
         entry = entries[item.source]
-        case_note = "Name spelling differs" if item.detail else ""
-        if item.detail and item.existing_path and item.existing_path != item.source:
-            spelling = display_name(item.existing_path).split(" / ", 1)[-1]
-            case_note = f"Name spelling differs (here: {spelling})"
+        case_note = collision_note(item)
         clashes += bool(case_note)
         writes += item.action != "skip"
         action = restore_action(item, entry.category)
         detail = f"Backup · {version_text(entry.size, entry.modified_at)}"
-        names = item.source.partition("/")[2]
+        names = f"Backup file · {item.source.partition('/')[2]}"
         if item.existing_path and item.existing_path != item.source:
             names += f"\nHere · {item.existing_path.partition('/')[2]}"
         if item.action != "skip" and item.target != item.source and entry.category != "preferences":
@@ -183,13 +194,15 @@ def restore_review(plan: backup.Plan, cancel: Cancel = None) -> Review:
                 else:
                     values_here, values_backup = item.mine or "(blank)", item.theirs or "(blank)"
                 names = f"Here · {values_here}\nBackup · {values_backup}"
+                if item.action != "skip" and item.target != CONF:
+                    names += f"\nSeparate copy · {item.target.partition('/')[2]}"
                 action = f"{action}  ·  Here: {values_here} / Backup: {values_backup}"
             elif item.existing_path:
                 stat = plan.install.target(item.existing_path).stat()
                 here = version_text(stat.st_size, int(stat.st_mtime))
                 detail = f"Here · {here}   |   {detail}"
             else:
-                detail = f"Here · no matching item   |   {detail}"
+                detail = f"Backup name overlaps another name   |   {detail}"
         annotation = "  ·  ".join(filter(None, (case_note, action)))
         groups[item.status].append(Row(display_name(item.source), detail, annotation, names))
     return Review(groups, writes, clashes, preference_conflicts)

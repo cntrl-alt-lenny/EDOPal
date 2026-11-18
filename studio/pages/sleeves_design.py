@@ -1,5 +1,6 @@
 import random
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import QGridLayout, QSlider, QWidget
 
@@ -58,6 +59,7 @@ class Designer(Editor):
         self.field("Print colours", self.inks)
         self.inks.set_colours(PALETTES[self.palette.currentText()])
         self.inks.changed.connect(self.custom_colours)
+        self.inks.editing.connect(self.show_ink_control)
         self.parameters = QWidget()
         self.form.addWidget(self.parameters)
         self.sliders: dict[str, tuple[QSlider, int]] = {}
@@ -88,6 +90,10 @@ class Designer(Editor):
             self.seed = recipe.seed
         self.update_preview()
         self.save.clicked.connect(self.save_design)
+
+    def show_ink_control(self, slider: QWidget) -> None:
+        # Scroll after the newly expanded controls have received their final geometry.
+        QTimer.singleShot(0, slider, lambda: self.scroll.ensureWidgetVisible(slider, 0, t.SM))
 
     def pattern_changed(self) -> None:
         old = self.parameters

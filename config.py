@@ -1,5 +1,5 @@
 """
-Configuration management for EDOPro HD Cards Downloader.
+Configuration management for EDOPal.
 
 Loads settings from (in priority order):
   1. CLI arguments (highest priority)
@@ -15,15 +15,21 @@ import sys
 import time
 from collections.abc import Iterator
 
+from card_databases import iter_db_files
+
+# Only these installed HD prints need refreshing when upgrading from hd-v2.
+CORRECTED_HD_PRINTS = {
+    "504700040": "23401840",  # Senju of the Thousand Hands
+    "504700142": "83011278",  # Mystic Tomato
+    "511000824": "83555667",  # Ring of Destruction, flames
+    "511000825": "83555666",  # Ring of Destruction, grenades
+    "511002992": "14878871",  # Rescue Cat
+    "511003023": "80604092",  # Ultimate Offering
+}
+HISTORICAL_IGNIS_PRINT = 88264988  # CDN serves modern Red-Eyes text under the historical ID.
+
 BUILTIN_MANUAL_MAP: dict[str, str] = {
-    # When multiple suffix variants (GOAT / Pre-Errata) share the same base name,
-    # suffix stripping returns all official IDs but always tries them in the same
-    # order — so every variant ends up with the first artwork.  These overrides pin
-    # each variant to a distinct official artwork.
-    #
-    # Ring of Destruction (Pre-Errata)
-    "511000824": "83555666",
-    "511000825": "83555667",
+    **CORRECTED_HD_PRINTS,
     # Crush Card Virus (Pre-Errata)
     "511000822": "57728570",
     "511000823": "57728571",
@@ -32,7 +38,6 @@ BUILTIN_MANUAL_MAP: dict[str, str] = {
     "511006005": "68540059",
     # Rescue Cat — GOAT + Pre-Errata
     "504700179": "14878871",
-    "511002992": "14878872",
 }
 
 DEFAULTS = {
@@ -68,7 +73,7 @@ CONFIG_FILENAME = "config.json"
 # Keep this directory name for compatibility with existing packaged installs.
 # The name players see. The data folder below keeps its original name so
 # existing settings, caches and soundtrack libraries are found unchanged.
-APP_NAME = "EDOPro Studio"
+APP_NAME = "EDOPal"
 APP_DATA_NAME = "EDOPro HD Sync"
 
 
@@ -206,9 +211,11 @@ def folder_has_card_databases(path: str, *, deadline: float | None = None) -> bo
     get_db_files() would come back empty, this has to say no, or the app would
     happily "find" a folder it then cannot sync.
     """
-    from card_databases import iter_db_files
-
-    return bool(path and os.path.isdir(path) and next(iter_db_files(path, deadline=deadline), None))
+    if not path or not os.path.isdir(path):
+        return False
+    with contextlib.suppress(OSError):
+        return next(iter_db_files(path, deadline=deadline), None) is not None
+    return False
 
 
 def looks_like_edopro_folder(path: str) -> bool:
@@ -486,6 +493,22 @@ def _found_installations(first_guesses: list[str] | None) -> Iterator[tuple[int,
                 yield score, path
 
 
+def installation_roots(path: str) -> tuple[str, ...]:
+    """Candidate game-data roots belonging to a single selection, in preference order."""
+    if sys.platform != "darwin" or not path.lower().endswith(".app"):
+        return (path,)
+    contents = os.path.join(path, "Contents")
+    if not os.path.isfile(os.path.join(contents, "Info.plist")):
+        return ()
+    resources = os.path.join(contents, "Resources")
+    return (
+        resources,
+        os.path.join(resources, "ProjectIgnis"),
+        os.path.join(contents, "MacOS"),
+        os.path.dirname(path),
+    )
+
+
 def find_edopro_folder(first_guesses: list[str] | None = None) -> str | None:
     """Stop at the first ready installation to keep normal startup fast."""
     deadline = time.monotonic() + _SEARCH_TIME_BUDGET_SECONDS
@@ -513,21 +536,7 @@ def find_edopro_folder(first_guesses: list[str] | None = None) -> str | None:
     for candidate in candidates():
         if time.monotonic() >= deadline:
             break
-        path = os.path.abspath(candidate)
-        roots = [path]
-        bundle = sys.platform == "darwin" and path.lower().endswith(".app")
-        if bundle:
-            contents = os.path.join(path, "Contents")
-            if not os.path.isfile(os.path.join(contents, "Info.plist")):
-                continue
-            resources = os.path.join(contents, "Resources")
-            roots = [
-                resources,
-                os.path.join(resources, "ProjectIgnis"),
-                os.path.join(contents, "MacOS"),
-                os.path.dirname(path),
-            ]
-        for root in roots:
+        for root in installation_roots(os.path.abspath(candidate)):
             key = os.path.normcase(root)
             if key in seen:
                 continue
@@ -547,8 +556,8 @@ def find_edopro_folders(first_guesses: list[str] | None = None) -> list[str]:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="EDOPro HD Cards Downloader",
-        description="Automatically download missing HD card artwork for EDOPro.",
+        prog=APP_NAME,
+        description="Your unofficial companion for EDOPro. Download missing HD card artwork.",
     )
     p.add_argument(
         "--force",
@@ -652,12 +661,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Only sync cards used in your EDOPro deck folder (much faster).",
     )
     interface = p.add_mutually_exclusive_group()
-    interface.add_argument("--legacy-gui", action="store_true", help="Open the original Tk window.")
+    interface.add_argument(
+        "--legacy-gui", action="store_true", help="Open the Tk window (source only)."
+    )
+    interface.add_argument(
+        "--gui-smoke-test", action="store_true", help="Test the real Qt window offline and exit."
+    )
     interface.add_argument(
         "--gui",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help=("Open EDOPro Studio. The packaged app shows it by default; use --no-gui to skip it."),
+        help=(f"Open {APP_NAME}. The packaged app shows it by default; use --no-gui to skip it."),
     )
     p.add_argument(
         "--prune",

@@ -363,7 +363,7 @@ class _App:
             raise GuiUnavailable(str(exc)) from exc
 
         try:
-            self.root.title(f"EDOPro HD Sync · {version}")
+            self.root.title(f"{config.APP_NAME} · {version}")
             self.content_width = min(CONTENT_WIDTH, max(1, self.root.winfo_screenwidth() - 20))
             self.root.resizable(False, False)
             _apply_style(self.root)
@@ -461,7 +461,7 @@ class _App:
             header,
             image=self._image("cards"),
             compound="left",
-            text="  EDOPro HD Sync",
+            text=f"  {config.APP_NAME}",
             style="Brand.TLabel",
         ).grid(row=0, column=0, sticky="w")
         ttk.Button(

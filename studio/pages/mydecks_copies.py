@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QSizePolicy
 
@@ -11,8 +12,10 @@ from decks.sharing import MAX_CODE
 from studio import theme as t
 from studio.pages.mydecks_logic import card_name
 from studio.pages.mydecks_widgets import Contents, Screen, button
-from studio.tasks import TaskRunner
+from studio.tasks import Job, TaskRunner, WorkerContext
 from studio.widgets import Hero, Panel, label
+
+CODE_HELP = "Paste a sharing code to review the Main, Extra and Side decks."
 
 
 class CopyReview(Screen):
@@ -20,7 +23,7 @@ class CopyReview(Screen):
         self,
         lib: Library,
         runner: TaskRunner,
-        back: Callable,
+        back: Callable[[], object],
         save: Callable[[str, Preview], None],
         deck: SavedDeck | None = None,
     ) -> None:
@@ -28,6 +31,9 @@ class CopyReview(Screen):
         self.lib, self.runner, self.save = lib, runner, save
         self.reviewed: Preview | None = None
         self.contents: Contents | None = None
+        self.decode_job: Job | None = None
+        self.duplicate = ""
+        self.root_names = {d.name.casefold() for d in lib.decks if d.folder == Path(".")}
         self.form = Panel(t.LG)
         self.body.addWidget(self.form)
         self.message = label("", "body", True)
@@ -38,9 +44,7 @@ class CopyReview(Screen):
             self.code.setAccessibleName("Sharing code")
             self.code.setPlaceholderText("Paste a deck sharing code")
             self.preview_btn = button("Preview deck", self.decode, "secondary", "deck")
-            self.message.setText(
-                "Paste the sharing code from another player to review all three sections."
-            )
+            self.message.setText(CODE_HELP)
             row = QHBoxLayout()
             row.addWidget(self.code, 1)
             row.addWidget(self.preview_btn)
@@ -58,12 +62,7 @@ class CopyReview(Screen):
         row.addWidget(self.name, 1)
         row.addWidget(self.save_btn)
         self.form.body.addLayout(row)
-        self.note = label(
-            ("Your original deck stays in its folder. " if deck else "")
-            + "The new copy appears next time you start EDOPro. You can remove the copy after saving.",
-            "muted",
-            True,
-        )
+        self.note = label("", "muted", True)
         self.form.body.addWidget(self.note)
         self.save_btn.setEnabled(False)
         self.name.textChanged.connect(self.enable_save)
@@ -76,6 +75,7 @@ class CopyReview(Screen):
         )
         self.body.addWidget(self.guide, 1)
         self.guide.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.enable_save()
         if deck:
             repair = preview_repair(deck.preview, lib.catalog)
             lines = [
@@ -96,13 +96,22 @@ class CopyReview(Screen):
                 self.enable_save()
 
     def enable_save(self) -> None:
-        self.save_btn.setEnabled(bool(self.reviewed and self.name.text().strip()))
+        name = self.name.text().strip()
+        self.save_btn.setEnabled(bool(self.reviewed and name))
+        notes = []
+        if self.reviewed and self.duplicate:
+            notes.append(f"These cards are already saved in {self.duplicate}.")
+        if self.reviewed and name.casefold() in self.root_names:
+            notes.append("A deck has this name. The new copy will get a numbered filename.")
+        self.note.setText(" ".join(notes) or "The new copy appears next time you start EDOPro.")
 
     def submit(self) -> None:
         if self.save_btn.isEnabled() and self.reviewed:
             self.save(self.name.text(), self.reviewed)
 
     def invalidate(self) -> None:
+        self.leave()
+        self.duplicate = ""
         self.reviewed = None
         self.enable_save()
         if self.contents:
@@ -111,27 +120,68 @@ class CopyReview(Screen):
             self.contents.deleteLater()
             self.contents = None
         self.guide.show()
+        self.preview_btn.setEnabled(True)
+        self.message.setText(CODE_HELP)
+
+    def leave(self) -> None:
+        if self.decode_job is not None:
+            self.decode_job.cancel()
+            self.decode_job = None
 
     def decode(self) -> None:
         self.invalidate()
-        try:
-            reviewed = preview_ydke(self.code.text(), self.lib.catalog)
-        except ValueError:
+        code = self.code.text()
+        if len(code) > MAX_CODE:
             self.message.setText(
-                "This sharing code could not be read. Copy the entire code starting with ydke:// and try again."
+                "This sharing code is too large. Check what you copied and try again."
             )
             return
-        self.message.setText(
-            "Review the cards below, then name your new copy."
-            + (
-                " Some printed numbers are missing from your game’s card data."
-                if reviewed.unresolved
-                else ""
+        library = self.lib
+        self.preview_btn.setEnabled(False)
+        self.message.setText("Reading sharing code…")
+
+        def work(worker: WorkerContext) -> tuple[Preview, str]:
+            reviewed = preview_ydke(code, library.catalog)
+            for deck in library.decks:
+                if worker.cancel.is_set():
+                    break
+                if deck.preview and deck.preview.sections == reviewed.sections:
+                    return reviewed, deck.name
+            return reviewed, ""
+
+        self.decode_job = job = self.runner.start(work)
+
+        def ready(result: tuple[Preview, str]) -> None:
+            if self.decode_job is not job:
+                return
+            reviewed, self.duplicate = result
+            self.message.setText(
+                "Review the cards below, then name your new copy."
+                + (
+                    " Some cards are missing from your game’s card data."
+                    if reviewed.unresolved
+                    else ""
+                )
             )
-        )
-        self.display(reviewed)
-        self.name.setFocus()
-        self.name.selectAll()
+            self.display(reviewed)
+            if self.isVisible():
+                self.name.setFocus()
+                self.name.selectAll()
+
+        def failed(_: Exception) -> None:
+            if self.decode_job is job:
+                self.message.setText(
+                    "This sharing code could not be read. Copy the entire code starting with ydke:// and try again."
+                )
+
+        def finished() -> None:
+            if self.decode_job is job:
+                self.decode_job = None
+                self.preview_btn.setEnabled(True)
+
+        job.result.connect(ready)
+        job.error.connect(failed)
+        job.finished.connect(finished)
 
     def display(self, reviewed: Preview) -> None:
         self.reviewed = reviewed

@@ -118,7 +118,7 @@ class StartupPromptTests(unittest.TestCase):
             asyncio.run(main.run(cfg))
 
         scan_mock.assert_called_once_with(expected_dbs, unreadable=[])
-        self.assertTrue(os.path.isdir(os.path.join(valid_path, "pics")))
+        self.assertFalse(os.path.exists(os.path.join(valid_path, "pics")))
         with open(config_path, encoding="utf-8") as file_obj:
             saved = json.load(file_obj)
         self.assertEqual(saved["edopro_path"], os.path.abspath(valid_path))

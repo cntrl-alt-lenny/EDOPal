@@ -43,8 +43,9 @@ class Editor(QWidget):
         self.preview = Preview()
         columns.addWidget(self.preview, 5)
         panel = self.panel = Panel(t.LG)
+        panel.setMaximumWidth(t.TILE_SIZE[0] * 4)
         columns.addWidget(panel, 6)
-        scroll = QScrollArea()
+        self.scroll = scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(

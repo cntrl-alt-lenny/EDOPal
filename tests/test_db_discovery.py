@@ -26,10 +26,12 @@ class DbDiscoveryTests(unittest.TestCase):
         prerelease = self.touch(
             os.path.join("repositories", "delta-bagooska", "prerelease-loch.cdb")
         )
+        release = self.touch(os.path.join("repositories", "delta-bagooska", "release-betb.cdb"))
+        self.touch(os.path.join("repositories", "other", "release-unrelated.cdb"))
 
         self.assertEqual(
             main.get_db_files(self.edopro_root),
-            [root_db, expansion_db, repo_delta_db, prerelease],
+            [prerelease, release, root_db, expansion_db, repo_delta_db],
         )
 
 

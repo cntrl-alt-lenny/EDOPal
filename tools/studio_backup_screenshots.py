@@ -162,6 +162,12 @@ def capture_backup(
         click("Preview changes")
         settle(lambda: page.plan is not None)
         shot("backup-05-preview")
+        click("Item details")
+        shot("backup-18-conflict-details")
+        page.escape()
+        click("Use backup")
+        settle(lambda: page.plan is not None and page.plan.policy == "take_theirs")
+        shot("backup-19-use-backup")
         click("Keep both")
         settle(lambda: page.plan is not None and page.plan.policy == "keep_both")
         shot("backup-06-keep-both")
@@ -240,5 +246,37 @@ def capture_backup(
         ctx.set_installation(Installation(str(game)))
         home()
         shot("backup-15-installation-setting-up")
+        click("Save a backup")
+        settle(lambda: isinstance(page.screen, SaveScreen))
+        release_save.clear()
+        stopped_path = root / "Cancelled save.zip"
+        with (
+            patch.object(backup, "create", slow_save),
+            patch.object(QFileDialog, "getSaveFileName", return_value=(str(stopped_path), "")),
+        ):
+            try:
+                click("Choose where to save")
+                settle(lambda: page.writing and page.progress.bar.value() >= 16)
+                click("Cancel")
+            finally:
+                release_save.set()
+            settle(lambda: showing("Stopped"))
+        assert not stopped_path.exists()
+        shot("backup-20-cancelled")
+        new_game = game.parent / "Steam Deck"
+        new_game.mkdir()
+        ctx.set_installation(Installation(str(new_game)))
+        home()
+        click("Save a backup")
+        settle(lambda: isinstance(page.screen, SaveScreen))
+        shot("backup-21-nothing-to-save")
+        click("Back")
+        home()
+        path = incoming
+        click("Restore")
+        settle(lambda: isinstance(page.screen, ArchiveScreen))
+        click("Preview changes")
+        settle(lambda: page.plan is not None)
+        shot("backup-22-no-conflicts")
         ctx.set_installation(Installation())
         shot("backup-16-no-installation")

@@ -7,8 +7,9 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QHBoxLayout
 
 import config
+from studio import theme as t
 from studio.context import AppContext
-from studio.widgets import Button, Panel, label
+from studio.widgets import Button, Panel, glyph, label
 
 PROJECT = "https://github.com/cntrl-alt-lenny/edopro-hd-cards"
 
@@ -36,9 +37,15 @@ def actions(*buttons: Button) -> QHBoxLayout:
 
 def add_about(ctx: AppContext, panel_for: Callable[[str], Panel]) -> None:
     panel = panel_for(f"{config.APP_NAME}   ·   {ctx.version}")
+    brand = QHBoxLayout()
+    brand.addWidget(glyph("brand", t.BRAND_ICON))
+    brand.addWidget(label("Your unofficial companion for EDOPro.", "subheading", True), 1)
+    panel.body.addLayout(brand)
     panel.body.addWidget(
         label(
-            "An unofficial fan project. It is independent of ProjectIgnis and Konami and has no affiliation with either.",
+            "EDOPal is an independent fan-made companion for EDOPro. EDOPro is a Project Ignis project. "
+            "EDOPal is unaffiliated with Project Ignis, Konami, and Shueisha and has no endorsement from them. "
+            "Yu-Gi-Oh! and related marks belong to their respective rights holders.",
             "body",
             True,
         )

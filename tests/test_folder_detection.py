@@ -49,6 +49,15 @@ class FolderRuleTests(unittest.TestCase):
         open(os.path.join(path, "cards.delta.cdb"), "wb").close()
         self.assert_agrees(os.path.join(self.root, "repo-only"))
 
+    def test_agrees_on_release_only_update_repository(self) -> None:
+        for filename in ("prerelease-loch.cdb", "release-betb.cdb"):
+            path = os.path.join(self.root, filename, "repositories", "delta-bagooska")
+            os.makedirs(path)
+            open(os.path.join(path, filename), "wb").close()
+            game = os.path.join(self.root, filename)
+            self.assertTrue(config_module.folder_has_card_databases(game))
+            self.assert_agrees(game)
+
     def test_agrees_on_empty_folder(self):
         path = os.path.join(self.root, "empty")
         os.makedirs(path)

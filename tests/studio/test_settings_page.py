@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QPoint, Qt, QUrl
 from PySide6.QtWidgets import QLabel
 from pytestqt.qtbot import QtBot
 
@@ -26,6 +26,30 @@ def control(window: StudioWindow, caption: str, qtbot: QtBot) -> Button:
 
     qtbot.waitUntil(lambda: bool(matches()))
     return matches()[0]
+
+
+def test_about_shows_brand_credits_and_independence(make_window: Callable, qtbot: QtBot) -> None:
+    window = make_window()
+    window.navigate("settings")
+    page = window.current
+    page.tiles["about"].click()
+    qtbot.waitUntil(
+        lambda: any(
+            not w.pixmap().isNull() and w.isVisible() for w in page.detail.findChildren(QLabel)
+        )
+    )
+    lines = [w.text() for w in page.detail.findChildren(QLabel) if w.isVisible()]
+    assert "Your unofficial companion for EDOPro." in lines
+    assert (
+        "EDOPal is an independent fan-made companion for EDOPro. EDOPro is a Project Ignis project. "
+        "EDOPal is unaffiliated with Project Ignis, Konami, and Shueisha and has no endorsement from them. "
+        "Yu-Gi-Oh! and related marks belong to their respective rights holders."
+    ) in lines
+    assert not page.hero.isVisible()
+    marks = [
+        w.pixmap().toImage() for w in page.detail.findChildren(QLabel) if not w.pixmap().isNull()
+    ]
+    assert window.windowIcon().pixmap(38, 38).toImage() in marks
 
 
 def test_both_editors_save_all_choices_across_relaunch(make_window: Callable, qtbot: QtBot) -> None:
@@ -112,6 +136,7 @@ def test_storage_remove_clear_busy_and_failure(
     make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
+    window.resize(960, 600)
     window.navigate("settings")
     page = window.current
     for name in ("blue-grid", "gold"):
@@ -144,11 +169,43 @@ def test_storage_remove_clear_busy_and_failure(
         mp.setattr(page.cache, "clear", Mock(side_effect=OSError("Pack is in use")))
         page.clear_packs.click()
         qtbot.waitUntil(lambda: "in use" in page.message.text())
+        view = page.detail.viewport()
+        qtbot.waitUntil(lambda: view.rect().contains(page.message.mapTo(view, QPoint())))
         assert not window.ctx.busy
     page.clear_packs.click()
     qtbot.waitUntil(lambda: not page.remove_buttons)
     assert not page.clear_packs.isEnabled()
     assert set(Path(window.ctx.installation.path).rglob("*")) == game_files
+
+
+def test_leave_storage_check_and_return_before_its_first_result(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    window.navigate("settings")
+    page = window.current
+    entered, release = threading.Event(), threading.Event()
+    inspect = settings.inspect_storage
+
+    def read(*args: object) -> settings.Storage:
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(5)
+            raise OSError("Old read")
+        return inspect(*args)
+
+    monkeypatch.setattr(settings, "inspect_storage", read)
+    page.tiles["storage"].click()
+    qtbot.waitUntil(entered.is_set)
+    try:
+        assert window.navigate("cards")
+        assert window.navigate("settings")
+        qtbot.waitUntil(lambda: page.message.text() == "")
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not page.pending)
+    assert page.section == "storage" and page.message.text() == ""
+    assert page.clear_packs.isVisible()
 
 
 def test_update_survives_offline_check_and_restart(

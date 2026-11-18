@@ -1,28 +1,38 @@
 """Offline Skins views for the Studio screenshot gallery."""
 
+import asyncio
+import hashlib
+import json
 import shutil
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import replace
 from functools import cache
+from io import BytesIO
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 import extras
+import sleeves
 import themes
-from content import catalogue
-from content.cache import file_sha256
+from content import catalogue, download, libraries
+from content.cache import PackCache, file_sha256
+from content.catalogue import PackStatus
 from content.download import DownloadError, DownloadFailure, Progress
 from content.manifest import Manifest, Pack, Preview
+from content.media import Changes
 from studio.context import Installation
 from studio.pages.skins import SkinsPage
 from studio.pages.skins_model import preset_id
+from studio.pages.sleeves import SleevesPage
 from studio.shell import StudioWindow
 from studio.tasks import WorkerContext
 from themes.transaction import Store
+from tools.sleeve_contact_sheet import stand_in
 
 
 @cache
@@ -53,6 +63,173 @@ def sample_pack(name: str) -> Pack:
     )
 
 
+def library_archive(kind: str) -> tuple[Pack, bytes]:
+    """A small original illustration with the same manifest and ZIP layout as a release."""
+    data = BytesIO()
+    member = "images/Dusk.png"
+    item = (
+        {"file": member, "title": "Evening lake"}
+        if kind == "wallpaper"
+        else {"file": member, "name": "Evening lake", "tags": ["landscape", "lake"]}
+    )
+    with ZipFile(data, "w") as archive:
+        archive.writestr("pack.json", json.dumps({"items": [item]}))
+        archive.writestr(member, sleeves.png_bytes(stand_in()))
+    raw = data.getvalue()
+    pack = replace(
+        sample_pack("Moon"),
+        id="lakeside-" + kind,
+        kind=kind,
+        title="Lakeside",
+        description="A mountain lake at sunset.",
+        author="Studio demo",
+        license="Demo artwork",
+        attribution="Evening lake, from the Studio illustration collection.",
+        source_url="https://example.invalid/lakeside",
+        sha256=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+    )
+    return pack, raw
+
+
+def capture_library(
+    page: SkinsPage | SleevesPage,
+    shot: Callable[[str], None],
+    settle: Callable[[Callable[[], bool]], None],
+) -> None:
+    browser = page.packs
+    prefix = browser.kind + "-catalogue-"
+    empty = catalogue.Catalogue(Manifest(1, ()), catalogue.CatalogueSource.LIVE)
+    with patch("content.catalogue.fetch_catalogue", return_value=empty):
+        page.gallery.more.click()
+        settle(lambda: not browser.loading)
+        shot(prefix + "empty")
+    offline = catalogue.Catalogue(
+        empty.manifest,
+        catalogue.CatalogueSource.BUNDLED,
+        "Could not reach the catalogue. You can still use your local collection.",
+    )
+    with patch("content.catalogue.fetch_catalogue", return_value=offline):
+        browser.refresh.click()
+        settle(lambda: not browser.loading)
+        shot(prefix + "offline")
+    pack, body = library_archive(browser.kind)
+    newer = replace(pack, id="new-edition", title="Lakeside II", min_app_version="99.0.0")
+    cat = catalogue.Catalogue(Manifest(1, (pack, newer)), catalogue.CatalogueSource.LIVE)
+    with patch("content.catalogue.fetch_catalogue", return_value=cat):
+        browser.refresh.click()
+        settle(lambda: not browser.loading)
+    browser.menu.setCurrentRow(1)
+    shot(prefix + "incompatible")
+    browser.menu.setCurrentRow(0)
+    shot(prefix + "available")
+    release = Event()
+
+    async def stream(
+        session: object,
+        transfer: object,
+        partial: Path,
+        offset: int,
+        progress: download.ProgressCallback,
+        cancel: Event,
+        timeout: float,
+    ) -> int:
+        progress(Progress(len(body) // 2, len(body), 102400))
+        while not release.is_set():
+            await asyncio.sleep(0.01)
+        partial.write_bytes(body)
+        return len(body)
+
+    with (
+        patch("content.download._stream", stream),
+        patch("content.download.create_http_session", return_value=nullcontext()),
+    ):
+        browser.action.click()
+        settle(lambda: browser.progress.value() in (49, 50))
+        shot(prefix + "downloading")
+        browser.cancel.click()
+        settle(lambda: not browser.loading and browser.action.text() == "Resume")
+        shot(prefix + "cancelled")
+        with patch(
+            "content.libraries.make_available", side_effect=ValueError("Unreadable pack image.")
+        ):
+            browser.action.click()
+            settle(lambda: not browser.loading and browser.action.text() == "Retry")
+            shot(prefix + "invalid")
+
+        # Pause the real bridge at its published phase boundaries so short local operations
+        # remain visible long enough to capture.
+        install = libraries.make_available
+        gates = {state: Event() for state in ("verifying", "installing")}
+
+        async def phased(
+            cache: PackCache,
+            status: PackStatus,
+            *,
+            app_version: str,
+            cancel: Event,
+            progress: download.ProgressCallback,
+            phase: Callable[[str], None],
+        ) -> Changes:
+            def report(value: str) -> None:
+                phase(value)
+                if value in gates and not gates[value].wait(15):
+                    raise TimeoutError("Screenshot phase did not advance")
+
+            return await install(
+                cache,
+                status,
+                app_version=app_version,
+                cancel=cancel,
+                progress=progress,
+                phase=report,
+            )
+
+        release.set()
+        with patch("content.libraries.make_available", phased):
+            browser.action.click()
+            for state, gate in gates.items():
+                settle(lambda state=state: browser.feedback.text() == state.capitalize() + "…")
+                shot(prefix + state)
+                gate.set()
+        settle(lambda: not browser.job and not browser.loading and browser.remove.isVisible())
+        shot(prefix + "installed")
+        update = catalogue.Catalogue(
+            Manifest(1, (replace(pack, version="1.1.0"), newer)), cat.source
+        )
+        with patch("content.catalogue.fetch_catalogue", return_value=update):
+            browser.refresh.click()
+            settle(lambda: not browser.loading)
+            shot(prefix + "update")
+        remove = libraries.remove_pack
+        removed = Event()
+
+        def paused_remove(cache: PackCache, pack_id: str) -> Changes:
+            if not removed.wait(15):
+                raise TimeoutError("Screenshot removal did not advance")
+            return remove(cache, pack_id)
+
+        with (
+            patch.object(page.ctx, "confirm", return_value=True),
+            patch("content.libraries.remove_pack", paused_remove),
+        ):
+            browser.remove.click()
+            shot(prefix + "removing")
+            removed.set()
+            settle(lambda: not browser.job and not browser.loading)
+            shot(prefix + "removed")
+        folder = browser.cache.root / ("pack-" + pack.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{pack.version}--{pack.sha256}.zip").write_bytes(body)
+        with patch("content.catalogue.fetch_catalogue", return_value=cat):
+            browser.refresh.click()
+            settle(lambda: browser.action.text() == "Add to library")
+            shot(prefix + "cached")
+        browser.action.click()
+        settle(lambda: not browser.job and not browser.loading)
+    browser.back.click()
+
+
 def render_skins(
     window: StudioWindow, shot: Callable[[str], None], settle: Callable[[Callable[[], bool]], None]
 ) -> None:
@@ -70,6 +247,7 @@ def render_skins(
         settle(
             lambda: all(
                 tile.path in gallery.grid.tiles.cache
+                and not gallery.grid.tiles.cache[tile.path].isNull()
                 for i, tile in enumerate(gallery.grid.tiles.items)
                 if gallery.grid.visualRect(gallery.grid.model().index(i)).intersects(
                     gallery.grid.viewport().rect()
@@ -92,6 +270,17 @@ def render_skins(
 
     gallery_ready()
     shot("skins-gallery")
+    capture_library(page, shot, settle)
+    gallery_ready()
+    gallery.create.click()
+    page.maker.fine.click()
+    page.maker.wallpapers.setCurrentIndex(1)
+    page.maker.wallpapers.activated.emit(1)
+    QApplication.processEvents()
+    view.scroll.ensureWidgetVisible(page.maker.credit)
+    frame("downloaded-wallpaper")
+    with patch.object(ctx, "confirm", return_value=True):
+        page.escape()
     gallery.filters.buttons["Light"].click()
     gallery_ready()
     shot("skins-light")
@@ -160,6 +349,26 @@ def render_skins(
         page.escape()
         gallery_ready()
         shot("skins-active-gallery")
+        window.navigate("sleeves")
+        desk = window.pages["sleeves"]
+        settle(lambda: desk.snapshot is not None and not desk.loading)
+        for slot, name in (("mine", "Vortex"), ("opponent", "1998 OCG")):
+            desk.banner.slots[slot].click()
+            desk.gallery.search.setText(name)
+            desk.gallery.choose(desk.gallery.grid.model().index(0))
+        desk.apply.click()
+        settle(lambda: not desk.writing and not desk.loading)
+        desk.gallery.search.clear()
+        window.navigate("skins")
+        gallery_ready()
+        shot("skins-with-assigned-sleeves")
+        from tools.studio_sleeves_shots import prepare_overview
+
+        window.navigate("sleeves")
+        prepare_overview(window)
+        shot("sleeves-with-active-theme")
+        window.navigate("skins")
+        gallery_ready()
         choose("Deep Current")
         view.inspector.back.click()
         settle(lambda: not page.look.active and loaded())
@@ -251,3 +460,24 @@ def render_skins(
         page.escape()
     gallery.filters.buttons["All looks"].click()
     gallery_ready()
+
+
+def render_page(
+    window: StudioWindow,
+    selected: Installation,
+    shot: Callable[[str], None],
+    settle: Callable[[Callable[[], bool]], None],
+    *,
+    overview: str = "",
+) -> None:
+    window.navigate("skins")
+    render_skins(window, shot, settle)
+    if overview:
+        shot(overview)
+
+
+if __name__ == "__main__":
+    from tools.studio_screenshots import PAGE_RENDERERS, main_cli
+
+    PAGE_RENDERERS["skins"] = render_page
+    main_cli()

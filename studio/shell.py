@@ -37,7 +37,7 @@ from studio.pages.skins import SkinsPage
 from studio.pages.sleeves import SleevesPage
 from studio.pages.sounds import SoundsPage
 from studio.tasks import WorkerContext
-from studio.widgets import Button, ElidedLabel, Notice, glyph, label, margins
+from studio.widgets import Button, ElidedLabel, Hero, Notice, glyph, label, margins
 
 PAGES = (
     CardsPage,
@@ -60,8 +60,10 @@ class StudioWindow(QMainWindow):
         super().__init__()
         self.ctx = context
         self.ctx.attach(self)
+        self.destroyed.connect(context.detach)
         self.ctx.installations_requested.connect(self.open_picker)
         self.setWindowTitle(config.APP_NAME)
+        self.setWindowIcon(icon("brand"))
         self.settings = context.state
         self.ctx.select_installation_requested.connect(self.select_installation)
         self.ctx.update_requested.connect(self.check_updates)
@@ -137,12 +139,11 @@ class StudioWindow(QMainWindow):
         brand = QHBoxLayout()
         brand.setContentsMargins(t.SM, 0, 0, t.MD)
         brand.setSpacing(t.MD)
-        brand.addWidget(glyph("brand", t.BRAND_ICON))
+        brand.addWidget(glyph("mark", t.BRAND_ICON + t.XS))
         wordmark = QVBoxLayout()
         wordmark.setSpacing(0)
-        brand_name, _, edition = config.APP_NAME.partition(" ")
-        wordmark.addWidget(label(brand_name, "brand"))
-        wordmark.addWidget(label(" ".join(edition.upper()), "goldKicker"))
+        wordmark.addWidget(label(config.APP_NAME, "brand"))
+        wordmark.addWidget(label("Unofficial EDOPro companion", "muted", True))
         brand.addLayout(wordmark, 1)
         layout.addLayout(brand)
         self.rail_scroll = QScrollArea()
@@ -157,6 +158,7 @@ class StudioWindow(QMainWindow):
         entries.setSpacing(t.XS)
         entries.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.rail_scroll.setWidget(items)
+        self.rail_scroll.viewport().installEventFilter(self)
         layout.addWidget(self.rail_scroll, 1)
         headings = {"cards": "CUSTOMISE", "decks": "DECKS", "replays": "TOOLS"}
         for page in PAGES:
@@ -169,9 +171,11 @@ class StudioWindow(QMainWindow):
                 self.release.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(RELEASES)))
                 self.release.hide()
                 layout.addWidget(self.release)
-            item = Button("  " + page.title.replace("&", "&&"), "nav", page.icon)
-            item.setAccessibleName(page.title)
-            item.setToolTip(page.title)
+            # Page titles can already contain a Qt literal ampersand.
+            title = page.title.replace("&&", "&")
+            item = Button(title.replace("&", "&&"), "nav", page.icon)
+            item.setAccessibleName(title)
+            item.setToolTip(title)
             item.setMinimumHeight(t.NAV_H)
             item.setCheckable(True)
             item.clicked.connect(lambda _checked=False, key=page.id: self.navigate(key))
@@ -370,6 +374,9 @@ class StudioWindow(QMainWindow):
         )
 
     def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Resize and obj is self.rail_scroll.viewport():
+            # The update link and scrollbar can resize the rail independently of the window.
+            QTimer.singleShot(0, self, self._reveal_current)
         if (
             event.type() == QEvent.Type.FocusIn
             and obj in self.nav.values()
@@ -403,11 +410,15 @@ class StudioWindow(QMainWindow):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        short = event.size().height() <= t.COMPACT_HERO_HEIGHT
+        if self.property("compactHeroes") != short:
+            self.setProperty("compactHeroes", short)
+            for hero in self.findChildren(Hero):
+                hero.set_compact(short)
         compact = self.width() < t.COMPACT_WIDTH
         self.rail.setFixedWidth(t.RAIL_COMPACT if compact else t.RAIL_WIDTH)
         inset = t.SM if compact else t.MD
         self.rail.layout().setContentsMargins(inset, t.XL, inset, t.LG)
-        QTimer.singleShot(0, self, self._reveal_current)
 
     def _reveal_current(self) -> None:
         if self.current.id != "settings":
@@ -428,4 +439,4 @@ class StudioWindow(QMainWindow):
 
     def _idle(self) -> None:
         if self.closing:
-            QTimer.singleShot(0, self.close)
+            QTimer.singleShot(0, self, self.close)

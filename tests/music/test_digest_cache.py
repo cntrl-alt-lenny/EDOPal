@@ -36,9 +36,12 @@ def test_rewrite_replace_and_corruption(tmp_path: Path) -> None:
     rows = json.loads(database.read_bytes())
     next(iter(rows.values()))[1] = "0" * 64
     database.write_text(json.dumps(rows))
+    damaged = database.read_bytes()
     visit(b"cccc")
+    assert database.with_suffix(".json.corrupt").read_bytes() == damaged
     database.write_bytes(b"broken")
     visit(b"cccc")
+    assert database.with_suffix(".json.corrupt").read_bytes() == b"broken"
     with patch.object(digest_cache, "_digest", side_effect=AssertionError("lost repaired cache")):
         visit(b"cccc")
 
@@ -61,6 +64,44 @@ def test_cache_bound_and_per_file_cancellation(
         with pytest.raises(InterruptedError):
             digest(path)
     assert checkpoint.call_count == 2
+
+
+def test_failed_cache_sync_preserves_previous_file(tmp_path: Path) -> None:
+    library = tmp_path / "soundtracks"
+    recording = tmp_path / "recording.wav"
+    recording.write_bytes(b"old")
+    with browsing_digests(library) as lookup:
+        lookup(recording)
+    cache = tmp_path / "music-digests-v1.json"
+    previous = cache.read_bytes()
+    recording.write_bytes(b"changed")
+    with (
+        patch("music.catalogue.os.fsync", side_effect=OSError("sync failed")),
+        browsing_digests(library) as lookup,
+    ):
+        assert lookup(recording) == hashlib.sha256(b"changed").hexdigest()
+    assert cache.read_bytes() == previous
+    assert not cache.with_suffix(".json.corrupt").exists()
+
+
+def test_cache_repaired_by_another_instance_before_quarantine(tmp_path: Path) -> None:
+    cache = tmp_path / "music-digests-v1.json"
+    cache.write_bytes(b"broken")
+    read = digest_cache._read
+
+    def read_during_repair(path: Path) -> dict | None:
+        result = read(path)
+        if result is None:
+            digest_cache.atomic_json(path, {})
+        return result
+
+    with (
+        patch.object(digest_cache, "_read", read_during_repair),
+        browsing_digests(tmp_path / "soundtracks"),
+    ):
+        pass
+    assert cache.read_bytes() == b"{}"
+    assert not cache.with_suffix(".json.corrupt").exists()
 
 
 def test_two_instances_merge_independent_hashes(tmp_path: Path) -> None:

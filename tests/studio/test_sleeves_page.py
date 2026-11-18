@@ -359,3 +359,135 @@ def test_leaving_card_fetch_ignores_late_result(
     ready(qtbot, page)
     qtbot.waitUntil(lambda: not page.ctx.tasks.jobs)
     assert page.editor is None and not page.pending and not page.install.path
+
+
+def test_fast_scroll_filter_and_surprise_paint_the_selected_print(
+    desk: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtGui import QPixmap
+
+    import extras
+    from studio import theme as t
+
+    _, page = desk
+    gallery, grid = page.gallery, page.gallery.grid
+    write = extras._atomic_write
+
+    def readonly_print_cache(path: Path, data: bytes) -> None:
+        if "print-previews-v1" in path.parts:
+            raise PermissionError("Thumbnail cache is read-only")
+        write(path, data)
+
+    monkeypatch.setattr(extras, "_atomic_write", readonly_print_cache)
+    # Change generations while readers from the old viewport can still be running.
+    for row in (370, 6, 383):
+        grid.scrollTo(grid.model().index(row))
+    gallery.colour.setCurrentText("Purple")
+    gallery.search.setText("fans")
+    gallery.search.clear()
+    monkeypatch.setattr("studio.pages.sleeves_gallery.random.randrange", lambda count: count - 1)
+    gallery.surprise.click()
+    selected = grid.currentIndex()
+    assert grid.hasFocus() and page.pending["mine"] == gallery.visible[-1]
+
+    def painted() -> bool:
+        pix = selected.data(Qt.ItemDataRole.DecorationRole)
+        return isinstance(pix, QPixmap) and not pix.isNull()
+
+    qtbot.waitUntil(painted)
+    rect = grid.visualRect(selected)
+    assert grid.viewport().rect().contains(rect)
+    box = rect.adjusted(t.XS + t.SM, t.XS + t.MD, -t.XS - t.SM, -t.XS - t.HUGE)
+    pix = selected.data(Qt.ItemDataRole.DecorationRole)
+    target = QRect(QPoint(), pix.size().scaled(box.size(), Qt.AspectRatioMode.KeepAspectRatio))
+    target.moveCenter(box.center())
+    painted_tile = grid.viewport().grab(target).toImage()
+    expected = pix.toImage().scaled(
+        target.size(),
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    # Compare actual painted artwork, including the interior where a placeholder icon would sit.
+    samples = [
+        (x, y)
+        for x in range(3, expected.width() - 3, 7)
+        for y in range(3, expected.height() - 3, 7)
+    ]
+    assert (
+        sum(
+            abs(a - b)
+            for x, y in samples
+            for a, b in zip(
+                painted_tile.pixelColor(x, y).getRgb()[:3],
+                expected.pixelColor(x, y).getRgb()[:3],
+                strict=True,
+            )
+        )
+        / (len(samples) * 3)
+        < 8
+    )
+    qtbot.keyClick(grid, Qt.Key.Key_Up)
+    above = grid.currentIndex()
+    assert above.row() < selected.row() - 1
+    qtbot.keyClick(grid, Qt.Key.Key_Right)
+    assert grid.currentIndex().row() == above.row() + 1
+    qtbot.keyClick(grid, Qt.Key.Key_Return)
+    assert page.pending["mine"] == gallery.visible[above.row() + 1]
+
+
+def test_compact_designer_reveals_the_ink_being_edited(desk: tuple, qtbot: QtBot) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QScrollArea
+
+    window, page = desk
+    window.resize(960, 600)
+    page.gallery.actions["design"].click()
+    inks = page.editor.inks
+    inks.buttons[2].click()
+    slider = inks.sliders[0]
+    viewport = page.editor.panel.findChild(QScrollArea).viewport()
+    qtbot.waitUntil(
+        lambda: (
+            slider.hasFocus()
+            and viewport.rect().contains(
+                slider.mapTo(viewport, QPoint(slider.width() // 2, slider.height() // 2))
+            )
+        )
+    )
+    window.resize(2560, 1440)
+    assert page.editor.panel.width() <= 616
+
+
+def test_updated_pack_keeps_slot_identity_and_remeasures_colour(
+    desk: tuple, qtbot: QtBot, tmp_path: Path
+) -> None:
+    from dataclasses import replace
+
+    from content.media import Item, Origin
+
+    _, page = desk
+    path = tmp_path / "Ink.png"
+    image = QImage(32, 48, QImage.Format.Format_RGB32)
+    origin = Origin(
+        "ink", "1.0.0", "a" * 64, "Studio", "Demo", "Studio ink", "https://example.invalid/ink"
+    )
+    item = Item("images/Ink.png", "Single ink", "sleeve")
+    image.fill(Qt.GlobalColor.blue)
+    assert image.save(str(path))
+    page.library.replace_pack(origin, [(item, path)])
+    page.refresh()
+    ready(qtbot, page)
+    page.gallery.source.setCurrentText("Pack sleeve")
+    page.gallery.colour.setCurrentText("Blue")
+    qtbot.waitUntil(lambda: len(page.gallery.visible) == 1)
+    key = page.gallery.visible[0].key
+    image.fill(Qt.GlobalColor.red)
+    assert image.save(str(path))
+    page.library.replace_pack(replace(origin, version="2.0.0", sha256="b" * 64), [(item, path)])
+    page.refresh()
+    ready(qtbot, page)
+    qtbot.waitUntil(lambda: page.gallery.measured.get(key) == "Red")
+    assert not page.gallery.visible
+    page.gallery.colour.setCurrentText("Red")
+    assert [c.key for c in page.gallery.visible] == [key]

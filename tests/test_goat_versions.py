@@ -111,7 +111,7 @@ class GoatVersionTests(unittest.TestCase):
         aliases = {cid: 83555666 for cid in ids}
         aliases[83555666] = 0
         library = GoatVersions({511000824: 1, 511000825: 1}, ids, aliases)
-        for source, expected in ((83555666, "511000824"), (83555667, "511000825")):
+        for source, expected in ((83555667, "511000824"), (83555666, "511000825")):
             result = library.convert(((str(source),), (), ()))
             self.assertEqual(result.sections, ((expected,), (), ()))
             self.assertEqual(result.review, {})

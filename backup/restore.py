@@ -8,13 +8,14 @@ import shutil
 import uuid
 from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
 from typing import BinaryIO, Literal
 
 from music_library import _game_running
 
-from . import preferences
+from . import collection, preferences
 from .archive import opened
 from .core import (
     MAX_FILE,
@@ -32,8 +33,18 @@ from .core import (
     signature,
     transfer,
 )
-from .inventory import CONF, INDEX, category, managed_puzzles
-from .journal import _TOKEN, Change, Transaction, _changes, _home, _locks, _record, transactions
+from .inventory import CONF, INDEX, category, managed_puzzles, validate_index
+from .journal import (
+    _TOKEN,
+    Change,
+    Transaction,
+    _changes,
+    _home,
+    _locks,
+    _record,
+    _writer_locks,
+    transactions,
+)
 from .plan import Plan, plan_restore, puzzle_target
 
 
@@ -102,6 +113,7 @@ def _save_original(install: Installation, tx: Path, change: Change, cancel: Canc
 
 def _stage(plan: Plan, tx: Path, progress: Progress, cancel: Cancel) -> list[Change]:
     changes = []
+    required: set[str] = set()
     by_name = {i.source: i for i in plan.items}
     merges: dict[str, dict[str, bytes]] = {}
     publications = len({item.target for item in plan.items if item.action != "skip"})
@@ -111,7 +123,8 @@ def _stage(plan: Plan, tx: Path, progress: Progress, cancel: Cancel) -> list[Cha
         for i, entry in enumerate(manifest.entries, 1):
             item = by_name.get(entry.path)
             with archive.open(entry.path) as stream:
-                if entry.category == "preferences" or entry.path == INDEX:
+                editable = collection.recipe(entry.path) or entry.path in collection.CATALOGUES
+                if entry.category == "preferences" or entry.path == INDEX or editable:
                     data = stream.read()
                     if hashlib.sha256(data).hexdigest() != entry.sha256:
                         raise ValueError("Backup checksum mismatch")
@@ -121,17 +134,12 @@ def _stage(plan: Plan, tx: Path, progress: Progress, cancel: Cancel) -> list[Cha
                         if item and item.action == "merge":
                             merges.setdefault(item.target, {})[key] = data
                     else:
-                        tracks = json.loads(data)
-                        if (
-                            not isinstance(tracks, list)
-                            or len(tracks) > MAX_FILES
-                            or any(
-                                not isinstance(t, str)
-                                or category("studio/soundtracks/" + t) != "audio"
-                                for t in tracks
-                            )
-                        ):
-                            raise ValueError("Invalid portable music index")
+                        if entry.path == INDEX:
+                            validate_index(json.loads(data))
+                        elif item and (item.status == "identical" or item.action == "write"):
+                            required.update(collection.references(entry.path, data))
+                            if len(required) > MAX_FILES:
+                                raise ValueError("Too many editable assets")
                         if item and item.action == "write":
                             _blob(tx, io.BytesIO(data), entry.size, entry.sha256, cancel)
                 elif item and item.action == "write":
@@ -156,6 +164,22 @@ def _stage(plan: Plan, tx: Path, progress: Progress, cancel: Cancel) -> list[Cha
         digest = hashlib.sha256(data).hexdigest()
         _blob(tx, io.BytesIO(data), len(data), digest, cancel)
         changes.append(Change(item.source, target, item.before, digest))
+    # Older format-1 archives may omit an editable original. A matching local object
+    # can satisfy the recipe, including when the user keeps an existing file.
+    writes = {change.target: change.after for change in changes}
+    existing_bytes = 0
+    for name in sorted(required):
+        check(cancel)
+        digest = writes.get(name)
+        if digest is None:
+            path = plan.install.target(name)
+            size = path.stat().st_size if path.is_file() else 0
+            existing_bytes += size
+            if size > collection.size_limit(name) or existing_bytes > MAX_TOTAL:
+                raise ValueError("Existing editable assets exceed the restore size limit")
+            digest = signature(path, cancel)
+        if digest != collection.asset_digest(name):
+            raise ValueError(f"Missing or changed editable asset: {name}")
     for change in changes:
         _save_original(plan.install, tx, change, cancel)
     return changes
@@ -177,6 +201,44 @@ def _current(install: Installation, change: Change, cancel: Cancel) -> tuple[Pat
     return target, signature(target, cancel)
 
 
+class _Blocked(ValueError):
+    def __init__(self, reason: str, target: str) -> None:
+        super().__init__(f"{reason}: {target}")
+        self.reason = reason
+        self.target = target
+
+
+def _preflight(
+    install: Installation,
+    tx: Path,
+    changes: list[Change],
+    reverse: bool,
+    cancel: Cancel,
+    fresh: bool,
+    require_closed: bool,
+) -> None:
+    for change in changes:
+        old, new = (change.after, change.before) if reverse else (change.before, change.after)
+        _, current = _current(install, change, cancel)
+        if current != old and (fresh or current != new):
+            raise _Blocked("Destination changed since preview", change.target)
+        for digest in {old, new} - {None}:
+            if signature(safe(tx, digest), cancel) != digest:
+                raise _Blocked("Restore journal checksum mismatch", change.target)
+        if current != new and change.target == CONF and _game_running(install.game):
+            raise GameRunning("Close EDOPro before restoring preferences")
+    if require_closed and _game_running(install.game):
+        raise GameRunning("Close EDOPro before changing files")
+    if reverse:
+        # A later Save as can reuse an unchanged photo without editing any journalled file.
+        assets = {c.target for c in changes if collection.asset_digest(c.target) == c.after}
+        referrer = collection.retained_referrer(
+            install, assets, {c.target for c in changes}, cancel
+        )
+        if referrer:
+            raise _Blocked("A saved item still uses an asset this undo would remove", referrer)
+
+
 def _apply(
     install: Installation,
     tx: Path,
@@ -193,19 +255,8 @@ def _apply(
         (c, c.after if reverse else c.before, c.before if reverse else c.after)
         for c in (reversed(changes) if reverse else changes)
     ]
-    # Preflight every file before changing any, also on retries and rollback.
-    for change, old, new in desired:
-        target, current = _current(install, change, cancel)
-        if current != old and (fresh or current != new):
-            raise ValueError(f"Destination changed since preview: {target}")
-        for digest in {old, new} - {None}:
-            if signature(safe(tx, digest), cancel) != digest:
-                raise ValueError(f"Restore journal checksum mismatch: {target}")
-        if current != new and change.target == CONF and _game_running(install.game):
-            raise GameRunning("Close EDOPro before restoring preferences")
-    if require_closed and _game_running(install.game):
-        raise GameRunning("Close EDOPro before changing files")
-    next_game_check = monotonic() + 1
+    _preflight(install, tx, changes, reverse, cancel, fresh, require_closed)
+    next_game_check = 0.0
 
     def check_game(target: str) -> None:
         nonlocal next_game_check
@@ -259,7 +310,8 @@ def execute(
     plan: Plan, *, progress: Progress = None, cancel: Cancel = None, require_closed: bool = False
 ) -> Transaction:
     """Apply exactly the preview. A durable pending journal precedes the first game write."""
-    with _locks(plan.install):
+    targets = (item.target for item in plan.items if item.action != "skip")
+    with _locks(plan.install), _writer_locks(plan.install, targets):
         for tx in transactions(plan.install):
             if tx.status in {"pending", "rolling_back"}:
                 raise ValueError(f"Recover interrupted restore {tx.id} first")
@@ -339,15 +391,47 @@ def recover(
             if reverse and state != "rolling_back":
                 _record(txdir, "rolling_back", changes)
 
-        _apply(
-            install,
-            txdir,
-            changes,
-            reverse,
-            progress,
-            cancel,
-            begin=begin,
-            require_closed=require_closed,
-        )
-        _record(txdir, expected, changes)
+        with _writer_locks(install, (change.target for change in changes)):
+            _apply(
+                install,
+                txdir,
+                changes,
+                reverse,
+                progress,
+                cancel,
+                begin=begin,
+                require_closed=require_closed,
+            )
+            _record(txdir, expected, changes)
         return Transaction(token, expected)
+
+
+@dataclass(frozen=True)
+class UndoPreview:
+    available: bool
+    reason: str = ""
+    target: str | None = None
+
+
+def preview_undo(
+    install: Installation, token: str, *, cancel: Cancel = None, require_closed: bool = False
+) -> UndoPreview:
+    """Check current files and journal images on demand. Recovery repeats these checks."""
+    if not _TOKEN.fullmatch(token):
+        raise ValueError("Invalid recovery request")
+    try:
+        with _locks(install):
+            txdir = safe(_home(install), token)
+            state, changes = _changes(txdir)
+            if state == "rolled_back":
+                return UndoPreview(False, "Already undone")
+            for other in transactions(install):
+                if other.id != token and other.status in {"pending", "rolling_back"}:
+                    return UndoPreview(False, f"Recover interrupted restore {other.id} first")
+            with _writer_locks(install, (change.target for change in changes)):
+                _preflight(install, txdir, changes, True, cancel, False, require_closed)
+    except _Blocked as exc:
+        return UndoPreview(False, exc.reason, exc.target)
+    except (OSError, ValueError) as exc:
+        return UndoPreview(False, str(exc))
+    return UndoPreview(True)

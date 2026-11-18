@@ -15,6 +15,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import music_library as library
+from config import APP_NAME
 from music.view import LibraryView, SeekState, run_job
 from music_import import ImportItem, execute_import, import_library, import_power_of_chaos
 from music_player import PreviewPlayer
@@ -800,7 +801,7 @@ def open_music_library(
         existing.destroy()
     window = tk.Toplevel(parent)
     window.withdraw()
-    window.title("Soundtrack library · EDOPro HD Sync")
+    window.title(f"Soundtrack library · {APP_NAME}")
     window.transient(parent.winfo_toplevel())
     window.columnconfigure(0, weight=1)
     window.rowconfigure(0, weight=1)

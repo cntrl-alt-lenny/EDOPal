@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -154,7 +155,16 @@ def physical_tracks(
     root: Path,
     games: dict[str, Game],
     *,
-    digest_file: Callable[[Path], str] = _digest,
+    digest_file: Callable[[Path], str] | None = None,
+) -> Iterator[Track]:
+    """Browse credited recordings, or use the caller's verification policy."""
+    source = browsing_digests(root) if digest_file is None else nullcontext(digest_file)
+    with source as digest:
+        yield from _physical_tracks(game, scene, root, games, digest)
+
+
+def _physical_tracks(
+    game: Path, scene: str, root: Path, games: dict[str, Game], digest_file: Callable[[Path], str]
 ) -> Iterator[Track]:
     output = active_tracks(game, scene, games, digest_file=digest_file)
     for base in _folders(game, scene):

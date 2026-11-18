@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from . import preferences
+from . import collection, preferences
 from .archive import Manifest, inspect, opened
 from .core import (
     DEFAULTS,
+    MAX_TOTAL,
     Cancel,
     Installation,
     check,
@@ -20,7 +21,7 @@ from .core import (
     safe,
     signature,
 )
-from .inventory import CONF, hashes, managed, managed_puzzles, selection
+from .inventory import CONF, category, hashes, managed, managed_puzzles, selection
 
 Policy = Literal["keep_mine", "take_theirs", "keep_both"]
 
@@ -75,7 +76,10 @@ class Names:
         p = PurePosixPath(name)
         for n in range(1, 10001):
             suffix = "" if n == 1 else f" {n}"
-            candidate = f"{p.stem} (incoming{suffix}){p.suffix}"
+            if collection.recipe(f"{folded(parent)}/{folded(name)}"):
+                candidate = collection.alternate_theme(folded(name), n)
+            else:
+                candidate = f"{p.stem} (incoming{suffix}){p.suffix}"
             if folded(candidate) not in names:
                 portable(parent + "/" + candidate)
                 return candidate
@@ -148,10 +152,12 @@ def plan_restore(
     if policy not in {"keep_mine", "take_theirs", "keep_both"}:
         raise ValueError("Unknown conflict policy")
     items = []
+    existing_bytes = 0
     names = Names(install)
     path = Path(path).absolute()
     with opened(path) as (archive, manifest):
         selected = selection(categories if categories is not None else manifest.categories)
+        selected = selected.intersection(manifest.categories)
         excluded = managed_puzzles(install) if "puzzles" in selected else set()
         prefs: dict[str, bytes] = {}
         conf = CONF
@@ -168,7 +174,7 @@ def plan_restore(
                 prefs = preferences.values(content)
         for entry in sorted(manifest.entries, key=lambda e: e.path):
             check(cancel)
-            if entry.category not in selected:
+            if category(entry.path, selected) not in selected:
                 continue
             if entry.category == "preferences":
                 key = entry.path.split("/")[1]
@@ -198,10 +204,15 @@ def plan_restore(
                     )
                 )
                 continue
-            target, detail = names.resolve(entry.path)
+            target, detail = names.resolve(collection.restored_name(entry.path))
             if entry.category == "puzzles":
                 puzzle_target(install, target, excluded)
-            before = signature(install.target(target), cancel)
+            local = install.target(target)
+            if local.is_file():
+                existing_bytes += local.stat().st_size
+                if existing_bytes > MAX_TOTAL:
+                    raise ValueError("Existing files exceed the restore preview size limit")
+            before = signature(local, cancel)
             existing = target if before is not None else None
             existing_sha = before
             status = "identical" if before == entry.sha256 else "conflict" if before else "add"
@@ -252,7 +263,8 @@ def compare(
         b = hashes(right, selected, cancel)
     else:
         assert manifest is not None
-        b = {e.path: e.sha256 for e in manifest.entries if e.category in selected}
+        archived = selected.intersection(manifest.categories)
+        b = {e.path: e.sha256 for e in manifest.entries if category(e.path, archived) in archived}
     names = sorted(a.keys() | b.keys())
     groups: dict[str, set[str]] = defaultdict(set)
     for name in names:

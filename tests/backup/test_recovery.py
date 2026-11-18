@@ -11,7 +11,9 @@ from backup import restore
 from music.settings import _linux_game_running
 
 
-def test_proton_process_blocks_preference_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_proton_process_blocks_preference_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     proc = tmp_path / "proc" / "42"
     proc.mkdir(parents=True)
     monkeypatch.setattr(Path, "readlink", lambda _: Path("/usr/bin/wine64-preloader"))
