@@ -181,7 +181,7 @@ def valid_decks(selected_path: str, game: Path, paths: tuple[Path, ...]) -> bool
             path.is_file()
             and path.suffix.lower() == ".ydk"
             and not path.is_symlink()
-            and path.resolve().parent == deck
+            and path.resolve().is_relative_to(deck)
             for path in paths
         )
     )

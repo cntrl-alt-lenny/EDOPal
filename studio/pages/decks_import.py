@@ -17,6 +17,7 @@ from studio.pages.decks_flow import (
     resume_import,
     undo_import,
 )
+from studio.pages.decks_handoff import saved_deck_selection
 from studio.tasks import Job, Work, WorkerContext
 from tournament_decks import DeckError, DeckPublication
 
@@ -38,12 +39,12 @@ class DeckImports:
 
         host.browser.recent.clicked.connect(self.open_receipt)
         host.browser.save.clicked.connect(self.start_import)
-        host.preview.save.clicked.connect(self.start_import)
         host.import_view.progress.cancel.clicked.connect(self.cancel)
         host.results.review.clicked.connect(self._open_review)
         host.results.undo.clicked.connect(self._confirm_undo)
         host.results.retry.clicked.connect(self._retry)
         host.results.artwork.clicked.connect(self._sync_artwork)
+        host.results.open_saved.clicked.connect(self._open_saved)
 
     def reset(self) -> None:
         self.receipt = self.batch = None
@@ -56,19 +57,14 @@ class DeckImports:
             return
         game = Path(self.host.ctx.installation.path)
         goat = self.host.goat_available and self.host.browser.goat.isChecked()
-        if self.host.view is self.host.preview and self.host.preview_target:
-            event, deck = self.host.preview_target
-            batch = ImportBatch(game, event, (deck,), goat)
-        else:
-            batch = self.host.selection.capture(game, goat)
+        batch = self.host.selection.capture(game, goat)
         if batch is not None:
             self.batch = batch
             self._reset_undo()
             self._run_import(batch)
 
     def _run_import(self, batch: ImportBatch, resume: ImportReceipt | None = None) -> None:
-        self.host._discard("preview", "artwork")
-        self.host.preview_target = None
+        self.host._discard("artwork")
         self.host.import_view.progress.begin("Preparing deck folder…")
         self.host.import_view.progress.detail.setText("Checking the selected EDOPro installation.")
         self.host._show(self.host.import_view, self.host.import_view.progress.cancel)
@@ -145,6 +141,8 @@ class DeckImports:
         )
         self.host.results.undo.setEnabled(True)
         self.host.results.artwork.setEnabled(True)
+        self.host.results.open_saved.setEnabled(True)
+        self.host.results.open_saved.setVisible(bool(self._remaining_paths()))
         self.host.results.artwork.setVisible(
             self.handoff_available
             and self.host.ctx.installation.ready
@@ -153,13 +151,24 @@ class DeckImports:
         if self.removed:
             self.host.results.mark_removed(self.removed)
         self.retry_action = None
-        if receipt.blocked and self.batch is not None and not self.removed:
+        if receipt.skipped and not receipt.stopped and self.batch is not None and not self.removed:
             batch = self.batch
             self.retry_action = lambda: self._run_import(batch, receipt)
         if self.undo_notice:
             self.host.results.notice.show_message(self.undo_notice)
         self.host.results.retry.setVisible(self.retry_action is not None)
         self.host._show(self.host.results, self.host.results.back)
+
+    def _remaining_paths(self) -> tuple[Path, ...]:
+        return tuple(path for path in self.receipt.paths if path not in self.removed)
+
+    def _open_saved(self) -> None:
+        if self.receipt is None or self.job or self.host.ctx.busy:
+            return
+        selection = saved_deck_selection(self.host.ctx)
+        selection.paths = self._remaining_paths()
+        if not self.host.ctx.navigate("mydecks"):
+            selection.paths = ()
 
     def _open_review(self) -> None:
         if self.receipt:
@@ -193,6 +202,7 @@ class DeckImports:
         self.host.results.undo.setEnabled(False)
         self.host.results.retry.hide()
         self.host.results.artwork.setEnabled(False)
+        self.host.results.open_saved.setEnabled(False)
         self.host.results.notice.show_message(
             "Removing unchanged copies. You can change folders when it’s done."
         )

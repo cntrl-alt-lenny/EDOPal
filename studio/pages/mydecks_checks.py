@@ -10,6 +10,7 @@ from PySide6.QtCore import QModelIndex, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QSizePolicy,
@@ -18,11 +19,13 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QTextBrowser,
     QVBoxLayout,
+    QWidget,
 )
 
 from decks import Library, SavedDeck, Verdict, compare, preflight, version_groups
 from studio import theme as t
 from studio.icons import icon
+from studio.pages.decks_contents import paint_text
 from studio.pages.mydecks_logic import (
     change_lines,
     deck_title,
@@ -31,11 +34,15 @@ from studio.pages.mydecks_logic import (
     list_names,
     quantity,
 )
-from studio.pages.mydecks_widgets import Contents, Screen, choice, paint_text
+from studio.pages.mydecks_widgets import Contents, Screen, choice
 from studio.tasks import Job, TaskRunner, WorkerContext
-from studio.widgets import Hero, SectionHeader, label
+from studio.widgets import Hero, SectionHeader, glyph, label
 
-STATUS = {"legal": t.GREEN, "illegal": t.RED, "could not verify": t.GOLD}
+STATUS = {
+    "legal": ("check", t.GREEN),
+    "illegal": ("warning", t.RED),
+    "could not verify": ("search", t.GOLD),
+}
 
 
 class VerdictRow(QStyledItemDelegate):
@@ -55,13 +62,10 @@ class VerdictRow(QStyledItemDelegate):
         paint_text(p, QRect(x, y, width, t.XL), name, t.INK, t.SUBTITLE, True)
         paint_text(p, QRect(x, y + t.XL, width, t.XL), folder, t.MUTED, t.SMALL)
         x = r.right() - t.RAIL_WIDTH
-        icon("check" if status == "legal" else "warning", STATUS[status]).paint(
-            p, x, y, t.ICON, t.ICON
-        )
+        symbol, colour = STATUS[status]
+        icon(symbol, colour).paint(p, x, y, t.ICON, t.ICON)
         x += t.XXL
-        paint_text(
-            p, QRect(x, y, t.TILE_LARGE, t.XL), status.capitalize(), STATUS[status], t.BODY, True
-        )
+        paint_text(p, QRect(x, y, t.TILE_LARGE, t.XL), status.capitalize(), colour, t.BODY, True)
         paint_text(
             p,
             QRect(x, y + t.XL, t.TILE_LARGE, t.XL),
@@ -100,7 +104,7 @@ class FormatCheck(Screen):
         deck: SavedDeck | None,
         selected: int = 0,
     ) -> None:
-        super().__init__("Check a format", back)
+        super().__init__(deck.name if deck else "Check a format", back)
         self.lib, self.deck = lib, deck
         self.runner, self.open_findings = runner, open_findings
         self.generation = 0
@@ -117,13 +121,14 @@ class FormatCheck(Screen):
             self.summary = hero.headline
             self.body.addWidget(hero, 1)
             return
-        self.body.addWidget(
-            label(
-                "Check standard deck sizes and card limits against a list installed in your game.",
-                "body",
-                True,
+        if deck is None:
+            self.body.addWidget(
+                label(
+                    "Check standard deck sizes and card limits against a list installed in your game.",
+                    "body",
+                    True,
+                )
             )
-        )
         panel = self.panel()
         top = QHBoxLayout()
         top.addWidget(label("Forbidden list", "subheading"))
@@ -137,12 +142,37 @@ class FormatCheck(Screen):
         top.addWidget(self.filter)
         panel.body.addLayout(top)
         self.summary = label("", "subheading", True)
-        panel.body.addWidget(self.summary)
+        headline = QHBoxLayout()
+        self.verdict_icon = glyph("search", t.ICON, t.GOLD)
+        self.verdict_icon.hide()
+        headline.addWidget(self.verdict_icon)
+        headline.addWidget(self.summary, 1)
+        panel.body.addLayout(headline)
+        totals = QHBoxLayout()
+        self.counts: dict[str, QLabel] = {}
+        for status, (symbol, colour) in STATUS.items():
+            total = label("", "subheading")
+            total.setStyleSheet(f"color: {colour};")
+            self.counts[status] = total
+            marker = glyph(symbol, t.ICON, colour)
+            line = QHBoxLayout()
+            line.setSpacing(t.SM)
+            line.addWidget(marker)
+            line.addWidget(total)
+            line.addStretch()
+            totals.addLayout(line)
+        self.totals = QWidget()
+        self.totals.setLayout(totals)
+        totals.setContentsMargins(0, 0, 0, 0)
+        self.totals.hide()
+        panel.body.addWidget(self.totals)
         self.results = QListWidget()
         self.results.setAccessibleName("Deck verdicts. Open a deck to read its findings.")
         self.results.setObjectName("installList")
         self.results.setMinimumHeight(t.TILE_H)
         self.results.setMouseTracking(True)
+        self.results.setUniformItemSizes(True)
+        self.results.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.results.setItemDelegate(VerdictRow(self.results))
         self.details = ReadingPane("Findings")
         panel.body.addWidget(self.results, 1)
@@ -153,9 +183,10 @@ class FormatCheck(Screen):
         self.results.setVisible(deck is None)
         self.details.setVisible(deck is not None)
         if deck and deck.preview:
-            self.body.setStretchFactor(panel, 1)
+            self.body.setStretchFactor(panel, 0)
+            self.details.setMaximumHeight(t.TILE_H)
             self.contents = Contents(runner, lib.game, deck.preview)
-            self.body.addWidget(self.contents, 2)
+            self.body.addWidget(self.contents, 1)
         self.results.itemClicked.connect(self._open)
         self.results.itemActivated.connect(self._open)
         self.filter.currentIndexChanged.connect(self._filter)
@@ -184,6 +215,10 @@ class FormatCheck(Screen):
         self.results.clear()
         self.details.clear()
         self.verdicts = []
+        self.totals.hide()
+        self.verdict_icon.hide()
+        self.summary.show()
+        self.summary.setStyleSheet("")
         self.summary.setText("Checking decks…")
         lib, banlist = self.lib, self.lib.banlists[index]
         decks = (self.deck,) if self.deck else lib.decks
@@ -199,12 +234,19 @@ class FormatCheck(Screen):
             self.verdicts = verdicts
             if self.deck and verdicts:
                 verdict = verdicts[0]
-                self.summary.setText(f"{verdict.status.capitalize()}  ·  {self.deck.name}")
-                self.summary.setStyleSheet(f"color: {STATUS[verdict.status]};")
+                symbol, colour = STATUS[verdict.status]
+                self.verdict_icon.setPixmap(icon(symbol, colour).pixmap(t.ICON, t.ICON))
+                self.verdict_icon.show()
+                self.summary.setText(verdict.status.capitalize())
+                self.summary.setStyleSheet(f"color: {colour};")
+                if self.deck.preview:
+                    self.details.setMaximumHeight(
+                        max(t.TILE_H, min(t.TILE_LARGE, len(verdict.findings) * t.HUGE))
+                    )
                 self.details.setHtml(
                     "".join(
                         f"<p><b style='color:{t.GOLD if f.uncertain else t.RED}'>"
-                        f"{'Needs verification' if f.uncertain else 'Rule violation'}</b><br>"
+                        f"{'Could not check' if f.uncertain else 'Breaks a rule'}</b><br>"
                         f"{escape(finding_text(f))}</p>"
                         for f in verdict.findings
                     )
@@ -212,7 +254,10 @@ class FormatCheck(Screen):
                 )
             else:
                 counts = Counter(v.status for v in verdicts)
-                self.summary.setText("   ·   ".join(f"{counts[s]} {s}" for s in STATUS))
+                self.summary.hide()
+                for status, total in self.counts.items():
+                    total.setText(f"{counts[status]} {status}")
+                self.totals.show()
                 for d, v in zip(decks, verdicts, strict=True):
                     item = QListWidgetItem(
                         f"{deck_title(d)}\n{v.status.capitalize()}   ·   "

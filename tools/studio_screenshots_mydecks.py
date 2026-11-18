@@ -11,17 +11,18 @@ from unittest.mock import patch
 
 from PIL import Image
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QAbstractItemView, QApplication
 
 import main
 from config import Config
 from decks import DeckIndexer, Sections, encode_ydke
+from decks.sharing import MAX_CODE
 from studio import theme
 from studio.context import AppContext, Installation
+from studio.pages.decks_contents import CardList
 from studio.pages.mydecks import MyDecksPage
 from studio.pages.mydecks_checks import Comparison, FormatCheck
 from studio.pages.mydecks_library import Collection
-from studio.pages.mydecks_widgets import CardGrid
 from studio.shell import StudioWindow
 from studio.widgets import Button
 from tools.studio_screenshots import DemoSync, create_demo, settle
@@ -64,7 +65,7 @@ SPELLS = {7, 8, 10, 11, 12, 14, 15, 20, 21, 27}
 TRAPS = {9, 13, 16, 17}
 
 
-def seed_game(root: Path) -> Config:
+def seed_game(root: Path, *, archive_size: int = 0) -> Config:
     cfg = create_demo(root)
     game = Path(cfg.edopro_path)
     with closing(sqlite3.connect(game / "cards.cdb")) as db, db:
@@ -134,6 +135,8 @@ def seed_game(root: Path) -> Config:
         add(name, Sections(cards, (1029,), tuple(1000 + j for j in range(i % 6))), i + 3)
     add("Archive/Relinquished", Sections((999,) + sections.main[1:], (), sections.side), 18)
     add("Spellcasters", Sections((1000, 1003, 1005) * 3), 22)
+    for i in range(archive_size):
+        add(f"Weekend League/Version {i + 1:02}", sections, i + 23)
     (folder / "Archive/Damaged copy.ydk").write_text("a broken deck\n", encoding="utf-8")
     return cfg
 
@@ -141,7 +144,7 @@ def seed_game(root: Path) -> Config:
 def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     app = QApplication.instance()
     theme.apply(app)
-    cfg = seed_game(root)
+    cfg = seed_game(root, archive_size=48)
     ctx = AppContext(cfg, main.VERSION, DemoSync(), main._apply_gui_choices)
     win = StudioWindow(ctx, startup=False)
     selected = Installation.inspect(cfg.edopro_path)
@@ -162,16 +165,20 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         win.setFocus(Qt.FocusReason.MouseFocusReason)
 
         def thumbs_ready() -> bool:
-            for grid in page.view.findChildren(CardGrid):
-                if grid.isVisible():
-                    for i, tile in enumerate(grid.tiles.items):
-                        idx = grid.model().index(i, 0)
-                        if (
-                            grid.viewport().rect().intersects(grid.visualRect(idx))
-                            and tile.path not in grid.tiles.cache
-                        ):
-                            idx.data(Qt.ItemDataRole.DecorationRole)
-                            grid.viewport().update()
+            for cards in page.view.findChildren(CardList):
+                if not cards.isVisible():
+                    continue
+                for i, band in enumerate(cards.rows.rows):
+                    if (
+                        not cards.viewport()
+                        .rect()
+                        .intersects(cards.visualRect(cards.rows.index(i, 0)))
+                    ):
+                        continue
+                    for card in band.cards:
+                        if card.artwork and card.artwork not in cards.thumbnails.cache:
+                            cards.thumbnail(card.artwork)
+                            cards.viewport().update()
                             return False
             return True
 
@@ -237,10 +244,11 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
 
         open_named("Empty Jar - Athens")
         shot("09-main-deck")
-        page.view.contents.sections.button(1).click()
-        shot("10-extra-deck")
-        page.view.contents.sections.button(2).click()
-        shot("11-side-deck")
+        cards = page.view.contents.cards
+        for group, name in (("Extra", "10-extra-deck"), ("Side", "11-side-deck")):
+            row = next(i for i, band in enumerate(cards.rows.rows) if band.title.startswith(group))
+            cards.scrollTo(cards.rows.index(row, 0), QAbstractItemView.ScrollHint.PositionAtTop)
+            shot(name)
         page.escape()
         open_named("Damaged copy")
         shot("12-unreadable")
@@ -256,6 +264,9 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         review.code.setText("incomplete")
         review.preview_btn.click()
         shot("15-invalid-code")
+        review.code.setText("x" * (MAX_CODE * 2))
+        review.preview_btn.click()
+        shot("29-oversized-code")
         review.code.setText(
             encode_ydke(
                 next(d.preview.sections for d in page.lib.decks if d.name == "Empty Jar - Athens")
@@ -263,6 +274,8 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         )
         review.preview_btn.click()
         shot("16-preview")
+        review.name.setText("Spellcasters")
+        shot("30-existing-name")
         with patch("studio.pages.mydecks_files._game_running", return_value=True):
             review.save_btn.click()
             settle(lambda: not page.writing)

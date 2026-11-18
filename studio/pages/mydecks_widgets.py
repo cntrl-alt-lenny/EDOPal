@@ -2,27 +2,22 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from PySide6.QtCore import (
     QAbstractListModel,
-    QEvent,
     QModelIndex,
     QPoint,
     QRect,
     QRectF,
     QSize,
     Qt,
-    Signal,
 )
-from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen, QPixmap, QResizeEvent
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QComboBox,
     QHBoxLayout,
-    QLabel,
     QListView,
     QSizePolicy,
     QStyle,
@@ -30,7 +25,6 @@ from PySide6.QtWidgets import (
     QStyleOptionComboBox,
     QStyleOptionViewItem,
     QStylePainter,
-    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -38,35 +32,49 @@ from PySide6.QtWidgets import (
 from decks import Preview
 from studio import theme as t
 from studio.icons import icon
-from studio.pages.mydecks_logic import LibraryRow, breakdown, card_name
+from studio.pages.decks_contents import DeckContents, paint_text
+from studio.pages.mydecks_logic import LibraryRow, breakdown, saved_sections
 from studio.tasks import TaskRunner
-from studio.widgets import Button, ElidedLabel, Hero, ImageTileGrid, Panel, Tile, label, margins
+from studio.widgets import Button, ElidedLabel, Hero, Panel
 
-ALIGN = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
 KINDS = {"monster": t.GOLD, "spell": t.GREEN, "trap": t.RED, "other": t.TEXT, "unresolved": t.MUTED}
 
 
 class DeckHero(Hero):
     def __init__(self, description: str) -> None:
-        super().__init__("Personal collection", "My decks", description, "check")
-        self.sleeves = [
-            QPixmap(str(t.ASSETS / "window/gallery" / filename))
-            for filename in ("sleeve-1.png", "sleeve-0.png")
-        ]
+        super().__init__("Deck library", "My decks", description, "mydecks")
         self.setFixedHeight(t.TILE_LARGE + t.XL)
 
     def _print(self, p: QPainter, x: float, y: float, height: float) -> None:
-        size = min(height * 1.38, self.width() * 0.23)
-        for offset, angle, sleeve in zip(
-            (-0.47, 0.46, 0), (-17, 17, -3), (*self.sleeves, self.sleeves[1]), strict=True
+        scale = min(height * 1.20, self.width() * 0.23) / 100
+        for offset, angle, symbol, accent in (
+            (-52, -20, "spark", t.GREEN),
+            (52, 20, "health", t.RED),
+            (0, -4, "mydecks", t.GOLD),
         ):
             p.save()
-            p.translate(x + offset * size, y + abs(offset) * t.XL)
+            p.translate(x + offset * scale, y + (8 if offset else 0) * scale)
             p.rotate(angle)
-            box = QRectF(-size * 0.34, -size * 0.5, size * 0.68, size)
-            p.setPen(QPen(QColor(t.BRONZE), t.FOCUS))
-            p.drawRoundedRect(box, t.R_SMALL, t.R_SMALL)
-            p.drawPixmap(box, sleeve, QRectF(sleeve.rect()))
+            p.scale(scale, scale)
+            box = QRectF(-32, -50, 64, 100)
+            foil = QLinearGradient(box.topLeft(), box.bottomRight())
+            foil.setColorAt(0, QColor(t.RAISED))
+            foil.setColorAt(0.54, QColor(t.RAIL))
+            foil.setColorAt(1, QColor(t.HERO_DARK))
+            p.setBrush(foil)
+            p.setPen(QPen(QColor(accent), 1.2))
+            p.drawRoundedRect(box, 5, 5)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(t.BRONZE), 0.8))
+            p.drawRoundedRect(box.adjusted(5, 5, -5, -5), 4, 4)
+            p.drawEllipse(QRectF(-22, -22, 44, 44))
+            icon(symbol, accent).paint(p, -16, -16, 32, 32)
+            for top in (-38, 30):
+                p.save()
+                p.translate(0, top + 4)
+                p.rotate(45)
+                p.drawRect(QRectF(-2, -2, 4, 4))
+                p.restore()
             p.restore()
 
 
@@ -75,14 +83,13 @@ class Screen(QWidget):
         super().__init__()
         self.body = QVBoxLayout(self)
         self.setMaximumWidth(t.CONTENT_MAX)
-        margins(self.body, t.XL)
-        self.body.setSpacing(t.LG)
+        self.body.setContentsMargins(t.XXL, t.XL, t.XXL, t.XL)
+        self.body.setSpacing(t.MD)
         self.initial: QWidget | None = None
         if back:
             row = QHBoxLayout()
             self.back = button("Back", back, "quiet", "back")
             row.addWidget(self.back)
-            row.addWidget(label("MY DECKS", "goldKicker"))
             row.addStretch()
             self.body.addLayout(row)
             self.initial = self.back
@@ -173,16 +180,6 @@ class RowModel(QAbstractListModel):
         return None
 
 
-def paint_text(
-    p: QPainter, rect: QRect, value: str, colour: str, size: int, bold: bool = False
-) -> None:
-    p.setFont(t.font(size, bold=bold))
-    p.setPen(QColor(colour))
-    p.drawText(
-        rect, ALIGN, p.fontMetrics().elidedText(value, Qt.TextElideMode.ElideRight, rect.width())
-    )
-
-
 class DeckDelegate(QStyledItemDelegate):
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         return QSize(t.TILE_LARGE, t.HUGE + t.XL)
@@ -242,153 +239,8 @@ class DeckDelegate(QStyledItemDelegate):
         p.restore()
 
 
-class CardDelegate(QStyledItemDelegate):
-    def __init__(self, grid: CardGrid) -> None:
-        super().__init__(grid)
-        self.grid = grid
-
-    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
-        return self.grid.gridSize()
-
-    def paint(self, p: QPainter, opt: QStyleOptionViewItem, index: QModelIndex) -> None:
-        p.save()
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        box = opt.rect.adjusted(t.XS, t.XS, -t.XS, -t.XS)
-        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
-        p.setBrush(QColor(t.ACTIVE if selected else t.RAISED))
-        p.setPen(QColor(t.GOLD if selected else t.EDGE))
-        p.drawRoundedRect(box, t.R_SMALL, t.R_SMALL)
-        pix = index.data(Qt.ItemDataRole.DecorationRole)
-        left = box.x() + t.SM
-        art = QRect(left, box.y() + t.XS, t.BUTTON_H, box.height() - 2 * t.XS)
-        if pix and not pix.isNull():
-            size = pix.size().scaled(art.size(), Qt.AspectRatioMode.KeepAspectRatio)
-            target = QRect(art)
-            target.setSize(size)
-            target.moveCenter(art.center())
-            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            p.drawPixmap(target, pix)
-            left = art.right() + t.SM
-        else:
-            p.fillRect(
-                QRect(left, art.y() + t.SM, t.XS, art.height() - 2 * t.SM),
-                QColor(self.grid.colours[index.row()]),
-            )
-            left += t.MD
-        width = box.right() - left - t.XS
-        paint_text(p, QRect(left, box.y() + t.SM, width, t.XL), index.data(), t.INK, t.BODY, True)
-        paint_text(
-            p,
-            QRect(left, box.y() + t.XXL, width, t.XL),
-            self.grid.details[index.row()],
-            t.MUTED,
-            t.SMALL,
-        )
-        p.restore()
-
-
-class CardGrid(ImageTileGrid):
-    inspected = Signal(str)
-
+class Contents(DeckContents):
     def __init__(self, runner: TaskRunner, game: Path, preview: Preview) -> None:
         super().__init__(runner)
-        self.game, self.preview = game, preview
-        self.details: list[str] = []
-        self.colours: list[str] = []
-        self.setAccessibleName("Cards in this section")
-        self.setItemDelegate(CardDelegate(self))
-        self.setMinimumHeight(t.TILE_H)
-        self.setStyleSheet(
-            f"QListView {{ background: {t.PANEL}; padding: 0; border: 0; }} "
-            f"QListView:focus {{ border: {t.FOCUS}px solid {t.PALE}; }}"
-        )
-        self.selectionModel().currentChanged.connect(self._tip)
-        self.activated.connect(self._tip)
-
-    def _tip(self, idx: QModelIndex) -> None:
-        if idx.isValid():
-            detail = f"{idx.data()} · {self.details[idx.row()]}"
-            self.setAccessibleDescription(detail)
-            self.inspected.emit(detail)
-
-    def viewportEvent(self, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.ToolTip:
-            idx = self.indexAt(event.pos())
-            if idx.isValid():
-                QToolTip.showText(
-                    event.globalPos(), f"{idx.data()} · {self.details[idx.row()]}", self
-                )
-                return True
-        return super().viewportEvent(event)
-
-    def show_section(self, section: int) -> None:
-        self.details.clear()
-        self.colours.clear()
-        tiles = []
-        for code, copies in Counter(self.preview.sections[section]).items():
-            card = self.preview.cards.get(code)
-            name = card_name(self.preview, code)
-            self.details.append(
-                " · ".join(
-                    filter(
-                        None,
-                        (
-                            card.type_line if card else "Missing from game data",
-                            f"{card.rating_kind} {card.rating}"
-                            if card and card.rating_kind and card.rating is not None
-                            else "",
-                            card.attribute.title() if card else "",
-                        ),
-                    )
-                )
-            )
-            self.colours.append(KINDS[card.kind if card else "unresolved"])
-            tiles.append(Tile(f"{copies} × {name}", self.game / "pics" / f"{code}.jpg"))
-        self.set_tiles(tiles)
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        width = max(1, self.viewport().width() - t.SM - t.FOCUS)
-        cols = max(1, width // (t.RAIL_WIDTH + t.HUGE))
-        self.setGridSize(QSize(width // cols, t.HUGE + t.XL))
-
-
-class Contents(Panel):
-    def __init__(self, runner: TaskRunner, game: Path, preview: Preview) -> None:
-        super().__init__(t.LG)
-        row = QHBoxLayout()
-        self.sections = QButtonGroup(self)
-        for i, (s, n) in enumerate(zip(preview.sections._fields, preview.counts, strict=True)):
-            btn = Button(f"{s.title()}  {n}")
-            btn.setCheckable(True)
-            btn.setStyleSheet(
-                f"QPushButton:checked {{background: {t.ACTIVE}; color: {t.PALE}; border-color: {t.GOLD};}}"
-            )
-            self.sections.addButton(btn, i)
-            row.addWidget(btn)
-        self.sections.button(0).setChecked(True)
-        mix = label(breakdown(preview), "muted", True)
-        mix.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        row.addWidget(mix, 1)
-        self.body.addLayout(row)
-        self.grid = CardGrid(runner, game, preview)
-        self.empty: QLabel = label("There are no cards in this section.", "body")
-        self.body.addWidget(self.empty)
-        self.body.addWidget(self.grid, 1)
-        selected = ElidedLabel()
-        self.body.addWidget(selected)
-        selected.hide()
-
-        def inspect(text: str) -> None:
-            selected.set_value(text)
-            selected.show()
-
-        self.grid.inspected.connect(inspect)
-
-        def show(section: int) -> None:
-            self.grid.show_section(section)
-            self.empty.setVisible(not preview.sections[section])
-            selected.hide()
-
-        self.sections.idClicked.connect(show)
-        show(0)
+        job = runner.start(lambda worker: saved_sections(game, preview, worker.cancel))
+        job.result.connect(self.set_sections)

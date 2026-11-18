@@ -2,6 +2,7 @@
 
 import sqlite3
 from collections import Counter
+from collections.abc import Iterable
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,7 @@ from card_databases import get_db_files
 from tournament_decks import DeckPreview
 
 GROUPS = ("Main", "Extra", "Side")
-CARD_TYPES = {1: "Monsters", 2: "Spells", 4: "Traps"}
+CARD_TYPES = {1: "Monster", 2: "Spell", 4: "Trap"}
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class PreviewCard:
     copies: int
     artwork: Path | None
     types: tuple[tuple[str, int], ...]
+    detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,9 @@ class PreviewSection:
         for card in self.cards:
             totals.update(dict(card.types))
         return tuple(
-            (kind, totals[kind]) for kind in (*CARD_TYPES.values(), "Unknown type") if totals[kind]
+            (kind, totals[kind])
+            for kind in (*CARD_TYPES.values(), "Other", "Unknown type")
+            if totals[kind]
         )
 
 
@@ -62,12 +66,15 @@ def _local_types(game: Path, ids: set[int], cancel: Event) -> dict[int, str]:
     return result
 
 
-def _artwork(pics: Path, codes: Counter[int]) -> Path | None:
+def local_artwork(pics: Path, codes: Iterable[int]) -> Path | None:
     for code in codes:
         for extension in (".jpg", ".png"):
             path = pics / f"{code}{extension}"
-            if path.is_file():
-                return path
+            try:
+                if path.is_file():
+                    return path
+            except OSError:
+                continue
     return None
 
 
@@ -93,6 +100,8 @@ def prepare_preview(game: Path, preview: DeckPreview, cancel: Event) -> tuple[Pr
             unknown = count - counts.total()
             if unknown > 0:
                 counts["Unknown type"] += unknown
-            cards.append(PreviewCard(name, count, _artwork(pics, codes), tuple(counts.items())))
+            cards.append(
+                PreviewCard(name, count, local_artwork(pics, codes), tuple(counts.items()))
+            )
         sections.append(PreviewSection(tuple(cards)))
     return tuple(sections)
