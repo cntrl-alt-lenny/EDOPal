@@ -10,6 +10,10 @@ from tempfile import NamedTemporaryFile
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
+from content.archives import pack_files
+from content.cache import PackCache
+from content.manifest import Pack
+
 ASSETS = Path(__file__).resolve().parent / "assets" / "extras"
 PACKS = ASSETS.parent / "appearance"
 SKINS = ("Abyss", "Moon", "Nebula", "Ristretto")
@@ -85,17 +89,84 @@ def _pack_sources(archive: ZipFile, prefix: str) -> dict[str, str]:
 
 
 def _install_pack(
-    root: Path, backups: Path, pack: str, prefix: str, *, highlight_turn=False
-) -> None:
-    with ZipFile(PACKS / f"{pack}.zip") as archive:
-        files = _pack_sources(archive, prefix)
+    root: Path,
+    backups: Path,
+    pack: str,
+    prefix: str,
+    *,
+    turn_colors: tuple[tuple[int, ...], ...] | None = None,
+    archive_path: Path | None = None,
+) -> set[str]:
+    with ZipFile(archive_path or PACKS / f"{pack}.zip") as archive:
+        if archive_path is None:
+            files = _pack_sources(archive, prefix)
+        else:
+            files = {
+                name: source
+                for name, source in pack_files(archive).items()
+                if name.startswith(prefix)
+            }
         if not files:
             raise ValueError(f"No {prefix} files in the {pack} pack.")
+        if (
+            archive_path is not None
+            and prefix.startswith("skin/")
+            and prefix + "skin.xml" not in files
+        ):
+            raise ValueError(f"No skin.xml in the {pack} pack.")
         for name, source in files.items():
             data = archive.read(source)
-            if highlight_turn and name == prefix + "skin.xml":
-                data = _recolor_turn(data, TURN_ACCENTS[pack.capitalize()])
+            if turn_colors is not None and name == prefix + "skin.xml":
+                data = _recolor_turn(data, turn_colors)
             _publish(root, backups, name, data)
+        return set(files)
+
+
+def _skin_files(
+    root: Path,
+    backups: Path,
+    skin: str,
+    highlight_turn: bool | None,
+    cache: PackCache,
+    exact_skin: Pack | None,
+    exact_shared: Pack | None,
+) -> str:
+    pack_id = exact_skin.id if exact_skin else skin.lower()
+    prefix = f"skin/Monokai {skin}/"
+    relative = prefix + "skin.xml"
+    with ExitStack() as locks:
+        skin_path = locks.enter_context(cache.use_pack(pack_id, exact=exact_skin))
+        if exact_skin and skin_path is None:
+            raise FileNotFoundError(f"Download {exact_skin.title} before applying it.")
+        if (
+            exact_skin is None
+            and highlight_turn is not None
+            and current_skin(str(root)) == "Monokai " + skin
+        ):
+            installed = _regular_path(root, relative)
+            if installed.exists() and turn_highlight_enabled(root, skin) != highlight_turn:
+                with ZipFile(skin_path or PACKS / f"{pack_id}.zip") as pack:
+                    colors = (
+                        TURN_ACCENTS[skin] if highlight_turn else _turn_colors(pack.read(relative))
+                    )
+                _publish(root, backups, relative, _recolor_turn(installed.read_bytes(), colors))
+                # Keep local preferences when only the active skin's highlight changes.
+                return ""
+        shared_path = locks.enter_context(cache.use_pack("shared", exact=exact_shared))
+        if exact_shared and shared_path is None:
+            raise FileNotFoundError(f"Download {exact_shared.title} before applying this skin.")
+        _install_pack(
+            root,
+            backups,
+            pack_id,
+            prefix,
+            turn_colors=TURN_ACCENTS[skin] if highlight_turn else None,
+            archive_path=skin_path,
+        )
+        fonts = _install_pack(root, backups, "shared", "fonts/", archive_path=shared_path)
+        if "fonts/Inter-OFL.txt" not in fonts:
+            _publish(root, backups, "fonts/Inter-OFL.txt", (PACKS / "Inter-OFL.txt").read_bytes())
+    return skin
 
 
 def _turn_colors(data: bytes):
@@ -414,13 +485,30 @@ def apply_appearance(
     synth_music: bool = False,
     undo_group: str = "",
     highlight_turn: bool | None = None,
+    pack_cache: PackCache | None = None,
+    skin_pack: Pack | None = None,
+    shared_pack: Pack | None = None,
 ) -> None:
     """Install only the selected groups, activating the skin after its files are ready."""
     root = Path(edopro_path).resolve()
     backups = _backup_dir(root, config_path)
     snapshot = backups / "prior-skin.json"
     rel = "config/system.conf"
-    if (skin and skin not in SKINS) or audio not in ("", "Thonk", "Synth") or (restore and skin):
+    if skin_pack is not None and (
+        skin_pack.kind != "skin"
+        or skin_pack.withheld
+        or skin_pack.id == "shared"
+        or skin_pack.title != skin
+        or not re.fullmatch(r"[\w][\w -]{0,63}", skin)
+    ):
+        raise ValueError("Select the name and catalogue entry for a valid skin pack.")
+    if shared_pack is not None and (shared_pack.id != "shared" or shared_pack.withheld):
+        raise ValueError("Select the shared appearance pack.")
+    if (
+        (skin and skin not in SKINS and skin_pack is None)
+        or audio not in ("", "Thonk", "Synth")
+        or (restore and skin)
+    ):
         raise ValueError("Unknown or conflicting appearance selection.")
     if any(name and name not in SLEEVES for name in (player_sleeve, opponent_sleeve)):
         raise ValueError("Unknown card sleeve.")
@@ -442,26 +530,16 @@ def apply_appearance(
             raise ValueError("Undo one appearance category at a time.")
         _change_group(root, config_path, undo_group, None)
         return
-    if skin and highlight_turn is not None and current_skin(str(root)) == "Monokai " + skin:
-        relative = f"skin/Monokai {skin}/skin.xml"
-        installed = _regular_path(root, relative)
-        if installed.exists() and turn_highlight_enabled(root, skin) != highlight_turn:
-            with ZipFile(PACKS / (skin.lower() + ".zip")) as pack:
-                colors = TURN_ACCENTS[skin] if highlight_turn else _turn_colors(pack.read(relative))
-            _publish(root, backups, relative, _recolor_turn(installed.read_bytes(), colors))
-            # Only the LP highlight changed on the already-active skin. Its fonts,
-            # textures and system.conf may contain other preferences.
-            skin = ""
     if skin:
-        _install_pack(
+        skin = _skin_files(
             root,
             backups,
-            skin.lower(),
-            f"skin/Monokai {skin}/",
-            highlight_turn=bool(highlight_turn),
+            skin,
+            highlight_turn,
+            pack_cache or PackCache.for_config_path(config_path),
+            skin_pack,
+            shared_pack,
         )
-        _install_pack(root, backups, "shared", "fonts/")
-        _publish(root, backups, "fonts/Inter-OFL.txt", (PACKS / "Inter-OFL.txt").read_bytes())
     if sleeves:
         _install_pack(root, backups, "shared", "textures/")
     if audio == "Thonk":

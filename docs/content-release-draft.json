@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "packs": [
+    {
+      "id": "abyss",
+      "kind": "skin",
+      "title": "Abyss",
+      "description": "Monokai skin in the Abyss colourway.",
+      "author": "OLED Deck EDOPro project and original artwork holders",
+      "license": "Redistribution permissions unverified",
+      "attribution": "Captured from the OLED Deck EDOPro 41.0.2 installation. The included wallpaper and card artwork retain their original ownership.",
+      "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+      "version": "1.0.0",
+      "min_app_version": "5.5.0",
+      "withheld": true,
+      "download_url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/abyss.1.0.0.zip",
+      "size_bytes": 34272658,
+      "sha256": "01ae8e7012add55be096c5540f2930d7827445ca645ba92e9f3a46aacb65289c",
+      "previews": [
+        {
+          "url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/abyss.1.0.0-1.png",
+          "sha256": "5593d7078ffd03814444825e22d49913bca1e3151ae002bc14eeaea533c2326d",
+          "size_bytes": 79054
+        }
+      ]
+    },
+    {
+      "id": "moon",
+      "kind": "skin",
+      "title": "Moon",
+      "description": "Monokai skin in the Moon colourway.",
+      "author": "OLED Deck EDOPro project and original artwork holders",
+      "license": "Redistribution permissions unverified",
+      "attribution": "Captured from the OLED Deck EDOPro 41.0.2 installation. The included wallpaper and card artwork retain their original ownership.",
+      "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+      "version": "1.0.0",
+      "min_app_version": "5.5.0",
+      "withheld": true,
+      "download_url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/moon.1.0.0.zip",
+      "size_bytes": 27943261,
+      "sha256": "474df73dfa03fb67f04e14743c326ef2a867a680c1a3e5d7c9b084950dfe0198",
+      "previews": [
+        {
+          "url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/moon.1.0.0-1.png",
+          "sha256": "21607f7cea1f525b9e9e3f2e8270618d1905a90c1d68e92dc63de6330f3ae459",
+          "size_bytes": 72342
+        }
+      ]
+    },
+    {
+      "id": "nebula",
+      "kind": "skin",
+      "title": "Nebula",
+      "description": "Monokai skin in the Nebula colourway.",
+      "author": "OLED Deck EDOPro project and original artwork holders",
+      "license": "Redistribution permissions unverified",
+      "attribution": "Captured from the OLED Deck EDOPro 41.0.2 installation. The included wallpaper and card artwork retain their original ownership.",
+      "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+      "version": "1.0.0",
+      "min_app_version": "5.5.0",
+      "withheld": true,
+      "download_url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/nebula.1.0.0.zip",
+      "size_bytes": 33872775,
+      "sha256": "531e22360e43ba9d2b624962cd34fdd8a40d494c6e475b779548fda69d2d9565",
+      "previews": [
+        {
+          "url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/nebula.1.0.0-1.png",
+          "sha256": "b2e80f15c8934dd520167655dcb8789da787b93bde236f96e9e4c7559e8eaf34",
+          "size_bytes": 63992
+        }
+      ]
+    },
+    {
+      "id": "ristretto",
+      "kind": "skin",
+      "title": "Ristretto",
+      "description": "Monokai skin in the Ristretto colourway.",
+      "author": "OLED Deck EDOPro project and original artwork holders",
+      "license": "Redistribution permissions unverified",
+      "attribution": "Captured from the OLED Deck EDOPro 41.0.2 installation. The included wallpaper and card artwork retain their original ownership.",
+      "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+      "version": "1.0.0",
+      "min_app_version": "5.5.0",
+      "withheld": true,
+      "download_url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/ristretto.1.0.0.zip",
+      "size_bytes": 29819455,
+      "sha256": "6498def3a295a374dedb18f5e7b10999c5d546b47d7bba1d5674671960afec0a",
+      "previews": [
+        {
+          "url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/ristretto.1.0.0-1.png",
+          "sha256": "7841d5bffd69c62564d0c5b3148c367d06d10cc2941e7a1b6cd62a428dcc52cd",
+          "size_bytes": 97535
+        }
+      ]
+    },
+    {
+      "id": "shared",
+      "kind": "sound-effects",
+      "title": "Shared appearance assets",
+      "description": "Inter fonts, Thonk sound effects and the original sleeve images.",
+      "author": "Inter project, Kenney, and original sleeve artwork holders",
+      "license": "SIL Open Font License 1.1 (fonts), CC0 (Kenney audio); sleeve redistribution permissions unverified",
+      "attribution": "Inter and the InterEDO variant accompany Thonk effects derived from Kenney's Casino Audio, Interface Sounds and UI Audio. The Vortex and 1998 OCG sleeve artwork retains its original ownership.",
+      "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+      "version": "1.0.0",
+      "min_app_version": "5.5.0",
+      "withheld": true,
+      "download_url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/shared.1.0.0.zip",
+      "size_bytes": 4699056,
+      "sha256": "9942e48964ad93f1afffdd6f60d7db2743b1534c033044d0167d8a118ea3438c",
+      "previews": [
+        {
+          "url": "https://github.com/cntrl-alt-lenny/edopro-studio-content/releases/download/content-v1/shared.1.0.0-1.png",
+          "sha256": "dc9a8af4d74776e4db1fcba6359cb544acf1ee763a10cd9cce2c11c9370d0a72",
+          "size_bytes": 5988
+        }
+      ]
+    }
+  ]
+}

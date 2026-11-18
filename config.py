@@ -43,6 +43,7 @@ DEFAULTS = {
     "save_report": False,
     "field_art": True,
     "original_text": False,
+    "content_manifest_url": "",
     # YGOProDeck hosts official, Rush Duel, and anime/custom cards under the
     # same IDs EDOPro uses; it's a big CDN, so it takes the bulk of the load.
     # "backup"/"field_backup" is ProjectIgnis's own image server — the same one
@@ -625,6 +626,11 @@ class Config:
         self.concurrency = _clamp_min_int("concurrency", self.concurrency, 1)
         self.max_retries = _clamp_min_int("max_retries", self.max_retries, 0)
         self.timeout = _clamp_min_int("timeout", self.timeout, 1)
+        content_url = file_cfg.get("content_manifest_url", DEFAULTS["content_manifest_url"])
+        if not isinstance(content_url, str):
+            print("Warning: content_manifest_url must be a URL string; using the default.")
+            content_url = DEFAULTS["content_manifest_url"]
+        self.content_manifest_url: str = content_url.strip()
 
         sources = dict(DEFAULTS["sources"])
         file_sources = file_cfg.get("sources")
