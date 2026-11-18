@@ -49,6 +49,21 @@ class Soundtracks(unittest.TestCase):
                     width, height = struct.unpack(">II", header[16:24])
                     self.assertTrue(0 < width <= box[0] and 0 < height <= box[1])
 
+    def test_world_championship_search_and_existing_short_filenames(self):
+        games = music.catalog()
+        for year, key in enumerate(
+            ("wc2004", "trials", "ultimate", "wc2007", "wc2008", "wc2009", "wc2010", "wc2011"),
+            start=2004,
+        ):
+            with self.subTest(year):
+                short = (
+                    f"Championship Tournament {year}" if year <= 2006 else f"Championship {year}"
+                )
+                full = f"World {short}"
+                self.assertIn(full, (games[key].title, *games[key].aliases))
+                self.assertEqual(music._identify(f"{short} - Deck.wav", games), key)
+                self.assertEqual(music._identify(f"{full} - Duel.flac", games), key)
+
     def test_import_and_reimport_with_changed_recording(self):
         source = audio(self.album / "Theme.wav", 1)
         dst = music.import_track(source, "wc2011", "deck", root=self.library)
