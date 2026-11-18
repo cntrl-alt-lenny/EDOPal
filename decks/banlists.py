@@ -36,7 +36,7 @@ def parse_lists(path: Path) -> Iterator[Banlist]:
                 issues.append(f"Unnamed list at line {number}")
         elif line == "$whitelist":
             whitelist = True
-        elif header and line and not line.startswith("#"):
+        elif header and line and not line.startswith(("#", "--")):
             fields = line.split(maxsplit=2)
             if (
                 len(fields) >= 2

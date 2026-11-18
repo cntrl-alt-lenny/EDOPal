@@ -31,6 +31,7 @@ from studio.pages.decks import DecksPage
 from studio.pages.health import HealthPage
 from studio.pages.music import MusicPage
 from studio.pages.mydecks import MyDecksPage
+from studio.pages.practice import PracticePage
 from studio.pages.replays import ReplaysPage
 from studio.pages.settings import SettingsPage
 from studio.pages.skins import SkinsPage
@@ -47,6 +48,7 @@ PAGES = (
     MusicPage,
     DecksPage,
     MyDecksPage,
+    PracticePage,
     ReplaysPage,
     BackupPage,
     HealthPage,
