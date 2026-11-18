@@ -27,6 +27,9 @@ from config import Config  # noqa: E402
 from studio import theme  # noqa: E402
 from studio.context import AppContext, Installation  # noqa: E402
 from studio.shell import StudioWindow  # noqa: E402
+from tools.studio_decks_screenshots import render_decks  # noqa: E402
+
+PAGE_RENDERERS = {"decks": render_decks}
 
 
 def create_demo(root: Path) -> Config:
@@ -100,7 +103,7 @@ def settle(predicate: Callable[[], bool], timeout: float = 6) -> None:
         time.sleep(0.01)
 
 
-def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
+def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = None) -> list[Path]:
     app = QApplication.instance() or QApplication(["EDOPro Studio"])
     theme.apply(app)
     cfg = create_demo(root)
@@ -127,6 +130,9 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     window.show()
     window.setFocus(Qt.FocusReason.OtherFocusReason)
     try:
+        if page:
+            PAGE_RENDERERS[page](window, selected, shot, settle)
+            return files
         shot("01-hd-cards")
         card.options.settings.click()
         card.settings.toggles["save_report"].setChecked(True)
@@ -155,6 +161,9 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         for number, key in enumerate(
             ("skins", "sleeves", "sounds", "music", "decks", "settings"), 8
         ):
+            if renderer := PAGE_RENDERERS.get(key):
+                renderer(window, selected, shot, settle, overview=f"{number:02}-{key}")
+                continue
             window.navigate(key)
             shot(f"{number:02}-{key}")
         window.navigate("cards")
@@ -195,13 +204,14 @@ def main_cli() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--size", type=parse_size, action="append", help="WxH, repeatable")
+    parser.add_argument("--page", choices=PAGE_RENDERERS, help="Render the full set for one page")
     args = parser.parse_args()
     app = QApplication.instance() or QApplication(["EDOPro Studio"])
     app.setQuitOnLastWindowClosed(False)
     for width, height in args.size or [(1280, 800), (1600, 1000)]:
         name = f"{width}x{height}"
         with tempfile.TemporaryDirectory(prefix=".studio-preview-", dir=ROOT) as temporary:
-            files = render(args.out / name, (width, height), Path(temporary))
+            files = render(args.out / name, (width, height), Path(temporary), page=args.page)
         print(f"Rendered {len(files)} views at {name} in {files[0].parent}")
 
 
