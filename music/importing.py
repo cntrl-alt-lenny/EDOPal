@@ -7,8 +7,9 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from music.audio import FORMATS, _audio, _digest, store_track
+from music.audio import FORMATS, _audio, _digest, _store_track
 from music.catalogue import LOCAL, SCENES, Game, catalog, identify, library_root, normalized
+from music.packs import pack_media
 from music.tags import tags
 from state_lock import locked
 
@@ -96,7 +97,11 @@ def _suggest_game(hints: Iterable[str], games: dict[str, Game]) -> tuple[str | N
 
 
 def _index(root: Path, games: dict[str, Game]) -> dict[str, Path]:
-    result = {}
+    result = {
+        _digest(row.path): row.path
+        for row in pack_media(root)
+        if row.item.role == "track" and row.path.is_file()
+    }
     for key in games:
         for scene in SCENES:
             for path in _audio(root / key / scene):
@@ -192,7 +197,7 @@ def _import_one(item: ImportItem, root: Path, known: dict[str, Path] | None) -> 
         return ImportResult(item.path, "duplicate", destination=existing)
     if item.game is None:
         raise ValueError("Choose a game for this recording.")
-    out, added = store_track(item.path, item.game, item.scene, root=root, expected_digest=digest)
+    out, added = _store_track(item.path, item.game, item.scene, root=root, expected_digest=digest)
     if known is not None:
         known[digest] = out
     return ImportResult(item.path, "imported" if added else "duplicate", destination=out)

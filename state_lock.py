@@ -2,23 +2,38 @@
 
 import contextlib
 import functools
+import os
 import sys
+import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Concatenate, ParamSpec, TypeVar
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
+_held = threading.local()
 
 
 @contextlib.contextmanager
 def appearance_lock(game: Path) -> Iterator[None]:
+    """Serialize synchronous writers, allowing nested calls on the owning thread."""
     root = game.resolve()
+    roots = getattr(_held, "roots", None)
+    if roots is None or _held.pid != os.getpid():
+        roots = _held.roots = set()
+        _held.pid = os.getpid()
+    if root in roots:
+        yield
+        return
     lock = root / ".edopro-appearance.lock"
     if lock.resolve() != lock or lock.is_symlink():
         raise OSError("Invalid installation lock file.")
     with locked(root, lock.name):
-        yield
+        roots.add(root)
+        try:
+            yield
+        finally:
+            roots.remove(root)
 
 
 def appearance_writer(

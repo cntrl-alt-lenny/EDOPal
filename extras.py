@@ -12,10 +12,10 @@ from tempfile import NamedTemporaryFile
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
-from content.archives import pack_files
+from content.archives import shared_files, skin_files
 from content.cache import PackCache
 from content.manifest import Pack
-from state_lock import appearance_writer
+from state_lock import appearance_lock, appearance_writer
 
 ASSETS = Path(__file__).resolve().parent / "assets" / "extras"
 PACKS = ASSETS.parent / "appearance"
@@ -109,11 +109,12 @@ def _install_pack(
         if archive_path is None:
             files = _pack_sources(archive, prefix)
         else:
-            files = {
-                name: source
-                for name, source in pack_files(archive).items()
-                if name.startswith(prefix)
-            }
+            validated = (
+                skin_files(archive, prefix[len("skin/Monokai ") : -1])
+                if prefix.startswith("skin/Monokai ")
+                else shared_files(archive)
+            )
+            files = {name: source for name, source in validated.items() if name.startswith(prefix)}
         if not files:
             raise ValueError(f"No {prefix} files in the {pack} pack.")
         if (
@@ -527,17 +528,18 @@ def apply_sleeve_pngs(
 ) -> tuple[str, ...]:
     """Apply PNG bytes in one sleeves transaction. Return changed root-relative paths."""
     root = root.resolve()
-    active = current_skin(str(root)) if skin is None else skin
-    files = {}
-    for base, data in (("cover", mine), ("cover2", opponent)):
-        if data is None:
-            continue
-        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise ValueError("Choose a valid PNG sleeve.")
-        source = installed_sleeve(root, base, active)
-        target = source.with_suffix(".png") if source else root / "textures" / (base + ".png")
-        files[target.relative_to(root).as_posix()] = data
-    return _change_group(root, config_path, "sleeves", files, prepare=prepare) if files else ()
+    with appearance_lock(root):
+        active = current_skin(str(root)) if skin is None else skin
+        files = {}
+        for base, data in (("cover", mine), ("cover2", opponent)):
+            if data is None:
+                continue
+            if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise ValueError("Choose a valid PNG sleeve.")
+            source = installed_sleeve(root, base, active)
+            target = source.with_suffix(".png") if source else root / "textures" / (base + ".png")
+            files[target.relative_to(root).as_posix()] = data
+        return _change_group(root, config_path, "sleeves", files, prepare=prepare) if files else ()
 
 
 @appearance_writer
@@ -572,7 +574,9 @@ def apply_appearance(
         or not re.fullmatch(r"[\w][\w -]{0,63}", skin)
     ):
         raise ValueError("Select the name and catalogue entry for a valid skin pack.")
-    if shared_pack is not None and (shared_pack.id != "shared" or shared_pack.withheld):
+    if shared_pack is not None and (
+        shared_pack.id != "shared" or shared_pack.kind != "sound-effects" or shared_pack.withheld
+    ):
         raise ValueError("Select the shared appearance pack.")
     if (
         (skin and skin not in SKINS and skin_pack is None)
@@ -659,3 +663,13 @@ def apply_appearance(
     _publish(root, backups, rel, _update_settings(content, values))
     if restore:
         snapshot.unlink(missing_ok=True)
+    library_dir = (pack_cache or PackCache.for_config_path(config_path)).root.parent / "sleeves"
+    if library_dir.is_dir():
+        from sleeves import Library, reapply
+
+        exclude = tuple(
+            slot
+            for slot, explicit in (("mine", player_sleeve), ("opponent", opponent_sleeve))
+            if explicit
+        )
+        reapply(Library(library_dir), root, Path(config_path), exclude=exclude)

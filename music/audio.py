@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Iterator
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 
 from music.catalogue import SCENES, catalog, library_root
@@ -34,7 +35,7 @@ def _digest(path: Path) -> str:
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
-def _valid_audio(path: Path) -> None:
+def validate_audio(path: Path) -> None:
     if not path.is_file() or path.suffix.lower() not in FORMATS:
         raise ValueError("Choose a FLAC, Ogg Vorbis, MP3 or WAV audio file.")
     with path.open("rb") as source:
@@ -89,10 +90,31 @@ def store_track(
     source: Path, key: str, scene: str, *, root: Path | None = None, expected_digest: str = ""
 ) -> tuple[Path, bool]:
     """Store one recording and report whether a new file was added."""
+    root = root or library_root()
+    return _store_track(
+        source,
+        key,
+        scene,
+        root=root,
+        expected_digest=expected_digest,
+        guard=locked(root, ".import.lock"),
+    )
+
+
+def _store_track(
+    source: Path,
+    key: str,
+    scene: str,
+    *,
+    root: Path,
+    expected_digest: str,
+    guard: AbstractContextManager[None] | None = None,
+) -> tuple[Path, bool]:
+    """Batch import already owns the library lock. A standalone import acquires it after validation."""
     if key not in catalog(root=root):
         raise ValueError("Choose a game from the library.")
-    _valid_audio(source)
-    storage = (root or library_root()).resolve()
+    validate_audio(source)
+    storage = root.resolve()
     base = storage / key / _scene(scene)
     if not base.resolve().is_relative_to(storage):
         raise OSError("The target folder points outside your soundtrack library.")
@@ -103,7 +125,18 @@ def store_track(
     if expected_digest and digest != expected_digest:
         raise ValueError("The file changed after planning. Scan it again.")
     size = source.stat().st_size
-    with locked(base):
+    from music.packs import pack_media
+
+    with guard or nullcontext(), locked(base):
+        for row in pack_media(storage):
+            if (
+                row.item.game == key
+                and scene in row.item.scenes
+                and row.digest == digest
+                and row.path.is_file()
+                and _digest(row.path) == digest
+            ):
+                return row.path, False
         for existing in _audio(base):
             if existing.stat().st_size == size and _digest(existing) == digest:
                 return existing, False

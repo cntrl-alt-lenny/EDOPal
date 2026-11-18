@@ -49,7 +49,7 @@ class Progress:
 ProgressCallback = Callable[[Progress], None]
 
 
-def _check_cancel(cancel: Event | None) -> None:
+def check_cancel(cancel: Event | None) -> None:
     if cancel is not None and cancel.is_set():
         raise DownloadError(DownloadFailure.CANCELLED, "Download cancelled.")
 
@@ -164,7 +164,7 @@ async def _stream(
         sock_connect=timeout, sock_read=timeout, connect=timeout
     )
     while True:
-        _check_cancel(cancel)
+        check_cancel(cancel)
         async with session.get(
             transfer.url, headers=headers, auto_decompress=False, timeout=request_timeout
         ) as response:
@@ -183,14 +183,14 @@ async def _stream(
             done = resumed
             rate = 0.0
             last_tick = time.monotonic()
-            _check_cancel(cancel)
+            check_cancel(cancel)
             if progress is not None:
                 progress(Progress(done, total, rate))
-            _check_cancel(cancel)
+            check_cancel(cancel)
             oversized = False
             with partial.open("ab" if resumed else "wb") as output:
                 async for chunk in response.content.iter_chunked(_CHUNK_SIZE):
-                    _check_cancel(cancel)
+                    check_cancel(cancel)
                     if done + len(chunk) > (response_end or total or transfer.limit):
                         oversized = True
                         break
@@ -207,7 +207,7 @@ async def _stream(
                 raise DownloadError(
                     DownloadFailure.INTEGRITY, "The download exceeded the expected size."
                 )
-            _check_cancel(cancel)
+            check_cancel(cancel)
             if (total is not None and done != total) or (
                 response_end is not None and done != response_end
             ):
@@ -223,7 +223,7 @@ async def _fetch(
     path = transfer.target
     partial = path.with_suffix(path.suffix + ".part")
     try:
-        _check_cancel(cancel)
+        check_cancel(cancel)
         existing = _file_size(path)
         if existing is not None:
             if transfer.verify(path, existing):
@@ -231,7 +231,7 @@ async def _fetch(
             path.unlink()
         offset = _file_size(partial) or 0
         if offset and transfer.verify(partial, offset):
-            _check_cancel(cancel)
+            check_cancel(cancel)
             partial.replace(path)
             return path
         if offset >= (transfer.size_bytes or transfer.limit):
@@ -248,7 +248,7 @@ async def _fetch(
                 task = asyncio.create_task(stream)
                 try:
                     while not task.done():
-                        _check_cancel(cancel)
+                        check_cancel(cancel)
                         await asyncio.wait((task,), timeout=0.1)
                     done = task.result()
                 finally:
@@ -262,11 +262,11 @@ async def _fetch(
                 DownloadFailure.INTEGRITY,
                 "The downloaded file failed size, format or SHA-256 verification.",
             )
-        _check_cancel(cancel)
+        check_cancel(cancel)
         partial.replace(path)
         return path
     except (aiohttp.ClientError, TimeoutError) as exc:
-        _check_cancel(cancel)
+        check_cancel(cancel)
         raise DownloadError(DownloadFailure.TRANSIENT, f"Download interrupted: {exc}") from exc
     except OSError as exc:
         if exc.errno == errno.ENOSPC or getattr(exc, "winerror", None) in {39, 112}:
@@ -286,8 +286,10 @@ async def download_pack(
     timeout: float = 30,
 ) -> Path:
     """Fetch and verify one exact version on the caller's worker loop."""
-    if pack.withheld or not pack.license.strip() or not pack.attribution.strip():
-        raise ValueError("A content pack must have licence and attribution information.")
+    if pack.withheld or not all(
+        field.strip() for field in (pack.author, pack.license, pack.attribution)
+    ):
+        raise ValueError("A content pack requires author, licence and attribution information.")
     if not is_compatible(pack, app_version):
         raise DownloadError(
             DownloadFailure.INCOMPATIBLE, f"This pack requires app version {pack.min_app_version}."

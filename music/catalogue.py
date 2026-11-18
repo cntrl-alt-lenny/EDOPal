@@ -80,6 +80,12 @@ def _official() -> dict[str, Game]:
     return games
 
 
+@cache
+def official_games() -> frozenset[str]:
+    """IDs that a portable content pack can address on every installation."""
+    return frozenset(_official()) - {LOCAL}
+
+
 def personal_games(root: Path) -> dict[str, Game]:
     games = {}
     for folder in root.glob("user*"):

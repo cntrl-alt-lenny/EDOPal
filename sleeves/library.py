@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 
 import config
 import extras
+from content.media import Changes, Item, Origin
 
 from .catalog import Recipe
 from .designer import render
@@ -53,19 +54,96 @@ class Library:
         if layout is None:
             layout = Layout("framed" if passcode is not None else "fill")
         data = read_source(original) if isinstance(original, Path) else original
-        rendered = png_bytes(compose(data, layout))
         with self._store.transaction() as state:
-            e = Entry(
-                uuid4().hex,
-                name,
-                "imported" if passcode is None else "card art",
-                self._store.put(rendered),
-                self._store.put(data, original=True),
-                layout=layout,
-                passcode=passcode,
-            )
+            e = self._image_entry(uuid4().hex, name, data, layout, passcode)
             state.entries[e.id] = e
             return e
+
+    def _image_entry(
+        self, uid: str, name: str, data: bytes, layout: Layout, passcode: int | None = None
+    ) -> Entry:
+        rendered = png_bytes(compose(data, layout))
+        return Entry(
+            uid,
+            name,
+            "imported" if passcode is None else "card art",
+            self._store.put(rendered),
+            self._store.put(data, original=True),
+            layout=layout,
+            passcode=passcode,
+        )
+
+    def replace_pack(self, origin: Origin, sources: Iterable[tuple[Item, Path]]) -> Changes:
+        """Reconcile a whole sleeve set under the same transaction as edits and assignments."""
+        with self._store.open(writable=True) as state:
+            old = {
+                e.pack_member: e
+                for e in state.entries.values()
+                if e.origin and e.origin.id == origin.id and not e.retained
+            }
+            added, removed = [], []
+            retained = [
+                e.id
+                for e in state.entries.values()
+                if e.origin and e.origin.id == origin.id and e.retained
+            ]
+            stale = []
+            for entry in list(state.entries.values()):
+                if not entry.origin or entry.origin.id != origin.id:
+                    continue
+                preserved = {}
+                for field in ("image", "original"):
+                    expected = getattr(entry, field)
+                    if expected is None:
+                        continue
+                    path = self._store.blob(expected, original=(field == "original"))
+                    if extras._signature(path) not in {None, expected}:
+                        preserved[field] = self._store.put(
+                            read_source(path), original=(field == "original")
+                        )
+                if preserved:
+                    state.entries[entry.id] = replace(entry, retained=True, **preserved)
+                    if not entry.retained:
+                        del old[entry.pack_member]
+                        retained.append(entry.id)
+            for item, source in sources:
+                prev = old.pop(item.member, None)
+                uid = prev.id if prev else uuid4().hex
+                entry = replace(
+                    self._image_entry(uid, item.title, read_source(source), Layout()),
+                    tags=item.tags,
+                    origin=origin,
+                    pack_member=item.member,
+                    last_used=prev.last_used if prev else 0,
+                )
+                entry = replace(entry, pack_baseline=entry.fingerprint())
+                state.entries[uid] = entry
+                if prev != entry:
+                    added.append(uid)
+                    if prev:
+                        stale.append(prev)
+            for entry in old.values():
+                if any(
+                    entry.id in slots.values()
+                    for mapping in (state.assignments, state.undo)
+                    for slots in mapping.values()
+                ):
+                    state.entries[entry.id] = replace(entry, retained=True)
+                    retained.append(entry.id)
+                else:
+                    del state.entries[entry.id]
+                    stale.append(entry)
+                    removed.append(entry.id)
+            self._store.save(state)
+            for entry in stale:
+                if all(e.image != entry.image for e in state.entries.values()):
+                    self._store.blob(entry.image).unlink(missing_ok=True)
+                    self._thumb(entry).unlink(missing_ok=True)
+                if entry.original and all(
+                    e.original != entry.original for e in state.entries.values()
+                ):
+                    self._store.blob(entry.original, original=True).unlink(missing_ok=True)
+            return Changes(tuple(added), tuple(removed), tuple(retained))
 
     def entries(
         self,
@@ -112,6 +190,8 @@ class Library:
                 else tuple(dict.fromkeys(t.strip() for t in tags if t.strip())),
                 favourite=e.favourite if favourite is None else favourite,
             )
+            if e.origin and e != state.entries[e.id]:
+                e = replace(e, retained=True)
             state.entries[e.id] = e
             return e
 

@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -170,7 +171,7 @@ def test_all_config_writers_observe_one_install_lock(
 ) -> None:
     cfg = str(tmp_path / "separate-config/config.json")
     monkeypatch.setattr(music_library, "_game_running", lambda path: False)
-    with appearance_lock(game):
+    with ThreadPoolExecutor(max_workers=1) as pool, appearance_lock(game):
         for run in (
             lambda: install_theme(game, ID, THEME),
             lambda: extras.apply_appearance(str(game), cfg, skin="Moon"),
@@ -178,7 +179,7 @@ def test_all_config_writers_observe_one_install_lock(
             lambda: music_library.set_music_enabled(game, True),
         ):
             with pytest.raises(OSError):
-                run()
+                pool.submit(run).result(timeout=10)
     assert (game / "config/system.conf").read_bytes() == ORIGINAL
 
 

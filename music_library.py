@@ -16,9 +16,11 @@ from music.audio import (
     _audio,
     _copy_new,
     _digest,
-    _valid_audio,
     import_track,
     store_track,
+)
+from music.audio import (
+    validate_audio as _valid_audio,
 )
 from music.catalogue import (
     ART,
@@ -42,6 +44,7 @@ from music.discovery import (
     backup_folder,
     describe,
     read_json,
+    record_track,
     records,
     scan_scene,
     tracks,
@@ -397,7 +400,7 @@ def _retire_selection(
         for row in managed:
             path = main / row["name"]
             if path.is_file() and _digest(path) == row["digest"]:
-                previous.append(Track(row["game"], row["title"], path, scene))
+                previous.append(record_track(row, path, scene))
     saved = _remember(game, scene, previous)
     for record in managed:
         _retire_current(main, state, record, changes)
@@ -459,5 +462,5 @@ def undo_playlist(game: Path, scene: str, *, root: Path | None = None) -> None:
             path = history / row["name"]
             if _digest(path) != row["digest"]:
                 raise OSError("The undo copy has changed. Restore the original playlist instead.")
-            chosen.append(Track(row["game"], row["title"], path, scene))
+            chosen.append(record_track(row, path, scene))
         _publish(game, scene, chosen, catalog(root=root), undo=True)

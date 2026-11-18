@@ -1,4 +1,4 @@
-"""Stage a content release locally from pack ZIPs and editorial metadata."""
+"""Build a local release from your media folders, previews and packs.json."""
 
 import argparse
 import json
@@ -7,14 +7,15 @@ import shutil
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from zipfile import BadZipFile, ZipFile
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from content.archives import pack_files  # noqa: E402
+from content.archives import shared_files, skin_files  # noqa: E402
 from content.cache import file_sha256  # noqa: E402
 from content.download import preview_format  # noqa: E402
+from content.layouts import LAYOUTS, MAX_AUDIO, MAX_FILES, MAX_TOTAL, staged_items  # noqa: E402
 from content.manifest import (  # noqa: E402
     DEFAULT_REPOSITORY,
     MAX_PREVIEW_BYTES,
@@ -31,20 +32,18 @@ _GENERATED_FIELDS = {"download_url", "size_bytes", "sha256", "previews"}
 
 
 def _validate_archive(path: Path, info: dict) -> None:
+    if info["id"] == "shared" and info["kind"] != "sound-effects":
+        raise ValueError("The shared ID is reserved for the legacy appearance dependency.")
+    if info["kind"] in LAYOUTS:
+        with staged_items(path, info["kind"], path.parent):
+            return
+    if info["kind"] == "sound-effects" and info["id"] != "shared":
+        raise ValueError("The sound-effects layout is reserved for a future release.")
     with ZipFile(path) as archive:
-        files = pack_files(archive)
         if info["kind"] == "skin":
-            title = info["title"]
-            if (
-                not re.fullmatch(r"[\w][\w -]{0,63}", title)
-                or f"skin/Monokai {title}/skin.xml" not in files
-            ):
-                raise ValueError(f"Expected skin/Monokai {title}/skin.xml.")
-        if (
-            info["id"] == "shared"
-            and not {"fonts/Inter-Medium.ttf", "fonts/InterEDO-Regular.ttf"} <= files.keys()
-        ):
-            raise ValueError("The shared archive needs both Inter fonts.")
+            skin_files(archive, info["title"])
+        else:
+            shared_files(archive)
         if corrupt := archive.testzip():
             raise ValueError(f"ZIP checksum failed: {corrupt}.")
 
@@ -65,6 +64,29 @@ def _stage_preview(source: Path, stage: Path, name: str, release_url: str) -> di
         "sha256": file_sha256(staged),
         "size_bytes": len(data),
     }
+
+
+def _zip_folder(source: Path, target: Path) -> None:
+    root = source.absolute()
+    if root.resolve() != root or not root.is_dir():
+        raise ValueError(f"Expected a regular pack folder: {source.name}.")
+    count = size = 0
+    with ZipFile(target, "w", compression=ZIP_DEFLATED) as archive:
+        for path in root.rglob("*"):
+            if path == target.absolute():
+                raise ValueError("Choose an output folder outside the input pack.")
+            count += 1
+            if path.resolve() != path or count > MAX_FILES:
+                raise ValueError("Linked paths or too many files in pack folder.")
+            if path.is_dir():
+                continue
+            if not path.is_file():
+                raise ValueError(f"Expected an ordinary file: {path}")
+            length = path.stat().st_size
+            size += length
+            if size > MAX_TOTAL or length > MAX_AUDIO:
+                raise ValueError("Pack folder exceeds the size limit.")
+            archive.write(path, path.relative_to(root).as_posix())
 
 
 def _stage_pack(
@@ -88,10 +110,16 @@ def _stage_pack(
     ):
         raise ValueError(f"{pack_id}: preview_files must contain PNG, JPEG or WebP filenames.")
     source = folder / f"{pack_id}.zip"
-    if not source.is_file() or source.is_symlink():
-        raise ValueError(f"Expected a regular pack file: {source.name}.")
     staged = stage / f"{pack_id}.{version}.zip"
-    shutil.copyfile(source, staged)
+    plain = folder / pack_id
+    if plain.exists() and source.exists():
+        raise ValueError(f"Choose either {pack_id}/ or {pack_id}.zip.")
+    if plain.is_dir():
+        _zip_folder(plain, staged)
+    elif source.is_file() and not source.is_symlink():
+        shutil.copyfile(source, staged)
+    else:
+        raise ValueError(f"Expected a folder named {pack_id} or a regular {source.name}.")
     info.update(
         download_url=f"{release_url}/{staged.name}",
         size_bytes=staged.stat().st_size,
@@ -133,7 +161,7 @@ def build_release(
     ids = [pack_id for pack_id in ids if isinstance(pack_id, str)]
     if len(set(ids)) != len(ids):
         raise ValueError("packs.json contains duplicate pack ids.")
-    if {path.name for path in folder.glob("*.zip")} != {f"{pack_id}.zip" for pack_id in ids}:
+    if not {path.name for path in folder.glob("*.zip")} <= {f"{pack_id}.zip" for pack_id in ids}:
         raise ValueError("packs.json must describe every ZIP in the pack folder.")
     previous = []
     if base_manifest is not None:
@@ -141,10 +169,15 @@ def build_release(
         if parse_manifest(body).schema_version != SCHEMA_VERSION:
             raise ValueError("The base manifest must use the publisher's schema version.")
         previous = [entry for entry in json.loads(body)["packs"] if entry["id"] not in ids]
-    if not draft and any(
-        isinstance(entry, dict) and entry.get("withheld") for entry in [*previous, *metadata]
-    ):
-        raise ValueError("Withheld entries require --draft and have no upload commands.")
+    if not draft:
+        metadata = [
+            entry
+            for entry in metadata
+            if not isinstance(entry, dict) or entry.get("withheld") is not True
+        ]
+        previous = [entry for entry in previous if not entry.get("withheld")]
+        if not metadata and not previous:
+            raise ValueError("Withheld entries require --draft and have no upload commands.")
     release_url = f"https://github.com/{repo}/releases/download/{tag}"
     out.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=out.parent) as temporary:
@@ -170,9 +203,24 @@ def build_release(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Getting started\n"
+            "  1. Make a folder per pack ID. Put tracks and covers under each game ID,\n"
+            "     or put wallpaper and sleeve pictures under images/.\n"
+            "  2. List them in that folder's pack.json. Put credits and preview names\n"
+            "     in packs.json beside the folders. Examples are in docs/content-packs.md.\n"
+            "  3. Choose a new output folder. Add --draft to review withheld packs.\n"
+            "     Without --draft, only publishable assets get upload commands.\n"
+            "     This tool stages files on your computer. Nothing is uploaded."
+        ),
+    )
     parser.add_argument(
-        "folder", type=Path, help="directory containing packs.json and one ZIP per pack"
+        "folder",
+        type=Path,
+        help="folder containing packs.json, previews, and a subfolder (or ZIP) named for each pack ID",
     )
     parser.add_argument(
         "--out", type=Path, required=True, help="new directory for the staged release"
