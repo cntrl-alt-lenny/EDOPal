@@ -60,7 +60,7 @@ def test_search_sort_edit_undo_export_and_reveal(
         "Final round", "Remember turn seven.", ("practice", "round, one")
     )
     dest = tmp_path / "duel.zip"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_: (str(dest), ""))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_: (str(dest.with_suffix("")), ""))
     page.form.export.click()
     qtbot.waitUntil(lambda: page.state == "detail")
     with ZipFile(dest) as archive:
@@ -192,3 +192,75 @@ def test_tags_presets_and_two_rolling_formats(tmp_path: Path) -> None:
     tags = ("round, one", 'say "go"', "practice")
     assert notes_from_fields("Duel", "", format_tags(tags)).tags == tags
     assert notes_from_fields("Duel", "", "a\r\nb\nc").tags == ("a", "b", "c")
+
+
+def test_large_library_returns_to_the_same_replay_and_updates_in_place(
+    make_window: Callable, qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = make_window()
+    window.resize(960, 600)
+    game = Path(window.ctx.installation.path)
+    seed_replays(game, tmp_path, extra=320)
+    window.nav["replays"].click()
+    page = window.current
+    qtbot.waitUntil(lambda: page.state == "library")
+    assert page.preserve.isVisible()
+    assert page.list.records.rowCount() == 327
+    last = page.list.records.index(325)
+    page.list.setCurrentIndex(last)
+    page.list.scrollTo(last)
+    expected = page.list.records.entries[last.row()].path
+    qtbot.keyClick(page.list, Qt.Key.Key_Return)
+    assert page.selected.path == expected
+    qtbot.keyClick(button(window, "Back"), Qt.Key.Key_Escape)
+    assert page.list.currentIndex().row() == last.row()
+    assert (
+        page.list.viewport()
+        .rect()
+        .contains(page.list.visualRect(page.list.currentIndex()).center())
+    )
+
+    page.search.setText("duel")
+    page.search.setFocus()
+    page.search.setCursorPosition(1)
+    rolling = game / "replay" / "_LastReplay.yrpX"
+    rolling.write_bytes(b"yrpX")
+    page._watch_folder()
+    qtbot.waitUntil(lambda: page.preserve is None)
+    assert page.state == "library" and page.search.hasFocus()
+    assert page.search.text() == "duel" and page.search.cursorPosition() == 1
+    assert not any(
+        button.text() == "Save my last duel" for button in page.scroll.widget().findChildren(Button)
+    )
+
+
+def test_leaving_during_index_reopens_for_the_current_installation(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    window = make_window()
+    ctx = window.ctx
+    first = Path(ctx.installation.path)
+    seed_replays(first, tmp_path)
+    started, release = Event(), Event()
+
+    def index(game: Path, *, annotations: AnnotationStore) -> tuple:
+        if game == first:
+            started.set()
+            assert release.wait(5)
+        return index_replays(game, annotations=annotations)
+
+    monkeypatch.setattr(page_module, "index_replays", index)
+    window.nav["replays"].click()
+    try:
+        qtbot.waitUntil(started.is_set)
+        assert window.current.state == "loading"
+        assert window.navigate("cards")
+        other = tmp_path / "Game 2"
+        other.mkdir()
+        ctx.set_installation(Installation(str(other)))
+        assert window.navigate("replays")
+        qtbot.waitUntil(lambda: window.current.state == "empty")
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not ctx.tasks.jobs)
+    assert window.current.state == "empty" and window.current.preserve is None
