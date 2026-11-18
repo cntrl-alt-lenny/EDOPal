@@ -21,7 +21,7 @@ from decks import Library, SavedDeck
 from studio import theme as t
 from studio.pages.mydecks_logic import library_rows, quantity
 from studio.pages.mydecks_widgets import DeckDelegate, DeckHero, RowModel, Screen, button, choice
-from studio.widgets import SearchField, label
+from studio.widgets import ActivateOnEnter, SearchField, label
 
 
 class Collection(Screen):
@@ -68,6 +68,7 @@ class Collection(Screen):
         self.summary = label("", "goldKicker")
         panel.body.addWidget(self.summary)
         self.rows = QListView()
+        ActivateOnEnter(self.rows)
         self.rows.setAccessibleName("Deck library. Open a deck to see its cards.")
         self.rows.setUniformItemSizes(True)
         self.rows.setSelectionMode(QListView.SelectionMode.ExtendedSelection)

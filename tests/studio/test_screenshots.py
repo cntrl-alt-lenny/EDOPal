@@ -40,8 +40,9 @@ def test_screenshot_cli_writes_all_views_at_requested_size(tmp_path: Path) -> No
         capture_output=True,
         text=True,
         timeout=60,
-        check=True,
+        check=False,
     )
+    assert process.returncode == 0, process.stderr
     files = list((tmp_path / "1280x800").glob("*.png"))
     assert f"Rendered {len(files)} views" in process.stdout
     names = {path.stem for path in files}

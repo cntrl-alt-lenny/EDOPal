@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QColor, QImage, QKeyEvent
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
@@ -12,6 +12,27 @@ from studio.shell import StudioWindow
 from studio.tasks import TaskRunner, WorkerContext
 from studio.widgets import Hero, ImageTileGrid, SearchField, SwatchButton, Tile
 from studio.widgets import tiles as tiles_module
+
+
+def test_gallery_activates_once_without_native_return_binding(qtbot: QtBot) -> None:
+    class EditOnReturnGrid(ImageTileGrid):
+        def keyPressEvent(self, event: QKeyEvent) -> None:
+            # macOS offers Return to an editor instead of activating a read-only row.
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                event.ignore()
+            else:
+                super().keyPressEvent(event)
+
+    runner = TaskRunner()
+    grid = EditOnReturnGrid(runner)
+    qtbot.addWidget(grid)
+    grid.set_tiles([Tile("First", Path("first")), Tile("Second", Path("second"))])
+    grid.setCurrentIndex(grid.model().index(1, 0))
+    rows = []
+    grid.activated.connect(lambda index: rows.append(index.row()))
+    for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        qtbot.keyClick(grid, key)
+    assert rows == [1, 1]
 
 
 def test_large_grid_decodes_visible_items_and_reflows(
@@ -90,10 +111,14 @@ def test_compact_hero_restores_page_sizes_and_respects_hidden_subviews(
     window.navigate("music")
     qtbot.waitUntil(lambda: window.current.state == "home")
     hero = window.current.hero
+    qtbot.waitUntil(hero.isVisible)
     normal = hero.minimumHeight(), hero.maximumHeight()
     window.resize(1280, 800)
-    qtbot.waitUntil(lambda: hero.height() < normal[0])
-    assert hero.headline.isVisible() and hero.description.isVisible()
+    qtbot.waitUntil(
+        lambda: (
+            hero.height() < normal[0] and hero.headline.isVisible() and hero.description.isVisible()
+        )
+    )
     new = Hero("Section", "New view", "Created after the window was resized.")
     new.setParent(window.current)
     new.setFixedHeight(240)

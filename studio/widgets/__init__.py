@@ -1,6 +1,7 @@
 from studio.widgets.blocks import EmptyState, GameClosedBlock, Hero, Notice, ProgressBlock
 from studio.widgets.controls import (
     ActionTile,
+    ActivateOnEnter,
     Button,
     ElidedLabel,
     Panel,
@@ -17,6 +18,7 @@ from studio.widgets.tiles import ImageTileGrid, Tile
 
 __all__ = [
     "ActionTile",
+    "ActivateOnEnter",
     "Button",
     "ElidedLabel",
     "EmptyState",

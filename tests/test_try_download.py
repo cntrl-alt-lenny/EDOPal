@@ -4,6 +4,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import aiohttp
@@ -55,8 +56,9 @@ class TryDownloadTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
-        os.mkdir(os.path.join(self.temp_dir.name, "card-art"))
-        self.filepath = os.path.join(self.temp_dir.name, "card-art", "123.jpg")
+        self.cache = Path(self.temp_dir.name).resolve() / "card-art"
+        self.cache.mkdir()
+        self.filepath = str(self.cache / "123.jpg")
         self.timeout = aiohttp.ClientTimeout(total=1)
         # No real sleeps so tests stay fast; keep a handle to assert on delays.
         self.sleep_mock = mock.AsyncMock(return_value=None)
@@ -81,7 +83,7 @@ class TryDownloadTests(unittest.TestCase):
         with open(self.filepath, "rb") as f:
             self.assertEqual(f.read(), body)
         # Temp file should be cleaned up after successful rename.
-        self.assertFalse(os.path.exists(self.filepath + ".part"))
+        self.assertEqual(list(self.cache.iterdir()), [Path(self.filepath)])
 
     def test_rejects_payload_below_512_bytes(self):
         session = _FakeSession([(200, b"tiny")] * 4)
@@ -222,7 +224,7 @@ class TryDownloadTests(unittest.TestCase):
         session = _FakeSession([(200, _jpeg_body())])
 
         # Point tmp_path at a directory that doesn't exist so open() raises OSError.
-        broken_path = os.path.join(self.temp_dir.name, "missing-subdir", "card-art", "123.jpg")
+        broken_path = str(self.cache.parent / "missing-subdir/card-art/123.jpg")
         with self.assertRaises(main.ArtworkStorageError):
             asyncio.run(
                 main._try_download(session, "http://example/x.jpg", broken_path, self.timeout, 3)

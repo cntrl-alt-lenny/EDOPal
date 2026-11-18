@@ -11,6 +11,7 @@ import aiohttp
 
 from card_databases import installed_card_names
 from config import DEFAULTS
+from extras import _regular_path
 from state_lock import locked
 
 from .imaging import MAX_BYTES, decode, ensure_gui, read_source
@@ -82,7 +83,7 @@ class CardArt:
     def _trim(self, keep: Path) -> Path:
         # Only numeric provider downloads belong to this disposable cache.
         rows = []
-        for file in self._dir.glob("*.jpg"):
+        for file in keep.parent.glob("*.jpg"):
             if (
                 file.stem.isascii()
                 and file.stem.isdigit()
@@ -104,15 +105,19 @@ class CardArt:
         from main import load_failure_cache
 
         try:
-            with _gate, locked(self._dir, ".fetch.lock"):
-                path = self._dir / f"{passcode}.jpg"
+            # Profile parents can have system aliases (macOS /var or Windows 8.3).
+            # Keep the library and its writable members subject to the regular-file check.
+            profile = self._dir.parent.parent
+            member = self._dir.relative_to(profile) / f"{passcode}.jpg"
+            path = _regular_path(profile.resolve(), member)
+            with _gate, locked(path.parent, ".fetch.lock"):
                 if (
                     path.is_file()
                     and path.stat().st_size <= MAX_BYTES
                     and _valid(read_source(path))
                 ):
                     return self._trim(path)
-                misses = load_failure_cache(str(self._dir / "missing.json"))
+                misses = load_failure_cache(str(path.with_name("missing.json")))
                 if passcode in misses:
                     raise ArtMissing("No cropped art is available for this card.")
                 return self._trim(asyncio.run(self._request(passcode, path, misses)))
@@ -130,7 +135,7 @@ class CardArt:
         if result is FetchResult.MISSING:
             misses[passcode] = time.time()
             recent = dict(sorted(misses.items(), key=lambda item: item[1])[-512:])
-            save_failure_cache(str(self._dir / "missing.json"), recent)
+            save_failure_cache(str(path.with_name("missing.json")), recent)
             raise ArtMissing("No cropped art is available for this card.")
         if result is not FetchResult.OK:
             raise ArtUnavailable("The artwork provider could not supply the image. Try again.")

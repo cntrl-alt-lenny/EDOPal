@@ -87,14 +87,20 @@ def test_deleted_library_copy_keeps_history_in_another_game(
     select(page, qtbot, theme.name)
     assert not page.look.active
     page.view.inspector.tools["Delete"].click()
-    qtbot.waitUntil(lambda: key not in page.store.library.entries() and not page.job)
+    qtbot.waitUntil(lambda: page.mode == "gallery" and not page.job)
+    assert key not in page.store.library.entries()
     page.ctx.set_installation(first)
     qtbot.waitUntil(lambda: page.data is not None)
     select(page, qtbot, theme.name)
     assert page.look.active and page.look.group == "Installed"
     page.view.inspector.remove.click()
-    qtbot.waitUntil(lambda: page.mode == "gallery" and not page.job)
-    assert all(look.key != key for look in page.data.looks)
+    qtbot.waitUntil(
+        lambda: (
+            page.mode == "gallery"
+            and not page.job
+            and all(look.key != key for look in page.data.looks)
+        )
+    )
 
 
 def test_invalid_catalogue_keeps_local_looks(

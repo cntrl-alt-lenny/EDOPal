@@ -6,6 +6,7 @@ from replays import ReplayEntry
 from studio import theme as t
 from studio.icons import icon
 from studio.pages.replays_library import details_line, played, players, title
+from studio.widgets import ActivateOnEnter
 
 
 class ReplayModel(QAbstractListModel):
@@ -130,6 +131,7 @@ class ReplayRow(QStyledItemDelegate):
 class ReplayList(QListView):
     def __init__(self) -> None:
         super().__init__()
+        ActivateOnEnter(self)
         self.setAccessibleName("Replay library")
         self.setUniformItemSizes(True)
         self.setMouseTracking(True)

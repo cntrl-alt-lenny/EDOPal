@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
+from unittest.mock import Mock
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QRect, QSize, Qt, QThread
@@ -140,7 +141,7 @@ def test_browse_bundle_saves_only_its_validated_data_root(
     data = bundle / "Contents/Resources/ProjectIgnis"
     data.mkdir(parents=True)
     (bundle / "Contents/Info.plist").touch()
-    monkeypatch.setattr(config.sys, "platform", "darwin")
+    monkeypatch.setattr(config, "sys", Mock(wraps=config.sys, platform="darwin"))
     monkeypatch.setattr(config, "find_edopro_folders", lambda _: [original])
     monkeypatch.setattr(window.ctx, "choose_folder", lambda _: str(bundle))
     window.change.click()

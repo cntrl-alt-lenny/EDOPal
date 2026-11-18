@@ -103,6 +103,18 @@ def test_fetch_serializes_validates_and_reuses_disk(
     assert len(provider.urls) == 3
 
 
+def test_fetch_with_an_aliased_library_parent(
+    tmp_path: Path, blocks: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = tmp_path / "temp alias"
+    parent.mkdir()
+    root = parent / ".." / "library"
+    provider = FakeProvider([(200, blocks)])
+    monkeypatch.setattr(main, "_create_http_session", lambda **kwargs: provider)
+    assert asyncio.run(CardArt(root).fetch(17)).read_bytes() == blocks
+    assert (tmp_path / "library/card-art/17.jpg").read_bytes() == blocks
+
+
 def test_404_persists_until_ttl(
     library: Library, blocks: bytes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
