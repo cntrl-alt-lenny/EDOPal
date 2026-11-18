@@ -247,8 +247,9 @@ from content.libraries import installed_origins, make_available, remove_pack
 cache = PackCache.for_config(cfg)
 # status comes from Catalogue.list_packs(...), version is the running app version.
 cancel = Event()
-changes = await make_available(cache, status, app_version=version,
-                               progress=on_bytes, phase=on_phase, cancel=cancel)
+changes = await make_available(
+    cache, status, app_version=version, progress=on_bytes, phase=on_phase, cancel=cancel
+)
 # A separate Remove action on a worker:
 changes = remove_pack(cache, status)
 ```

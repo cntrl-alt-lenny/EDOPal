@@ -80,7 +80,9 @@ def test_cache_to_album_and_offline_removal(
         click(card, "Add to library")
         idle(qtbot, p)
         assert "Available in library" in messages(p.packs.cards[pack.id])
-    listing = Catalogue(Manifest(1, (replace(rows[0], version="2.0.0"), rows[1])), CatalogueSource.LIVE)
+    listing = Catalogue(
+        Manifest(1, (replace(rows[0], version="2.0.0"), rows[1])), CatalogueSource.LIVE
+    )
     click(p, "Refresh catalogue")
     idle(qtbot, p)
     update = messages(p.packs.cards[rows[0].id])
