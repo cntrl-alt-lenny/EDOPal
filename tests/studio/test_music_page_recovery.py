@@ -11,7 +11,7 @@ from music_player import PreviewPlayer
 from studio.context import Installation
 from studio.pages.music import MusicPage
 
-from .test_music_page import game_search, wait
+from .test_music_page import button, game_search, wait
 from .test_music_page import ready as ready
 
 
@@ -140,3 +140,41 @@ def test_named_destructive_confirmation_defaults_to_cancel(ready: MusicPage) -> 
     QTimer.singleShot(0, dismiss)
     assert not confirm_change(ready, "Clear playlist", "Remove all tracks from this playlist?")
     assert checked[0][0] and "Clear playlist" in checked[0][1]
+
+
+def test_compact_import_excludes_all_unsupported_and_keeps_action_visible(
+    ready: MusicPage, qtbot: QtBot, tmp_path: Path
+) -> None:
+    p = ready
+    p.window().resize(960, 600)
+    assert p.toggle_music.property("role") == "primary"
+    assert p.browse.property("role") == "secondary"
+    folder = tmp_path / "Notes"
+    folder.mkdir()
+    for i in range(32):
+        (folder / f"Note {i}.txt").write_text("notes", encoding="utf8")
+    p.imports.plan_paths([folder])
+    wait(qtbot, p, "review")
+    assert p.imports.review_table.rowCount() == 32
+    assert not p.imports.confirm.isEnabled()
+    assert p.imports.hint.text() == "This folder contains no supported audio files."
+    assert not p.imports.choices()
+    assert p.footer.isAncestorOf(p.imports.confirm)
+    assert p.scroll.verticalScrollBar().maximum() == 0
+    assert p.imports.review_table.verticalScrollBar().maximum() > 0
+    p.imports.review_table.scrollToBottom()
+    assert p.imports.confirm.visibleRegion().contains(p.imports.confirm.rect().center())
+
+
+def test_empty_album_keeps_add_files_beside_title(ready: MusicPage, qtbot: QtBot) -> None:
+    from studio import theme
+    from studio.pages.music_albums import AlbumHero
+
+    p = ready
+    p.window().resize(1600, 1000)
+    p.albums.open_game("dm3")
+    hero = p.scroll.widget().findChild(AlbumHero)
+    add = button(p, "Add files")
+    qtbot.waitUntil(lambda: add.visibleRegion().contains(add.rect().center()))
+    assert hero.height() <= theme.TILE_LARGE
+    assert add.mapTo(p, add.rect().center()).y() < p.height() // 2

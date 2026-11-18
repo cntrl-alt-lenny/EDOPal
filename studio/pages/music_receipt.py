@@ -40,7 +40,7 @@ class Receipt:
                     file.is_file() and file not in self.files and file.name != ".music.lock"
                     for file in path.parent.rglob("*")
                 ):
-                    raise ValueError("This game now contains other files. Kept its library entry.")
+                    raise ValueError("This album now contains other files. Kept its library entry.")
             for path in sorted(self.files, key=lambda f: f.name == "game.json"):
                 if checkpoint:
                     checkpoint()
@@ -51,7 +51,7 @@ class Receipt:
                     manifest = retired / path.name
                     if _digest(manifest) != self.files[path]:
                         retired.rename(path.parent)
-                        raise ValueError("The game name changed during undo. Kept its entry.")
+                        raise ValueError("The album name changed during undo. Kept its entry.")
                     manifest.unlink()
                     # Never recursively delete a directory another process could still be using.
                     if not any(retired.iterdir()):

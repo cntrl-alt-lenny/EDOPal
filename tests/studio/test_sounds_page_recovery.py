@@ -118,3 +118,39 @@ def test_game_opens_during_confirmed_apply(
     idle(qtbot, page)
     assert page.closed.isVisible() and page.closed.proceed.isHidden()
     assert (game / "sound/draw.wav").read_bytes() == original
+
+
+def test_compact_summary_and_mix_name(
+    sound_window: tuple[StudioWindow, SoundsPage, Path], qtbot: QtBot
+) -> None:
+    window, page, _ = sound_window
+    window.resize(960, 600)
+    summary = page.overview.summary
+    qtbot.waitUntil(summary.isVisible)
+    assert page.overview.current.isHidden()
+    summary.click()
+    assert page.overview.toggle.isVisible()
+    summary.click()
+    page.cards["builtin:Thonk"].use.click()
+    page.bar.save.click()
+    assert page.collections.name.name_label.text() == "Mix name"
+    assert page.collections.name.name_label.buddy() is page.collections.name.name
+
+
+def test_unreadable_sound_file_keeps_installation_ready(
+    sound_window: tuple[StudioWindow, SoundsPage, Path],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, page, _ = sound_window
+
+    def unreadable(_game: Path) -> None:
+        raise PermissionError("Cannot read draw.wav")
+
+    monkeypatch.setattr("sounds.scan_installation", unreadable)
+    page.refresh()
+    idle(qtbot, page)
+    assert page.ctx.installation.ready
+    assert page.overview.installed.toolTip() == "Could not read sounds"
+    assert page.overview.backend_info.text() == "Cannot read draw.wav"
+    assert page.overview.rescan.isVisible() and page.feedback.isHidden()

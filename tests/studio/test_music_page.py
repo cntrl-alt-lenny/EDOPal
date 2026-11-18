@@ -9,7 +9,7 @@ from threading import Event, get_ident
 import miniaudio
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QFileDialog, QLabel
+from PySide6.QtWidgets import QComboBox, QFileDialog, QHeaderView, QLabel, QTableWidget
 from pytestqt.qtbot import QtBot
 
 import music_import
@@ -28,7 +28,13 @@ def wait(qtbot: QtBot, page: MusicPage, state: str) -> None:
 
 
 def button(p: MusicPage, text: str) -> Button:
-    return next(b for b in p.scroll.widget().findChildren(Button) if b.text() == text)
+    return next(
+        b
+        for view in (p.scroll.widget(), p.footer)
+        if view
+        for b in view.findChildren(Button)
+        if b.text() == text
+    )
 
 
 @pytest.fixture
@@ -94,13 +100,13 @@ def test_game_and_track_search_cross_scene_playlist_editor(ready: MusicPage, qtb
     v.undo.click()
     wait(qtbot, p, "playlist")
     assert v.list.rowCount() == 0
-    button(p, "Browse games").click()
+    button(p, "Browse albums").click()
     assert not v.only.isChecked()
     v.only.click()
     v.field.setText("openinghand")
     assert [a.game.id for a in v.grid.albums] == ["tf5"]
     qtbot.keyClick(v.grid, Qt.Key.Key_Return)
-    button(p, "Replace a playlist with this album").click()
+    button(p, "Use all tracks from this album").click()
     v.destinations["win"].click()
     wait(qtbot, p, "playlist")
     assert v.list.item(0, 0).text() == "Opening hand"
@@ -119,7 +125,7 @@ def test_running_game_retry_and_busy_lifecycle(
     def game_open(_: Path) -> bool:
         threads.append(get_ident())
         entered.set()
-        release.wait(4)
+        release.wait()
         return True
 
     monkeypatch.setattr(settings, "_game_running", game_open)
@@ -199,7 +205,7 @@ def test_failed_and_superseded_scan(
     def blocked(path: Path, root: Path, checkpoint: Callable) -> music_page.Library:
         if path == source:
             entered.set()
-            release.wait(4)
+            release.wait()
             raise OSError("The music folder could not be read.")
         return read(path, root, checkpoint)
 
@@ -259,7 +265,11 @@ def test_edit_folder_plan_results_and_undo(
     wait(qtbot, p, "review")
     assert not imp.confirm.isEnabled()
     view = imp.review_table
-    qtbot.waitUntil(lambda: p.transition.currentTime() == p.transition.duration())
+    note = view.item(2, 0)
+    assert note.text() == "C notes.txt" and note.checkState() == Qt.CheckState.Unchecked
+    assert all(view.item(2, col).flags() == Qt.ItemFlag.NoItemFlags for col in range(4))
+    assert len(imp.choices()) == 3
+    p.transition.setCurrentTime(p.transition.duration())
     for i, col, value in [(0, 1, "roses"), (0, 2, "menu"), (3, 1, "tf5")]:
         rect = view.visualItemRect(view.item(i, col))
         qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
@@ -274,9 +284,13 @@ def test_edit_folder_plan_results_and_undo(
         )
         qtbot.waitUntil(lambda: not any(c.isVisible() for c in view.findChildren(QComboBox)))
     assert imp.confirm.isEnabled()
+    assert imp.hint.text() == "3 of 3 supported files selected"
     imp.confirm.click()
     wait(qtbot, p, "results")
-    assert [r.status for r in imp.results] == ["imported", "duplicate", "unsupported", "failed"]
+    assert [r.status for r in imp.results] == ["imported", "duplicate", "failed"]
+    results = p.scroll.widget().findChild(QTableWidget)
+    assert results.wordWrap() and results.textElideMode() == Qt.TextElideMode.ElideNone
+    assert results.verticalHeader().sectionResizeMode(2) == QHeaderView.ResizeMode.ResizeToContents
     added = p.root / "roses/menu/A tune.wav"
     assert added.read_bytes() == source.read_bytes()
     button(p, "Undo import").click()
@@ -365,7 +379,7 @@ def test_cancel_partial_import_reports_every_selected_file(
         def pause(n: int, total: int) -> None:
             progress(n, total)
             entered.set()
-            release.wait(4)
+            release.wait()
 
         return execute(items, progress=pause, **kwargs)
 
@@ -393,7 +407,7 @@ def test_scaled_library_loads_on_worker_and_switches_without_rescanning(
     def delayed(game: Path, root: Path, checkpoint: Callable) -> music_page.Library:
         assert get_ident() != ui_thread
         entered.set()
-        release.wait(4)
+        release.wait()
         return read(game, root, checkpoint)
 
     ui_thread = get_ident()

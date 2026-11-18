@@ -15,7 +15,7 @@ from music import settings as music_settings
 from sounds.archive import SavedSet
 from sounds.sets import InstalledCue
 from sounds.settings import _ENABLE, SoundSettings
-from studio.pages.music_sounds_controls import check_game
+from studio.pages.music_sounds_controls import can_resume, check_game, partial_archives
 
 EVENT_KEYS = tuple(event.stem for event in sounds.EVENTS)
 EVENT_COUNT = len(EVENT_KEYS)
@@ -38,12 +38,24 @@ class Snapshot:
     restore: bool
     files: dict[str, tuple[tuple[Path, int, int, int], ...]]
 
+    def matches(self, draft: sounds.SoundSet) -> bool:
+        for key, clip in draft.assignments.items():
+            if clip is None:
+                if key in self.files:
+                    return False
+            else:
+                installed = self.sound_set.assignments.get(key)
+                if not installed or installed.sha256 != clip.sha256:
+                    return False
+        return True
+
 
 @dataclass(frozen=True)
 class Downloadable:
     status: PackStatus
     sound_set: sounds.SoundSet | None = None
     error: str = ""
+    paused: bool = False
 
     @property
     def pack(self) -> Pack:
@@ -56,6 +68,10 @@ class OnlineSets:
     packs: tuple[Downloadable, ...]
 
 
+class InstallationUnavailable(OSError):
+    """The game folder itself cannot be opened."""
+
+
 class FilesChanged(Exception):
     """The player needs a fresh look at the files before applying a choice."""
 
@@ -65,7 +81,15 @@ def library_for(config_path: str, explicit: bool) -> sounds.SoundLibrary:
 
 
 def scan(game: Path, config_path: str) -> Snapshot:
-    rows = sounds.scan_installation(game)
+    try:
+        rows = sounds.scan_installation(game)
+    except OSError as exc:
+        # A damaged cue should not change the installation indicator for every page.
+        try:
+            next(game.iterdir(), None)
+        except OSError as folder_error:
+            raise InstallationUnavailable(str(folder_error)) from exc
+        raise
     files = {row.key: file_stamps(row.paths) for row in rows if row.paths}
     return Snapshot(
         rows,
@@ -165,8 +189,13 @@ def chants_for(draft: sounds.SoundSet, sources: Iterable[Source]) -> tuple[str, 
 
 
 def event_description(key: str) -> str:
-    if key in {"token", "reveal", "directattack"}:
-        return "Available to preview. In-duel playback can vary by EDOPro version."
+    optional = {
+        "token": "A Token is summoned.",
+        "reveal": "A card is revealed.",
+        "directattack": "A monster attacks the opponent directly.",
+    }
+    if key in optional:
+        return f"{optional[key]} Playback varies by EDOPro version."
     return sounds.event_for(key).description
 
 
@@ -195,6 +224,7 @@ def pack_audio(cache: PackCache, pack: Pack, *, exact: bool = True) -> sounds.So
 
 def online_sets(cache: PackCache, version: str, catalogue: Catalogue) -> OnlineSets:
     packs = []
+    partials = partial_archives(cache)
     for status in catalogue.list_packs(cache, app_version=version, kind="sound-effects"):
         sound_set = None
         error = ""
@@ -206,7 +236,7 @@ def online_sets(cache: PackCache, version: str, catalogue: Catalogue) -> OnlineS
             except (OSError, ValueError):
                 if status.state is PackState.DOWNLOADED:
                     error = "This download could not be opened. Try downloading it again."
-        packs.append(Downloadable(status, sound_set, error))
+        packs.append(Downloadable(status, sound_set, error, can_resume(status, partials)))
     return OnlineSets(catalogue, tuple(packs))
 
 

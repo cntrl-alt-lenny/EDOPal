@@ -168,10 +168,10 @@ def download_states(
         "sound-effects",
         "Tabletop effects",
         "Soft taps and short accents for a quieter duel.",
-        "Studio demo",
+        "Demo audio team",
         "CC0 1.0",
         "Synthetic catalogue entry for the screenshot.",
-        "https://example.test",
+        "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/tools/studio_sounds_screenshots.py",
         "1.0.0",
         "https://example.test/tabletop",
         2097152,
@@ -223,3 +223,6 @@ def download_states(
         card.download.click()
         idle()
         shot("18-downloaded")
+        page.collections.view_download(next(iter(page.collections.downloaded_cards)))
+        shot("25-downloaded-collection")
+        page.collections.open_downloads()

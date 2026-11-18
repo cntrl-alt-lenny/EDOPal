@@ -172,6 +172,7 @@ class SoundEvents:
                 )
             else:
                 updated = sounds.SoundSet(NEW_MIX, updated.assignments, updated.credits)
+            page.applied = None
             page.draft = updated
             page.selected_source = ""
 

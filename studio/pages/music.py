@@ -7,12 +7,11 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, Qt, QVariantAnimation, Signal
+from PySide6.QtCore import QModelIndex, Qt, Signal
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -22,7 +21,7 @@ import music_library as engine
 from music import settings
 from studio import theme as t
 from studio.context import AppContext, GameOpenError, Installation
-from studio.pages.base import Page
+from studio.pages.music_layout import MusicSurface
 from studio.tasks import Job, WorkerContext
 from studio.widgets import Panel, ProgressBlock, glyph, label, margins
 
@@ -50,25 +49,13 @@ def checkpoint(worker: WorkerContext) -> None:
         raise Stopped
 
 
-class MusicPage(Page):
+class MusicPage(MusicSurface):
     id, title, icon = "music", "Music", "music"
     compact_changed = Signal(bool)
 
     def __init__(self, context: AppContext) -> None:
         super().__init__(context)
         self.setStyleSheet(STYLE)
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.transition = QVariantAnimation(self)
-        self.transition.setDuration(t.MOTION_MS)
-        self.transition.setStartValue(t.MD)
-        self.transition.setEndValue(0)
-        self.transition.valueChanged.connect(self.slide)
-        layout = QVBoxLayout(self)
-        margins(layout, 0)
-        layout.addWidget(self.scroll)
         self.root = (
             Path(context.cfg.config_path).parent / "soundtracks"
             if context.cfg.cli.config
@@ -142,47 +129,6 @@ class MusicPage(Page):
             self.back()
         return True
 
-    def screen(
-        self,
-        name: str,
-        back: Callable | None = None,
-        title: str = "",
-        section: str = "MUSIC LIBRARY",
-    ) -> QVBoxLayout:
-        self.transition.stop()
-        self.preview.stop()
-        self.preview.setParent(self)
-        self.preview.hide()
-        self.state, self.back = name, back
-        old = self.scroll.takeWidget()
-        if old:
-            old.hide()
-            old.deleteLater()
-        body = QWidget()
-        body.setMaximumWidth(t.CONTENT_MAX)
-        layout = QVBoxLayout(body)
-        self.inset = t.LG if self.width() < t.COMPACT_WIDTH - t.RAIL_WIDTH else t.XXL
-        margins(layout, self.inset)
-        layout.setSpacing(t.LG)
-        self.scroll.setWidget(body)
-        if back or title:
-            top = QHBoxLayout()
-            if back:
-                self.back_button = action("Back", back, "quiet", "back")
-                top.addWidget(self.back_button)
-            top.addWidget(label(section, "goldKicker"))
-            top.addStretch()
-            layout.addLayout(top)
-            if title:
-                layout.addWidget(label(title, "heading", True))
-        if back:
-            self.transition.start()
-        return layout
-
-    def slide(self, offset: int) -> None:
-        layout = self.scroll.widget().layout()
-        layout.setContentsMargins(self.inset + offset, self.inset, self.inset - offset, self.inset)
-
     def refresh(self, after: Callable | None = None) -> None:
         install = self.ctx.installation
         if not install.ready or not install.path:
@@ -230,7 +176,7 @@ class MusicPage(Page):
         generation = self.generation
         fallback = fallback or self.home
         layout = self.screen("busy")
-        layout.addWidget(RecordHero("Music", "Soundtrack library", title, "music"), 1)
+        layout.addWidget(RecordHero("Music", "Soundtrack library", title, "music"))
         self.progress = ProgressBlock()
         self.progress.begin(title)
         self.progress.detail.setText(
@@ -242,7 +188,8 @@ class MusicPage(Page):
             "Cancel " + ("import" if title.startswith(("Import", "Adding")) else "operation")
         )
         self.progress.cancel.setVisible(cancellable)
-        layout.addWidget(self.progress, 2)
+        layout.addWidget(self.progress)
+        layout.addStretch(1)
 
         def execute(worker: WorkerContext) -> Any:
             checkpoint(worker)
@@ -317,7 +264,7 @@ class MusicPage(Page):
 
         if isinstance(error, (GameOpenError, settings.GameProcessUnknown)):
             block = AudioGameCheck()
-            self.back_button.hide()
+            self.back_button.setVisible(isinstance(error, GameOpenError))
             block.back.clicked.connect(back)
             block.proceed.clicked.connect(lambda: again(confirmed_closed=True))
             layout.addWidget(block)
@@ -343,7 +290,7 @@ class MusicPage(Page):
             )
         hero = RecordHero("Music", title, message, "music")
         hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(hero, 1)
+        layout.addWidget(hero)
         choose = action(
             "Refresh" if install.ready else "Check again" if install.path else "Choose folder",
             self.refresh
@@ -356,7 +303,8 @@ class MusicPage(Page):
             "primary",
             "folder",
         )
-        layout.addWidget(choose, 0, Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(choose, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addStretch()
         choose.setFocus()
 
     def feedback(self, layout: QVBoxLayout) -> None:
@@ -384,7 +332,12 @@ class MusicPage(Page):
         self.feedback(layout)
         header = QHBoxLayout()
         header.addWidget(label("EDOPro playlists", "heading", True), 1)
-        self.browse = action("Browse games", self.albums.gallery, "primary", "library")
+        self.browse = action(
+            "Browse albums",
+            self.albums.gallery,
+            "secondary" if self.data.enabled is False else "primary",
+            "library",
+        )
         self.manage = action("Add music", lambda: self.imports.open_tools(self.home), icon="folder")
         header.addWidget(self.manage)
         header.addWidget(self.browse)
@@ -397,7 +350,7 @@ class MusicPage(Page):
             games = {track.game for track in tracks}
             status = track_count(len(tracks)) if tracks else ""
             if len(games) > 1:
-                status += f" · {len(games)} games"
+                status += f" · {len(games)} albums"
             scene = SceneButton(
                 name,
                 icon,
@@ -415,6 +368,8 @@ class MusicPage(Page):
             empty.body.addWidget(
                 label("Browse an album and add a track to a scene.", "muted", True)
             )
+            header.removeWidget(self.browse)
+            empty.body.addWidget(self.browse, 0, Qt.AlignmentFlag.AlignLeft)
             layout.addWidget(empty)
             for button in self.scene_buttons.values():
                 button.hide()

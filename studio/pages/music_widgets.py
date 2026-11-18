@@ -72,7 +72,7 @@ def table(headers: Sequence[str], name: str) -> QTableWidget:
     view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-    view.setMinimumHeight(t.TILE_SIZE[1])
+    view.setMinimumHeight(2 * t.BUTTON_H)
     return view
 
 
@@ -87,6 +87,10 @@ def cells(view: QTableWidget, values: Sequence[str]) -> int:
 
 
 class RecordHero(Hero):
+    def __init__(self, category: str, title: str, description: str, symbol: str) -> None:
+        super().__init__(category, title, description, symbol)
+        self.setFixedHeight(t.TILE_LARGE)
+
     def _print(self, p: QPainter, x: float, y: float, height: float) -> None:
         height = min(height, self.width() * 0.20)
         p.save()
@@ -220,7 +224,7 @@ class AlbumGrid(ImageTileGrid):
     def __init__(self, runner: TaskRunner) -> None:
         super().__init__(runner)
         self.albums: list[Album] = []
-        self.setAccessibleName("Games")
+        self.setAccessibleName("Albums")
         self.setItemDelegate(AlbumDelegate(self))
         self.setMinimumHeight(t.TILE_SIZE[1] + t.XL)
         self.setStyleSheet(f"QListView {{background:{t.CANVAS};padding:0;border:none;}}")
@@ -277,7 +281,7 @@ def show_music_error(layout: QVBoxLayout, title: str, error: Exception, retry: C
     show = action("Technical details", lambda: details.setVisible(not details.isVisible()))
     layout.addWidget(show, 0, Qt.AlignmentFlag.AlignLeft)
     layout.addWidget(details)
-    layout.addStretch()
     retry_button = action("Retry", retry, "primary")
-    layout.addWidget(retry_button, 0, Qt.AlignmentFlag.AlignRight)
+    layout.addWidget(retry_button, 0, Qt.AlignmentFlag.AlignLeft)
+    layout.addStretch()
     retry_button.setFocus()

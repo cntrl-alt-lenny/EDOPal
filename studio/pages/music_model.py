@@ -48,7 +48,7 @@ def match_description(item: ImportItem, chosen_album: bool) -> str:
         return "Found in library" if item.in_library else "Repeated file"
     if chosen_album:
         return "Chosen album"
-    return {"high": "Strong match", "medium": "Suggested", "low": "Check game"}[item.confidence]
+    return {"high": "Strong match", "medium": "Suggested", "low": "Check album"}[item.confidence]
 
 
 def needs_game(item: ImportItem, chosen_album: bool) -> bool:

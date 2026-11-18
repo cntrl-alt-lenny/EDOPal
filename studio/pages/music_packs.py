@@ -22,7 +22,7 @@ from studio.tasks import Job, WorkerContext
 from studio.widgets import Button, Panel, ProgressBlock, label
 
 from .music_albums import credit_text
-from .music_sounds_controls import pack_size
+from .music_sounds_controls import can_resume, pack_size, partial_archives
 from .music_widgets import RecordHero, action
 
 if TYPE_CHECKING:
@@ -35,6 +35,7 @@ class Entry:
     status: PackStatus | None
     installed: bool
     games: tuple[str, ...]
+    paused: bool = False
 
     @property
     def state(self) -> str:
@@ -47,6 +48,8 @@ class Entry:
             return "Downloading in another window"
         if self.installed:
             return "Available in library"
+        if self.paused:
+            return "Paused"
         if self.games or state == PackState.UPDATE_AVAILABLE:
             return "Update available"
         return "Downloaded" if state == PackState.DOWNLOADED else "Not downloaded"
@@ -59,6 +62,7 @@ def entries(cache: PackCache, catalogue: Catalogue, version: str) -> list[Entry]
         if not row.retained and row.path.is_file():
             installed.setdefault(row.origin.id, {}).setdefault(row.origin, set()).add(row.item.game)
     result = []
+    partials = partial_archives(cache)
     for kind in ("music", "covers"):
         for status in catalogue.list_packs(cache, app_version=version, kind=kind):
             pack = status.pack
@@ -68,7 +72,7 @@ def entries(cache: PackCache, catalogue: Catalogue, version: str) -> list[Entry]
                 o.version == origin.version and o.sha256 == origin.sha256 for o in editions
             )
             games = tuple(sorted({g for keys in editions.values() for g in keys}))
-            result.append(Entry(origin, status, current, games))
+            result.append(Entry(origin, status, current, games, can_resume(status, partials)))
     for editions in installed.values():
         for origin, keys in editions.items():
             result.append(Entry(origin, None, True, tuple(sorted(keys))))
@@ -78,7 +82,7 @@ def entries(cache: PackCache, catalogue: Catalogue, version: str) -> list[Entry]
 def failure(exc: BaseException) -> tuple[str, str]:
     if isinstance(exc, DownloadError):
         if exc.reason == DownloadFailure.CANCELLED:
-            return "Download canceled", "Resume"
+            return "Paused", "Resume download"
         title = {
             DownloadFailure.NOT_FOUND: "Pack unavailable",
             DownloadFailure.DISK_SPACE: "Insufficient disk space",
@@ -192,15 +196,19 @@ class MusicPacks:
                 else "Add your own tracks, or check back here for music and covers.",
                 "music",
             )
-            layout.addWidget(empty)
             self.banner.deleteLater()
             self.banner = empty.description
             top.addStretch()
-            top.addWidget(action("Add local music", self.back))
+            top.addWidget(refresh)
+            layout.addLayout(top)
+            layout.addWidget(empty)
+            local = action("Add local music", self.back)
+            layout.addWidget(local, 0, Qt.AlignmentFlag.AlignLeft)
+            self.buttons.append(local)
         else:
             top.addWidget(self.banner, 1)
-        top.addWidget(refresh)
-        layout.addLayout(top)
+            top.addWidget(refresh)
+            layout.addLayout(top)
         for item in self.items:
             pack = item.status.pack if item.status else None
             key = item.origin.id
@@ -223,9 +231,9 @@ class MusicPacks:
             action_body = QVBoxLayout(actions)
             action_body.setContentsMargins(0, 0, 0, 0)
             note, retry = self.outcomes.get(item.origin, ("", ""))
-            status = label(item.state, "body", True)
+            status = label("Paused" if retry == "Resume download" else item.state, "body", True)
             action_body.addWidget(status)
-            if note:
+            if note and note not in ("Paused", "Added to your library."):
                 action_body.addWidget(label(note, "notice", True))
             controls = QHBoxLayout()
             controls.addStretch()
@@ -234,7 +242,7 @@ class MusicPacks:
                 controls.addWidget(remove)
                 self.buttons.append(remove)
             if item.games:
-                album = action("View album", partial(self.album, item.games[0]))
+                album = action("View in collection", partial(self.album, item.games[0]))
                 controls.addWidget(album)
                 self.buttons.append(album)
             if (
@@ -247,10 +255,11 @@ class MusicPacks:
                 )
             ):
                 caption = retry or {
+                    "Paused": "Resume download",
                     "Downloaded": "Add to library",
                     "Update available": "Update pack",
                 }.get(item.state, "Download")
-                add = action(caption, partial(self.change, item, False), "primary", "download")
+                add = action(caption, partial(self.change, item, False), "secondary", "download")
                 controls.addWidget(add)
                 self.buttons.append(add)
             action_body.addLayout(controls)
@@ -284,6 +293,7 @@ class MusicPacks:
         p.back_button.setEnabled(False)
         panel.body.addWidget(progress)
         progress.begin("Removing…" if remove else "Downloading…")
+        progress.cancel.setText("Pause download")
         progress.cancel.setVisible(not remove)
         self.enable(False)
         cache, version = self.cache, p.ctx.version

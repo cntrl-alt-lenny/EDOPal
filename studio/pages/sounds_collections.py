@@ -7,6 +7,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog
 
 import sounds
@@ -19,6 +20,7 @@ from studio.pages.sounds_model import (
     EVENT_COUNT,
     Downloadable,
     OnlineSets,
+    Source,
     catalogue_message,
     coverage,
     get_pack,
@@ -62,7 +64,7 @@ class SoundCollections:
         self.page.stop_audio()
         self.saved = rows
         empty_layout(self.library.cards)
-        if not rows:
+        if not rows and not self.library.downloaded.count():
             self.library.hint.show_message(
                 "Save a mix or import a sound set to start your collection."
             )
@@ -96,6 +98,15 @@ class SoundCollections:
                 remove = Button("Delete unreadable set", "secondary")
                 remove.clicked.connect(partial(self.delete, row.id, "this unreadable set"))
                 cards.append(remove)
+        if not rows and not self.library.downloaded.count():
+            self.library.body.insertWidget(
+                self.library.body.indexOf(self.library.hint) + 1,
+                self.library.import_button,
+                0,
+                Qt.AlignmentFlag.AlignLeft,
+            )
+        else:
+            self.library.actions.addWidget(self.library.import_button)
         add_section(self.library.cards, cards)
         self.page.sources_changed()
 
@@ -152,6 +163,9 @@ class SoundCollections:
             return
         self.page.name_parent = self.page.state
         self.name_action, self.edit_set, self.rename_id = action, sound_set, set_id
+        field = "Mix name" if action == "Save sound set" else "Sound set name"
+        self.name.name_label.setText(field)
+        self.name.name.setAccessibleName(field)
         self.name.heading.setText(action)
         self.name.submit.setText(action)
         hints = {
@@ -301,17 +315,30 @@ class SoundCollections:
             if item.sound_set:
                 self.add_download_controls(card, item)
         add_section(self.downloads.cards, self.pack_cards.values())
-        self.page.sources_changed()
+        empty_layout(self.library.downloaded)
+        self.downloaded_cards = {
+            item.pack.id: self.page.set_card(
+                Source(f"pack:{item.pack.id}", item.sound_set, "Downloaded")
+            )
+            for item in online.packs
+            if item.sound_set
+        }
+        add_section(self.library.downloaded, self.downloaded_cards.values())
+        if self.saved is not None:
+            self.update_library(self.saved)
+        else:
+            self.page.sources_changed()
+
+    def view_download(self, pack_id: str) -> None:
+        card = self.downloaded_cards[pack_id]
+        self.page.open_view("saved", card.use)
+        self.page.views["saved"].ensureWidgetVisible(card)
 
     def add_download_controls(self, card: DownloadCard, item: Downloadable) -> None:
         sound_set = item.sound_set
-        play = Button("Preview set")
-        play.setEnabled(any(sound_set.assignments.values()))
-        play.clicked.connect(partial(self.page.audio.play, play, sound_set))
-        use = Button("Select set", "quiet")
-        use.clicked.connect(partial(self.page.use_download, item))
-        card.buttons.addWidget(play)
-        card.buttons.addWidget(use)
+        view = Button("View in collection", "secondary")
+        view.clicked.connect(partial(self.view_download, item.pack.id))
+        card.buttons.addWidget(view)
         playable, silent = coverage(sound_set)
         count = f"{playable} of {EVENT_COUNT} sound slots have a clip"
         if silent:
@@ -350,7 +377,7 @@ class SoundCollections:
 
         def error(exc: BaseException) -> None:
             if isinstance(exc, DownloadError) and exc.reason == DownloadFailure.CANCELLED:
-                card.interrupted("Download paused. You can resume it here.", "Resume download")
+                card.interrupted("", "Resume download")
             else:
                 hints = {
                     DownloadFailure.DISK_SPACE: "There isn’t enough disk space. Free some space and retry.",

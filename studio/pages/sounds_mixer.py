@@ -78,7 +78,6 @@ class MixerView(InlineView):
             row = button_row(*self.forms.values())
             row.insertWidget(0, self.number, 1)
             form.body.addLayout(row)
-            self.body.addWidget(form)
         else:
             self.actions.addWidget(self.chants)
         self.groups = QWidget()
@@ -86,6 +85,8 @@ class MixerView(InlineView):
         margins(self.groups_body, 0)
         self.groups_body.setSpacing(t.LG)
         self.body.addWidget(self.groups)
+        if chants:
+            self.body.addWidget(form)
         self.body.addStretch(1)
 
     def build(
