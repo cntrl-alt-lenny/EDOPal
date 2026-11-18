@@ -53,13 +53,14 @@ class SavedScreen(Screen):
         name = path_label(str(path), path.name)
         name.setProperty("role", "subheading")
         panel.body.addWidget(name)
-        panel.body.addWidget(path_label(str(path)))
+        panel.body.addWidget(path_label(str(path.parent)))
         self.body.addWidget(panel)
         reveal = action("Open backup folder", reveal_folder, "primary", "folder")
         self.body.addWidget(
             actions(
                 reveal,
-                description="Copy this file to your other device, then choose Restore there.",
+                description="Copy this file to your other device using a USB drive or cloud storage. "
+                "Open Studio there, select your EDOPro folder, then choose Restore in Backup & transfer.",
             )
         )
         self.focus = reveal
@@ -78,21 +79,19 @@ class RestoredScreen(Screen):
         self.banner(
             title, "The changes will be available the next time you start EDOPro.", "check", back
         )
-        button = action(
-            "Undo this restore" if complete else "Back to backups",
-            undo if complete else back,
-            "secondary" if complete else "primary",
-            "back",
+        done = action("Done" if complete else "Back to backups", back, "primary", "check")
+        buttons = (
+            (action("Undo this restore", undo, "secondary", "back"), done) if complete else (done,)
         )
         self.body.addWidget(
             actions(
-                button,
+                *buttons,
                 description=UNDO_DESCRIPTION
                 if complete
                 else "This restore is marked as undone in history.",
             )
         )
-        self.focus = button
+        self.focus = done
 
 
 class ErrorScreen(Screen):

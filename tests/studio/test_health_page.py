@@ -7,11 +7,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel
 from pytestqt.qtbot import QtBot
 
-from doctor import DoctorReport, inspect_installation, support_summary
+from doctor import DoctorReport, ListConflict, inspect_installation, support_summary
 from doctor.model import finding
 from studio.context import Installation
 from studio.pages import health
-from studio.pages.health_report import byte_size, evidence, groups, route
+from studio.pages.health_report import byte_size, evidence, groups, heading, route
 from studio.shell import StudioWindow
 from studio.widgets import Button
 
@@ -68,6 +68,8 @@ def test_inspect_support_storage_and_navigation(
     assert item.isChecked()
     button(window, "Open Music").click()
     assert window.current.id == "music"
+    qtbot.waitUntil(lambda: window.current.state == "home")
+    assert QApplication.focusWidget() is window.current.toggle_music
 
 
 def test_selection_errors_and_stale_results(
@@ -182,3 +184,97 @@ def test_full_evidence_pages_and_keyboard_back(
     assert page.state == "overview" and toggle.isChecked()
     qtbot.keyClick(toggle, Qt.Key.Key_Escape)
     assert not toggle.isChecked() and window.isVisible()
+
+
+@pytest.mark.parametrize(
+    ("key", "extra", "destination"),
+    [
+        ("decks.unknown_cards", {}, "My decks"),
+        ("banlists.missing", {}, "My decks"),
+        ("artwork.coverage", {"cards_have": 10, "cards_total": 128}, "HD Cards"),
+        ("music.missing", {"missing": ("deck",)}, "Music"),
+        ("state.interrupted", {"category": "music"}, "Music"),
+        ("state.interrupted", {"category": "effects"}, "Sounds"),
+        ("state.interrupted", {"category": "sleeves"}, "Sleeves"),
+        ("storage.low", {}, "HD Cards"),
+        ("skin.missing", {}, "Skins"),
+    ],
+)
+def test_open_the_relevant_view(
+    make_window: Callable,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    extra: dict[str, object],
+    destination: str,
+) -> None:
+    window = make_window()
+    game = Path(window.ctx.installation.path)
+    deck = game / "deck" / "Another folder" / "Spellcasters.ydk"
+    deck.parent.mkdir()
+    deck.write_text("#main\n999999\n", encoding="utf-8")
+    path = game / "sound/.edopro-hd-sync/deck/pending.json" if key == "state.interrupted" else deck
+    item = finding(key, path=path, **extra)
+    report = DoctorReport(game, "1.0", None, (item,))
+    monkeypatch.setattr(health, "inspect_installation", lambda *a, **k: report)
+    window.nav["health"].click()
+    qtbot.waitUntil(lambda: window.current.state == "overview")
+    if item.severity == "info":
+        button(window, "Notes").click()
+    button(window, heading(item)).click()
+    button(window, f"Open {destination}").click()
+    page = window.current
+    assert page.id == route(item)
+    if key == "decks.unknown_cards":
+        qtbot.waitUntil(lambda: len(page.history) == 2)
+        assert any(str(deck) == label.toolTip() for label in page.view.findChildren(QLabel))
+    elif key == "banlists.missing":
+        qtbot.waitUntil(lambda: len(page.history) == 2)
+        assert page.view.summary.text() == "No forbidden lists installed"
+    elif destination == "Music":
+        qtbot.waitUntil(lambda: page.state == "playlist")
+        assert page.scene == "deck"
+    elif key == "artwork.coverage":
+        qtbot.waitUntil(lambda: page.state == "results")
+    elif key == "storage.low":
+        assert page.state == "options"
+        assert QApplication.focusWidget() is page.options.scope.buttons[1]
+    elif destination == "Sounds":
+        assert page.state == "overview"
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs, timeout=15000)
+
+
+def test_notes_stay_collapsed_and_explain_practice_matches(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    game = Path(window.ctx.installation.path)
+    sample = ListConflict(game / "AI_Dragon.ydk", game / "lflist.conf", "Cup", 7, "Dragon", 2, 1)
+    practice = finding(
+        "windbot.list_conflicts", decks=8, lists=10, conflicts=2400, details=(sample,) * 2400
+    )
+    missing = finding("skin.missing")
+    passed = finding("installation.found")
+    report = DoctorReport(game, "1.0", None, (practice, passed))
+    monkeypatch.setattr(health, "inspect_installation", lambda *a, **k: report)
+    window.nav["health"].click()
+    page = window.current
+    qtbot.waitUntil(lambda: page.state == "overview")
+    notes = button(window, "Notes")
+    assert not notes.isChecked()
+    assert not button(window, "Passed checks").isChecked()
+    assert any(label.text() == "Checks passed" for label in page.findChildren(QLabel))
+    notes.click()
+    button(window, heading(practice)).click()
+    visible = "\n".join(label.text() for label in page.scroll.widget().findChildren(QLabel))
+    assert "8 bundled practice decks" in visible and "10 installed lists" in visible
+    assert "2,400 matches count each card limit separately" in visible
+    button(window, "Review card limit matches").click()
+    assert page.state == "evidence"
+    page.escape()
+    assert button(window, "Notes").isChecked()
+    report = DoctorReport(game, "1.0", None, (practice, passed, missing))
+    page.rerun.click()
+    qtbot.waitUntil(lambda: page.state == "overview")
+    qtbot.waitUntil(lambda: button(window, missing.title).isVisible())
+    assert not button(window, "Notes").isChecked()

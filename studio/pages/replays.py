@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtGui import QResizeEvent
-from PySide6.QtWidgets import QComboBox, QFileDialog, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QVBoxLayout
 
 from music.settings import _game_running
 from replays import (
@@ -43,7 +43,11 @@ class ChangedRecording(ValueError):
 
 
 def require_closed(game: Path) -> None:
-    if _game_running(game):
+    try:
+        running = _game_running(game)
+    except OSError as error:
+        raise GameOpen("Couldn’t check if EDOPro is open. Close it, then choose Retry.") from error
+    if running:
         raise GameOpen("After the game closes, choose Retry to save the file.")
 
 
@@ -57,6 +61,7 @@ class ReplaysPage(ToolPage):
         self.entries: tuple[ReplayEntry, ...] = ()
         self.selected: ReplayEntry | None = None
         self.last: ReplayEntry | None = None
+        self.preserve: Button | None = None
         self.writing = False
         self.query, self.order = "", "Newest first"
         self.undo_notes: dict[str, tuple[ReplayNotes, ReplayNotes]] = {}
@@ -73,9 +78,9 @@ class ReplaysPage(ToolPage):
 
         def changed(stamp: tuple[int, ...]) -> None:
             if stamp != self.stamp:
-                self.refresh()
+                self._scan(game, passive=True)
 
-        self.read(lambda _: folder_stamp(game), changed, lambda _: self.refresh())
+        self.read(lambda _: folder_stamp(game), changed, lambda _: self._scan(game, passive=True))
 
     def installation_changed(self, installation: Installation) -> None:
         self.query, self.order = "", "Newest first"
@@ -85,45 +90,85 @@ class ReplaysPage(ToolPage):
 
     def refresh(self) -> None:
         self.stop_read()
+        self.watch.stop()
         game = self.ctx.installation.path
         self.selected, self.entries = None, ()
+        self.last = self.preserve = None
         if not game:
             self.no_game()
             return
-        profile = Path(self.ctx.cfg.config_path).parent
         self.state_view(
             "loading",
             "Reading your replays…",
             "Looking for saved duels and your most recent recording.",
         )
+        self._scan(Path(game))
+
+    def _scan(self, game: Path, *, passive: bool = False) -> None:
+        profile = Path(self.ctx.cfg.config_path).parent
 
         def scan(_: WorkerContext) -> tuple[tuple[int, ...], tuple[ReplayEntry, ...]]:
-            if not Path(game).is_dir():
+            if not game.is_dir():
                 raise FileNotFoundError(
                     "The installation folder is unavailable. Reconnect the drive or choose another folder."
                 )
-            return folder_stamp(Path(game)), index_replays(
-                game, annotations=AnnotationStore(profile)
-            )
+            return folder_stamp(game), index_replays(game, annotations=AnnotationStore(profile))
 
-        self.read(
-            scan,
-            self._indexed,
-            lambda exc: self.state_view(
-                "error", "The library could not open", str(exc), "Retry", self.refresh
+        def failed(exc: Exception) -> None:
+            self.watch.stop()
+            self.state_view("error", "The library could not open", str(exc), "Retry", self.refresh)
+
+        self.read(scan, lambda result: self._indexed(result, passive=passive), failed)
+
+    def _indexed(
+        self, result: tuple[tuple[int, ...], tuple[ReplayEntry, ...]], *, passive: bool
+    ) -> None:
+        selected = self._current_path() if passive and self.state == "library" else None
+        focus = QApplication.focusWidget() if passive else None
+        control = next(
+            (
+                name
+                for name in ("search", "sort", "list", "reload")
+                if focus is not None and focus is getattr(self, name, None)
             ),
+            "",
         )
-
-    def _indexed(self, result: tuple[tuple[int, ...], tuple[ReplayEntry, ...]]) -> None:
         self.stamp, self.entries = result
         self.watch.start()
-        self.library()
+        cursor = self.search.cursorPosition() if control == "search" else None
+        self.library(focus=not passive)
+        if self.state == "library":
+            self._select_path(selected)
+            if control:
+                getattr(self, control).setFocus()
+            if cursor is not None:
+                self.search.setCursorPosition(cursor)
+        elif passive and control == "reload":
+            self.reload.setFocus()
 
-    def library(self) -> None:
+    def library(self, *, focus: bool = True) -> None:
         self.selected = None
         self.surface("library")
         self.last = last_to_save(self.entries)
-        self.banner("Replay library", self.introduction)
+        self.preserve = None
+        self.banner("Duel replays", self.introduction)
+        if self.last:
+            panel = Panel(t.LG)
+            line = row()
+            line.addWidget(glyph("replays", t.ICON_BIG))
+            copy = QVBoxLayout()
+            copy.setSpacing(t.XS)
+            copy.addWidget(label("Your last duel is ready to save", "subheading", True))
+            copy.addWidget(
+                label("Save a copy before EDOPro replaces it in your next duel.", "body", True)
+            )
+            line.addLayout(copy, 1)
+            self.preserve = Button("Save my last duel", "primary", "download")
+            self.preserve.setToolTip(played(self.last))
+            self.preserve.clicked.connect(self._preserve)
+            line.addWidget(self.preserve)
+            panel.body.addLayout(line)
+            self.body.addWidget(panel)
         if not self.ctx.installation.ready:
             self.body.addWidget(
                 label(
@@ -134,33 +179,13 @@ class ReplaysPage(ToolPage):
             )
         if self.saved and any(e.path == self.saved for e in self.entries):
             self._saved_copy()
-        if self.last:
-            panel = Panel(t.LG)
-            line = row()
-            line.addWidget(glyph("replays", t.ICON_BIG))
-            copy = QVBoxLayout()
-            copy.setSpacing(t.XS)
-            copy.addWidget(label("Last duel  ·  " + played(self.last), "subheading", True))
-            copy.addWidget(
-                label("EDOPro replaces this recording after your next duel.", "body", True)
-            )
-            line.addLayout(copy, 1)
-            self.preserve = Button("Save my last duel", "primary", "download")
-            self.preserve.clicked.connect(self._preserve)
-            line.addWidget(self.preserve)
-            panel.body.addLayout(line)
-            self.body.addWidget(panel)
-        heading = row()
-        heading.addWidget(label("Your duels", "heading"), 1)
+        panel = Panel(t.LG)
         self.count = label("", "muted")
-        heading.addWidget(self.count)
-        refresh = Button("Refresh", "quiet")
-        refresh.clicked.connect(self.refresh)
-        heading.addWidget(refresh)
-        self.body.addLayout(heading)
+        self.reload = Button("Refresh", "quiet")
+        self.reload.clicked.connect(self.refresh)
         if not self.entries:
             self.state = "empty"
-            panel = Panel()
+            panel.body.addWidget(self.reload, 0, Qt.AlignmentFlag.AlignRight)
             panel.body.addStretch()
             panel.body.addWidget(glyph("replays", t.BRAND_ICON))
             panel.body.addWidget(
@@ -171,10 +196,12 @@ class ReplaysPage(ToolPage):
             )
             panel.body.addStretch()
             self.body.addWidget(panel, 1)
-            refresh.setFocus()
+            if focus:
+                self.reload.setFocus()
             return
         controls = row()
-        self.search = SearchField("Search players, labels, notes or tags")
+        self.search = SearchField("Search replays")
+        self.search.setToolTip("Search player names, labels, notes and tags.")
         self.search.setText(self.query)
         controls.addWidget(self.search, 1)
         controls.addWidget(label("Sort by", "muted"))
@@ -186,10 +213,12 @@ class ReplaysPage(ToolPage):
             border-radius:{t.R_SMALL}px; padding:{t.SM}px {t.MD}px; min-width:{t.TILE_H}px;}}
             QComboBox:focus {{border-color:{t.PALE};}}""")
         controls.addWidget(self.sort)
-        self.body.addLayout(controls)
+        controls.addWidget(self.count)
+        controls.addWidget(self.reload)
+        panel.body.addLayout(controls)
         self.list = ReplayList()
         self.list.setMinimumHeight(t.TILE_H * 2)
-        self.body.addWidget(self.list, 1)
+        panel.body.addWidget(self.list, 1)
         self.no_matches = Panel()
         self.no_matches.body.addStretch()
         self.no_matches.body.addWidget(
@@ -199,13 +228,16 @@ class ReplaysPage(ToolPage):
         clear.clicked.connect(self.search.clear)
         self.no_matches.body.addWidget(clear, 0, Qt.AlignmentFlag.AlignLeft)
         self.no_matches.body.addStretch()
-        self.body.addWidget(self.no_matches, 1)
+        panel.body.addWidget(self.no_matches, 1)
         self.list.clicked.connect(self._select)
         self.list.activated.connect(self._select)
         self.search.textChanged.connect(self._filter)
         self.sort.currentTextChanged.connect(self._filter)
+        self.body.addWidget(panel, 1)
+        panel.show()
         self._filter()
-        (self.preserve if self.last else self.search).setFocus()
+        if focus:
+            (self.preserve or self.search).setFocus()
 
     def _filter(self) -> None:
         self.query, self.order = self.search.text(), self.sort.currentText()
@@ -220,6 +252,19 @@ class ReplaysPage(ToolPage):
         )
         if entries:
             self.list.setCurrentIndex(self.list.records.index(0))
+
+    def _current_path(self) -> Path | None:
+        index = self.list.currentIndex()
+        return self.list.records.entries[index.row()].path if index.isValid() else None
+
+    def _select_path(self, path: Path | None) -> bool:
+        for row_index, entry in enumerate(self.list.records.entries):
+            if entry.path == path:
+                index = self.list.records.index(row_index)
+                self.list.setCurrentIndex(index)
+                self.list.scrollTo(index)
+                return True
+        return False
 
     def _select(self, index: QModelIndex) -> None:
         if self.state == "library" and index.isValid():
@@ -352,6 +397,8 @@ class ReplaysPage(ToolPage):
             return
         game = Path(self.ctx.installation.path)
         path = Path(destination)
+        if not path.suffix:
+            path = path.with_suffix(".zip")
 
         def export(_: WorkerContext) -> Path:
             if path.resolve().is_relative_to(game.resolve()):
@@ -404,7 +451,7 @@ class ReplaysPage(ToolPage):
             if release():
                 stale = isinstance(exc, ChangedRecording)
                 headline = (
-                    "Close EDOPro to save"
+                    "Close EDOPro to continue"
                     if isinstance(exc, GameOpen)
                     else "The file could not be saved"
                 )
@@ -414,9 +461,9 @@ class ReplaysPage(ToolPage):
                     str(exc),
                     "Refresh" if stale else "Retry",
                     self.refresh if stale else retry,
+                    back=back,
                 )
                 self.retry_back = back
-                self.back_button(back)
 
         job.result.connect(lambda value: done(value) if release() else None)
         job.error.connect(failed)
@@ -436,10 +483,7 @@ class ReplaysPage(ToolPage):
         if self._may_leave():
             previous = self.selected
             self.library()
-            if previous and previous in self.list.records.entries:
-                self.list.setCurrentIndex(
-                    self.list.records.index(self.list.records.entries.index(previous))
-                )
+            if previous and self.state == "library" and self._select_path(previous.path):
                 self.list.setFocus()
 
     def escape(self) -> bool:

@@ -242,6 +242,9 @@ class GroupedList(Panel):
             self.tabs[key] = tab
             toolbar.addWidget(tab)
         toolbar.addStretch()
+        self.details_button = Button("Item details", "quiet")
+        self.details_button.setCheckable(True)
+        toolbar.addWidget(self.details_button)
         self.body.addLayout(toolbar)
         self.list = ReviewList("File review", show_action=headings.get("add") is not None)
         self.list.setMinimumHeight(t.TILE_H * 2)
@@ -250,6 +253,25 @@ class GroupedList(Panel):
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setMinimumHeight(t.TILE_H * 2)
         self.body.addWidget(self.empty, 1)
+        self.details = label("", "body", True)
+        self.details.setTextFormat(Qt.TextFormat.PlainText)
+        self.details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.details.hide()
+        self.details_button.toggled.connect(self.details.setVisible)
+        self.list.selectionModel().currentChanged.connect(self._item_changed)
+        self.body.addWidget(self.details)
+
+    def _item_changed(self, current: QModelIndex, _previous: QModelIndex) -> None:
+        item = current.data(Qt.ItemDataRole.UserRole)
+        self.details.setText(item.tooltip if item else "")
+        self.details_button.setEnabled(item is not None)
+
+    def close_details(self) -> bool:
+        if not self.details_button.isChecked():
+            return False
+        self.details_button.setChecked(False)
+        self.details_button.setFocus()
+        return True
 
     def compact(self, small: bool) -> None:
         height = t.TILE_H if small else t.TILE_H * 2
@@ -269,8 +291,11 @@ class GroupedList(Panel):
     def _select(self, key: str, checked: bool) -> None:
         if checked:
             rows = self.groups[key]
+            self.details_button.setChecked(False)
             self.empty.setText(self.messages[key])
             self.empty.setVisible(not rows)
             self.list.setVisible(bool(rows))
             self.list.setAccessibleName(self.headings[key])
             self.list.replace(rows)
+            self.list.setCurrentIndex(self.list.rows.index(0, 0))
+            self.details_button.setVisible(bool(rows))

@@ -34,11 +34,13 @@ PAGE_NAMES = {
     "sounds": "Sounds",
     "skins": "Skins",
     "sleeves": "Sleeves",
+    "mydecks": "My decks",
 }
 ROUTES = {
     "music.disabled": "music",
     "music.missing": "music",
     "sound.missing": "sounds",
+    "sound.disabled": "sounds",
     "skin.missing": "skins",
     "skin.malformed": "skins",
     "skin.images": "skins",
@@ -47,18 +49,36 @@ ROUTES = {
     "storage.low": "cards",
     "artwork.coverage": "cards",
     "artwork.unavailable": "cards",
+    "decks.unreadable": "mydecks",
+    "decks.unknown_cards": "mydecks",
+    "banlists.missing": "mydecks",
+    "banlists.unreadable": "mydecks",
 }
 
 
 def route(item: Finding) -> str | None:
     if item.id == "state.interrupted":
-        return {"sleeves": "sleeves", "effects": "sounds", "music": "music"}.get(
-            str(item.evidence.get("category"))
-        )
+        return {
+            "sleeves": "sleeves",
+            "effects": "sounds",
+            "music": "music",
+        }.get(str(item.evidence.get("category")))
+    if item.id == "artwork.coverage" and all(
+        isinstance(have := item.evidence.get(f"{kind}_have"), int)
+        and have == item.evidence.get(f"{kind}_total")
+        for kind in ("cards", "fields")
+    ):
+        return None
     return ROUTES.get(item.id)
 
 
 def heading(item: Finding) -> str:
+    if item.id == "decks.unknown_cards":
+        return deck_heading(item, "uses unknown cards")
+    if item.id == "decks.unreadable":
+        return deck_heading(item, "could not be read")
+    if item.id == "state.interrupted" and (page := route(item)):
+        return f"Interrupted change in {PAGE_NAMES[page]}"
     if item.id == "artwork.coverage":
         have, total = item.evidence.get("cards_have"), item.evidence.get("cards_total")
         if isinstance(have, int) and isinstance(total, int) and total > have:
@@ -68,6 +88,23 @@ def heading(item: Finding) -> str:
         "repositories.config": "Game update sources checked",
         "process.closed": "EDOPro appears to be closed",
     }.get(item.id, item.title)
+
+
+def deck_heading(item: Finding, issue: str) -> str:
+    path = item.evidence.get("path")
+    return f"{path.stem} {issue}" if isinstance(path, Path) and path.suffix else item.title
+
+
+def practice_summary(item: Finding) -> str:
+    decks = item.evidence.get("decks", 0)
+    lists = item.evidence.get("lists", 0)
+    conflicts = item.evidence.get("conflicts", 0)
+    return (
+        f"{decks:,} bundled practice {'deck' if decks == 1 else 'decks'} exceeded card limits "
+        f"on {lists:,} installed {'list' if lists == 1 else 'lists'}. "
+        f"The {conflicts:,} matches count each card limit separately for every deck and list. "
+        "For practice duels, choose a bot suited to the list you play."
+    )
 
 
 def groups(items: tuple[Finding, ...]) -> list[tuple[str, str, list[Finding]]]:
@@ -114,6 +151,8 @@ def _sample(value: object, limit: int | None = 4) -> Iterator[str]:
 
 
 def evidence(item: Finding) -> Iterator[tuple[str, str]]:
+    if item.id == "windbot.list_conflicts":
+        return
     for key, value in item.evidence.items():
         name = key.replace("_", " ").capitalize()
         if isinstance(value, Path):

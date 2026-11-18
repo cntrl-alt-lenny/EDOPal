@@ -1,11 +1,13 @@
 """The home, selection, and review screens in the backup page."""
 
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
+    QLabel,
     QLayout,
     QSizePolicy,
     QVBoxLayout,
@@ -65,7 +67,14 @@ class Screen(QWidget):
         self.body.setSpacing(t.LG)
         self.focus: QWidget | None = None
 
-    def heading(self, title: str, back: Callable[[], None] | None, path: str = "") -> None:
+    def heading(
+        self,
+        title: str,
+        back: Callable[[], None] | None,
+        path: str = "",
+        *,
+        detail: QLabel | None = None,
+    ) -> None:
         if back:
             self.back = action("Back", back, "quiet", "back")
             self.focus = self.back
@@ -76,8 +85,10 @@ class Screen(QWidget):
         copy = QVBoxLayout()
         copy.setSpacing(t.XS)
         copy.addWidget(serif(title, t.DISPLAY - t.SM))
-        if path:
-            copy.addWidget(path_label(path))
+        if detail is not None:
+            copy.addWidget(detail)
+        elif path:
+            copy.addWidget(path_label(path, Path(path).name))
         header.addLayout(copy, 1)
         self.body.addLayout(header)
 
@@ -111,17 +122,17 @@ class HomeScreen(Screen):
         self.hero = Hero(
             "Backup & transfer",
             "Take your decks",
-            "Save or move your decks, replays, and settings in one file.",
+            "Save your decks, replays and preferences to one ZIP you can move to another device.",
             "check",
             emphasis="with you.",
         )
         self.body.addWidget(self.hero)
         if path:
             self.save = ActionTile(
-                "Save a backup", "Choose what to copy from this installation.", "backup"
+                "Save a backup", "Create a ZIP of your personal files.", "backup"
             )
             self.restore = ActionTile(
-                "Restore", "Review changes and bring your files over.", "download"
+                "Restore", "Open a ZIP from this or another device.", "download"
             )
             self.compare = ActionTile(
                 "Compare", "See what differs from a saved backup.", "coverage"
@@ -157,7 +168,7 @@ class HomeScreen(Screen):
                 "Your backup and restore history belongs to the game folder you select.",
             )
             self.focus = action("Choose folder", change_folder, "primary", "folder")
-            panel.body.addWidget(self.focus, 0, Qt.AlignmentFlag.AlignLeft)
+            panel.body.addWidget(self.focus, 0, Qt.AlignmentFlag.AlignRight)
             self.body.addWidget(panel)
 
     def set_history(
@@ -175,10 +186,11 @@ class HomeScreen(Screen):
         if error:
             panel.body.addWidget(label(error, "body", True))
             panel.body.addWidget(action("Retry", retry), 0, Qt.AlignmentFlag.AlignLeft)
+            self.body.setStretchFactor(panel, 0)
+            self.body.addStretch()
             return
         records = tuple(tx for tx in records if not is_interrupted(tx))
         if not records:
-            panel.body.addStretch()
             row = QHBoxLayout()
             row.setSpacing(t.MD)
             row.addWidget(glyph("backup", t.ICON_BIG, t.MUTED))
@@ -190,7 +202,8 @@ class HomeScreen(Screen):
             )
             row.addLayout(copy, 1)
             panel.body.addLayout(row)
-            panel.body.addStretch()
+            self.body.setStretchFactor(panel, 0)
+            self.body.addStretch()
             return
         view = ReviewList("Restore history")
         view.setMinimumHeight(t.BUTTON_H + t.MD)
@@ -266,7 +279,11 @@ class SaveScreen(Screen):
         super().__init__()
         self.heading("Save a backup", back)
         self.body.addWidget(
-            label("Choose what to copy from this installation.", "body", True),
+            label(
+                "Select what to put in the ZIP. Decks and replays are selected by default.",
+                "body",
+                True,
+            ),
             0,
             Qt.AlignmentFlag.AlignTop,
         )
@@ -300,7 +317,7 @@ class SaveScreen(Screen):
         self.body.addWidget(footer)
         self.body.addWidget(
             label(
-                "Card artwork, downloaded game content, device settings, and music recordings stay on this device.",
+                "Card artwork, downloaded game content, device settings, replay notes and imported music stay on this device.",
                 "muted",
                 True,
             ),
@@ -313,7 +330,7 @@ class SaveScreen(Screen):
             total = backup.Total(
                 sum(items[k].count for k in picked), sum(items[k].bytes for k in picked)
             )
-            self.total.setText(amount(total))
+            self.total.setText(amount(total) if total.count else "Select a category with items")
             self.save.setEnabled(total.count > 0)
 
         for choice in self.choices.values():
@@ -386,7 +403,7 @@ class ArchiveScreen(Screen):
                 self.review,
                 description="Comparison leaves both copies as they are."
                 if compare
-                else "You’ll review every change before anything is restored.",
+                else "Nothing has been changed yet. Preview what this backup can restore.",
             )
         )
         self.focus = self.review
@@ -396,17 +413,20 @@ class PreviewScreen(Screen):
     def __init__(
         self,
         path: str,
+        destination: str,
         back: Callable[[], None],
         choose_policy: Callable[[backup.Policy], None],
         restore: Callable[[], None],
     ) -> None:
         super().__init__()
-        self.heading("Restore preview", back, path)
+        source, target = Path(path).name, Path(destination).name
+        paths = path_label(f"{path}\n{destination}", f"{source}  →  Restore to {target}")
+        self.heading("Restore preview", back, detail=paths)
         self.policy = SegmentedControl(
             [
                 ("Keep mine", "Recommended. Keep the version here.", "check"),
-                ("Use backup", "Replace the version here with the backup.", "download"),
-                ("Keep both", "Save the backup version as a separate copy.", "library"),
+                ("Use backup", "Replace the version here.", "download"),
+                ("Keep both", "Add the backup as a separate copy.", "library"),
             ]
         )
         self.policy.setAccessibleName("When versions differ")
@@ -434,7 +454,7 @@ class PreviewScreen(Screen):
         self.set_loading()
 
     def set_loading(self) -> None:
-        self.status.setText("Checking this installation against the backup…")
+        self.status.setText("Nothing has been changed yet. Checking files…")
         self.restore.setEnabled(False)
         self.grouped.hide()
         self.notice.show_message("")
@@ -451,11 +471,14 @@ class PreviewScreen(Screen):
         selected = next((key for key, tab in self.grouped.tabs.items() if tab.isChecked()), None)
         self.grouped.set_groups(review.groups, selected)
         self.grouped.show()
+        self.policy.setVisible(bool(review.groups["conflict"]))
         if review.writes:
             change = "1 change" if review.writes == 1 else f"{review.writes:,} changes"
-            self.status.setText(f"{change} to apply. You can undo the restore from history.")
+            self.status.setText(f"Nothing has been changed yet. {change} ready to apply.")
         else:
-            self.status.setText("There are no changes to apply with this choice.")
+            self.status.setText(
+                "Nothing has been changed yet. This choice has no changes to apply."
+            )
         self.restore.setEnabled(bool(review.writes))
 
 
