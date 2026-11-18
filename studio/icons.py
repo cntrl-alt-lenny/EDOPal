@@ -9,6 +9,10 @@ from PySide6.QtSvg import QSvgRenderer
 from studio import theme as t
 
 PATHS = {
+    "mydecks": "M3 9l9-5 9 5-9 5z M3 13l9 5 9-5 M3 17l9 5 9-5 M9 8l3-1.5L15 8",
+    "replays": "M3 5h18v14H3z M3 9h18 M6 5l3 4 M12 5l3 4 M10 12l4 2-4 2z",
+    "backup": "M3 12l2-8h14l2 8v7H3z M3 12h5l2 3h4l2-3h5 M12 11V6 M9 8l3-3 3 3",
+    "health": "M12 2l8 3v6c0 5-4 8-8 11-4-3-8-6-8-11V5z M6 12h3l2-4 2 7 2-4h3",
     "brand": "M3 7l6-3 1 2 M2 8l3 12 4-1 M8 4l7-2 1 2 M7 6l2 15 5-1 M12 5h9v15h-9z M16.5 8l2.5 4-2.5 4-2.5-4z",
     "cards": "M3 6l4-1 M2 8l3 12 4-1 M8 4l4-1 M7 6l2 15 M12 4h9v16h-9z M16.5 8l2 4-2 4-2-4z",
     "skins": "M3 7l9-5 9 5-9 5z M3 12l9 5 9-5 M3 17l9 5 9-5",

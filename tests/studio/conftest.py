@@ -25,7 +25,10 @@ def game(tmp_path: Path) -> Config:
 
 
 @pytest.fixture
-def make_window(qapp: QApplication, qtbot: QtBot, game: Config) -> Callable:
+def make_window(
+    qapp: QApplication, qtbot: QtBot, game: Config, monkeypatch: pytest.MonkeyPatch
+) -> Callable:
+    monkeypatch.setattr("music.settings._game_running", lambda _: False)
     theme.apply(qapp)
 
     def factory(run: RunCoro | None = None) -> StudioWindow:

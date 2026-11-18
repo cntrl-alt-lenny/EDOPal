@@ -4,6 +4,7 @@ import contextlib
 import copy
 import os
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,18 @@ from config import Config, folder_has_card_databases
 
 if TYPE_CHECKING:
     from main import DownloadStats
+
+
+# Context-local so concurrent CLI or deck jobs never share a Studio undo record.
+ArtworkChange = Callable[[str | Path, bytes | bytearray | None], None]
+artwork_change_sink: ContextVar[ArtworkChange | None] = ContextVar(
+    "artwork_change_sink", default=None
+)
+
+
+def record_artwork_change(path: str | Path, incoming: bytes | bytearray | None) -> None:
+    if observer := artwork_change_sink.get():
+        observer(path, incoming)
 
 
 # (section, [(key, label, hint, default), ...])
@@ -34,7 +47,7 @@ CHECKBOX_GROUPS = [
             (
                 "hd_era_art",
                 "HD GOAT / Pre-Errata artwork",
-                "Modern text in HD; untick for original wording at lower resolution",
+                "Modern text in HD. Turn off for original wording at lower resolution.",
                 True,
             ),
         ],
@@ -258,7 +271,7 @@ def sync_summary(
     rows = (
         ("Card artwork", stats.total_ok),
         ("Field Spell artwork", stats.field_ok),
-        ("Already on disk", stats.skipped),
+        ("Queued downloads skipped (file already present)", stats.skipped),
         ("Rush Duel (no art yet)", stats.rush_failures),
         ("Anime / custom (no art yet)", stats.unofficial_failures),
         ("Tokens / placeholders", len(stats.token_failures)),
@@ -269,6 +282,8 @@ def sync_summary(
     notes = [extra_note] if installed else []
     if unavailable > stats.transient_failures + len(stats.field_transient_ids):
         notes.append("Known-missing artwork is retried after 14 days.")
+    if stats.transient_failures or stats.field_transient_ids:
+        notes.append("Sync again to retry interrupted downloads.")
     report = getattr(cfg, "report_path", None)
     failures = []
     for kind, entries, retry_ids in (
@@ -277,7 +292,7 @@ def sync_summary(
     ):
         for card_id, name in entries:
             suffix = " • Will retry" if card_id in retry_ids else ""
-            failures.append(f"{name}   ·   {card_id}   ·   {kind}{suffix}")
+            failures.append(f"{name}   ·   {kind}{suffix}")
     return Summary(
         "Sync cancelled" if cancelled else "Sync complete",
         (f"{downloaded:,}", "Downloaded"),

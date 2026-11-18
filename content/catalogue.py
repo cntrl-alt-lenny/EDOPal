@@ -143,6 +143,17 @@ def _read_saved(path: Path) -> _Saved | None:
         return None
 
 
+def offline_manifest(cache: PackCache, config_url: str = "") -> Manifest:
+    """Read display names for cached downloads without making a network request."""
+    try:
+        url = resolve_manifest_url(config_url)
+    except ManifestError:
+        return bundled_manifest()
+    key = "manifest-" + hashlib.sha256(url.encode("utf-8")).hexdigest()
+    saved = _read_saved(cache.root / key / "catalogue.json")
+    return saved.manifest if saved else bundled_manifest()
+
+
 def _save(path: Path, manifest: str, headers: Mapping[str, str]) -> None:
     envelope = {
         "manifest": manifest,

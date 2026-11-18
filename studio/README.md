@@ -16,7 +16,7 @@ The source app uses real downloads when you press **Sync HD cards**. **Show cove
 
 ## Add or replace a page
 
-The shell creates each class in `studio.shell.PAGES` once, in sidebar order. Replace the matching placeholder class in `studio/pages/` and keep its ID. For a new section, register its class in that tuple and add an original 24-unit SVG path in `studio/icons.py`. Settings belongs last.
+The shell creates each class in `studio.shell.PAGES` once, in sidebar order. Replace the matching placeholder class in `studio/pages/` and keep its ID. For a new section, register its class in that tuple and add an original 24-unit SVG path in `studio/icons.py`. The scrolling rail starts groups at `cards` (Customise), `decks` (Decks) and `replays` (Tools). Settings stays pinned below the scroll area. The reserved pages are `mydecks`, `replays`, `backup` and `health`. Replace their classes in the matching page files without changing their IDs. Up and Down move focus through all groups, and Enter selects the focused section.
 
 ```python
 from PySide6.QtWidgets import QVBoxLayout
@@ -81,6 +81,39 @@ job.error.connect(lambda exc: self.ctx.notify(str(exc)))
 `Job.progress`, `result`, `error`, `cancelled` and `finished` are delivered on the UI thread. Connect immediately after starting the job. `job.cancel()` requests cancellation. A cooperating worker can return its partial result. The runner emits the result or error, then `cancelled` if requested, then `finished`. Use `finished` for shared cleanup. For installation-changing jobs, call `ctx.set_busy(True)` before starting and release it on completion. Gate the page's own actions and navigation while busy. Read-only galleries can capture a selection generation to ignore results from a previous folder.
 
 The artwork-specific entry is `ctx.tasks.sync(job_config, ctx.run_coro)`. It installs the existing Rich-compatible progress adapter, notice and coverage sinks, folder request and cancellation event on the isolated job config. It runs asyncio inside the worker. Rapid count and description updates are combined before reaching Qt. Each phase keeps its final count. Both desktop interfaces use `artwork_flow.py` for scoped-job configuration, deck validation, first-run recommendations and result models.
+
+## Checking the game before a write
+
+Capture the selected game path on the UI thread. Inside the worker call
+`ctx.require_game_closed(game)` immediately before changing its files. This
+checks the executable path for that installation using the music engine. Both
+an open game and an unsuccessful process check raise `studio.context.GameOpenError`.
+Other installations can stay open. Read-only previews and coverage do not
+require this check.
+
+Use a `GameClosedBlock` from `studio.widgets` inside the page. For
+`GameOpenError`, release the busy state and call
+`block.show_reason(str(error))`. Connect `block.retry.clicked` to the
+original action so Retry performs a fresh check on a worker. Preserve the
+action's options, including any imported deck list. Drop the retry when the
+installation changes. During a write call `ctx.set_busy(True)`, veto
+`hidden()` and release ownership on every completion path.
+
+Settings and the installation bar share the inline picker. Emit
+`ctx.installations_requested` to rescan or browse, or
+`ctx.select_installation_requested.emit(path)` to validate a saved folder.
+HD Cards defaults are saved atomically in the active config. The small
+Studio state file beside it remembers known folders, per-game last runs,
+the available release and window geometry. A full coverage check remains
+available for large installations where opening every image automatically
+would be expensive.
+
+HD Cards keeps one restore point per game under `artwork-restore/` beside the
+config. A sync records only the files it changes, before publishing each
+change. A later sync that changes files replaces that game's restore point.
+Undo verifies the saved and installed bytes, restores replaced images and
+theme files, and removes new ones. An interrupted restore can be retried.
+The classic window and CLI retain their original download behaviour.
 
 ## Components
 

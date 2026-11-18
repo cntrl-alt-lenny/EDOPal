@@ -12,6 +12,7 @@ from tempfile import NamedTemporaryFile
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
+from artwork_flow import record_artwork_change
 from content.archives import pack_files
 from content.cache import PackCache
 from content.manifest import Pack
@@ -66,6 +67,7 @@ def _publish(root: Path, backups: Path, relative: str | Path, content: bytes) ->
         backup = backups / revision / relative
         if not backup.exists():
             _atomic_write(backup, previous)
+    record_artwork_change(destination, content)
     _atomic_write(destination, content)
 
 

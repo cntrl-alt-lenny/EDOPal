@@ -23,10 +23,11 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import main  # noqa: E402
-from config import Config  # noqa: E402
+from config import APP_NAME, Config  # noqa: E402
 from studio import theme  # noqa: E402
 from studio.context import AppContext, Installation  # noqa: E402
 from studio.shell import StudioWindow  # noqa: E402
+from tools.studio_shell_shots import render_shell_states  # noqa: E402
 
 
 def create_demo(root: Path) -> Config:
@@ -86,6 +87,14 @@ class DemoSync:
             stats.record_failure(155, "Network retry", transient=True)
             stats.record_failure(156, "Token")
             stats.record_failure(160000000, "Anime card")
+            from artwork_flow import record_artwork_change
+
+            # Exercise the real restore record with one small, local artwork file.
+            pictures = Path(cfg.pics_path)
+            new = pictures / "1100.jpg"
+            artwork = (pictures / "1000.jpg").read_bytes()
+            record_artwork_change(new, artwork)
+            new.write_bytes(artwork)
         if cfg.save_report:
             main._write_report(stats, cfg, 16.2)
         return stats
@@ -101,7 +110,7 @@ def settle(predicate: Callable[[], bool], timeout: float = 6) -> None:
 
 
 def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
-    app = QApplication.instance() or QApplication(["EDOPro Studio"])
+    app = QApplication.instance() or QApplication([APP_NAME])
     theme.apply(app)
     cfg = create_demo(root)
     fake = DemoSync()
@@ -127,6 +136,7 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     window.show()
     window.setFocus(Qt.FocusReason.OtherFocusReason)
     try:
+        settle(lambda: card.options.values[0].text() == "75%")
         shot("01-hd-cards")
         card.options.settings.click()
         card.settings.toggles["save_report"].setChecked(True)
@@ -173,6 +183,7 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         card.results.done.click()
         ctx.set_installation(Installation(selected.path))
         shot("18-awaiting-databases")
+        render_shell_states(window, shot, settle, root, selected)
     finally:
         fake.release.set()
         settle(lambda: not ctx.tasks.jobs)
@@ -196,11 +207,14 @@ def main_cli() -> None:
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--size", type=parse_size, action="append", help="WxH, repeatable")
     args = parser.parse_args()
-    app = QApplication.instance() or QApplication(["EDOPro Studio"])
+    app = QApplication.instance() or QApplication([APP_NAME])
     app.setQuitOnLastWindowClosed(False)
     for width, height in args.size or [(1280, 800), (1600, 1000)]:
         name = f"{width}x{height}"
-        with tempfile.TemporaryDirectory(prefix=".studio-preview-", dir=ROOT) as temporary:
+        with (
+            tempfile.TemporaryDirectory(prefix=".studio-preview-", dir=ROOT) as temporary,
+            patch("music.settings._game_running", return_value=False),
+        ):
             files = render(args.out / name, (width, height), Path(temporary))
         print(f"Rendered {len(files)} views at {name} in {files[0].parent}")
 

@@ -67,7 +67,7 @@ class InstallationPicker(QWidget):
         body.addLayout(actions)
         body.addStretch()
 
-    def open_picker(self) -> None:
+    def open_picker(self, selected: str = "") -> None:
         self.serial += 1
         serial = self.serial
         path = self.ctx.installation.path or self.ctx.cfg.edopro_path
@@ -78,7 +78,11 @@ class InstallationPicker(QWidget):
         self.browse.setEnabled(True)
         self.back.setEnabled(True)
         self.hint.setText("Searching your usual game folders…")
-        job = self.ctx.tasks.start(lambda _: config.find_edopro_folders([path]))
+        if selected:
+            self.validate(selected)
+            return
+        guesses = [path, *self.ctx.known_installations()]
+        job = self.ctx.tasks.start(lambda _: config.find_edopro_folders(guesses))
         job.result.connect(lambda paths: self._found(serial, paths))
         job.error.connect(lambda exc: self._failed(serial, exc))
         self.browse.setFocus()
@@ -115,14 +119,14 @@ class InstallationPicker(QWidget):
     @Slot()
     def _browse(self) -> None:
         if path := self.ctx.choose_folder(self.ctx.installation.path):
-            self._validate(path)
+            self.validate(path)
 
     @Slot()
     def _use(self) -> None:
         if self.use.isEnabled() and (item := self.list.currentItem()):
-            self._validate(item.data(Qt.ItemDataRole.UserRole))
+            self.validate(item.data(Qt.ItemDataRole.UserRole))
 
-    def _validate(self, path: str) -> None:
+    def validate(self, path: str) -> None:
         self.serial += 1
         serial = self.serial
         self.use.setEnabled(False)

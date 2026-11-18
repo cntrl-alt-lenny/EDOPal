@@ -28,6 +28,7 @@ import aiohttp
 import config as config_module
 import extras
 from artwork_flow import format_size as _format_size
+from artwork_flow import record_artwork_change
 from card_databases import get_db_files
 from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, find_edopro_folder
 from network_tls import create_http_session as _create_http_session
@@ -225,11 +226,13 @@ async def notify_if_update_available(
             cfg.notice_sink(f"A newer version ({latest}) is available")
 
 
-async def check_for_update(session: aiohttp.ClientSession, current: str) -> str | None:
+async def check_for_update(
+    session: aiohttp.ClientSession, current: str, *, strict: bool = False
+) -> str | None:
     """Return the latest release tag if it's newer than `current`, else None.
 
-    Uses a very short timeout and swallows every error so an offline user or a
-    rate-limited GitHub never delays or fails the sync.
+    Artwork sync ignores a failed check. The Settings screen requests strict
+    errors so it can distinguish an unavailable service from a current release.
     """
     if current == "dev":
         return None
@@ -237,12 +240,14 @@ async def check_for_update(session: aiohttp.ClientSession, current: str) -> str 
         timeout = aiohttp.ClientTimeout(total=3)
         async with session.get(LATEST_RELEASE_API, timeout=timeout) as resp:
             if resp.status != 200:
-                return None
+                raise OSError(f"GitHub returned HTTP {resp.status}")
             data = await resp.json()
+        latest = data.get("tag_name")
+        if not isinstance(latest, str) or _parse_version(latest) == (0,):
+            raise ValueError("Unrecognized release version")
     except Exception:
-        return None
-    latest = (data or {}).get("tag_name")
-    if not isinstance(latest, str):
+        if strict:
+            raise
         return None
     if _parse_version(latest) > _parse_version(current):
         return latest
@@ -617,6 +622,7 @@ def prune_orphan_images(pics_path: str, known_ids: set[int]) -> int:
             continue
         target = os.path.join(pics_path, entry)
         try:
+            record_artwork_change(target, None)
             os.remove(target)
             pruned += 1
         except OSError:
@@ -1009,6 +1015,7 @@ async def _try_download(
                         try:
                             with open(tmp_path, "xb") as file_obj:
                                 file_obj.write(content)
+                            record_artwork_change(filepath, content)
                             os.replace(tmp_path, filepath)
                         except BaseException:
                             _remove_quietly(tmp_path)
@@ -1214,6 +1221,7 @@ async def download_field_art(
                 with open(sibling, "rb") as existing:
                     valid = _looks_like_image(existing.read())
                 if not valid:
+                    record_artwork_change(sibling, None)
                     os.remove(sibling)
         stats.field_ok += 1
     else:
@@ -1871,7 +1879,8 @@ async def run(cfg: Config):
         if not dbs:
             return None
 
-    os.makedirs(cfg.pics_path, exist_ok=True)
+    if not cfg.stats:
+        os.makedirs(cfg.pics_path, exist_ok=True)
 
     deck_filter = None
     if not cfg.stats and (cfg.deck_paths or cfg.decks_folder):

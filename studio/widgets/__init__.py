@@ -1,4 +1,4 @@
-from studio.widgets.blocks import EmptyState, Hero, Notice, ProgressBlock
+from studio.widgets.blocks import EmptyState, GameClosedBlock, Hero, Notice, ProgressBlock
 from studio.widgets.controls import (
     ActionTile,
     Button,
@@ -20,6 +20,7 @@ __all__ = [
     "Button",
     "ElidedLabel",
     "EmptyState",
+    "GameClosedBlock",
     "Hero",
     "ImageTileGrid",
     "Notice",

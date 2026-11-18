@@ -25,9 +25,9 @@ def test_screenshot_cli_writes_all_views_at_requested_size(tmp_path: Path) -> No
         timeout=60,
         check=True,
     )
-    assert "Rendered 18 views" in process.stdout
+    assert "Rendered 41 views" in process.stdout
     files = list((tmp_path / "1280x800").glob("*.png"))
-    assert len(files) == 18
+    assert len(files) == 41
     for path in files:
         with Image.open(path) as image:
             assert image.size == (1280, 800)
