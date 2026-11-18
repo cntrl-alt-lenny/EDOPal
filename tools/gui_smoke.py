@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 from collections.abc import Callable
+from time import perf_counter_ns
 
 from config import APP_NAME, Config
 from studio.tasks import RunCoro
@@ -54,6 +55,8 @@ def _show_and_check(cfg: Config, version: str, run: RunCoro, apply: Callable) ->
                 raise RuntimeError(f"Requested Qt platform {expected}, loaded {platform}")
             if not window.isVisible() or window.windowHandle() is None:
                 raise RuntimeError("Studio window did not open")
+            # The parent uses the same monotonic clock and starts it before one-file extraction.
+            print(f"First visible window perf_counter_ns={perf_counter_ns()}", flush=True)
             for filename, codec in (
                 ("app-icon.png", b"png"),
                 ("window/studio-vortex.jpg", b"jpeg"),

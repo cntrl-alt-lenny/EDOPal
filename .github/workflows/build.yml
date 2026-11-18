@@ -70,16 +70,7 @@ jobs:
 
     - name: Install Qt runtime and headless displays before dependency analysis
       if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
-          libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 \
-          libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 libxcb-glx0 \
-          libx11-6 libx11-xcb1 libxkbcommon0 libxkbcommon-x11-0 \
-          libegl1 libgl1 libgl1-mesa-dri libwayland-client0 libwayland-cursor0 libwayland-egl1 \
-          libdbus-1-3 libfontconfig1 libfreetype6 libglib2.0-0 libzstd1 libstdc++6 \
-          xvfb xauth weston
+      run: bash .github/workflows/qt-linux.sh xvfb xauth weston
 
     - name: Install Dependencies
       shell: bash
@@ -114,30 +105,9 @@ jobs:
         fi
         python -m tools.release verify
 
-    - name: Test extracted Linux executable on X11
+    - name: Test extracted Linux executable on X11 and Wayland
       if: runner.os == 'Linux'
-      run: xvfb-run -a -s "-screen 0 1280x800x24" env QT_QPA_PLATFORM=xcb python -m tools.release verify
-
-    - name: Test extracted Linux executable on Wayland
-      if: runner.os == 'Linux'
-      shell: bash
-      run: |
-        export XDG_RUNTIME_DIR="$(mktemp -d)"
-        export WAYLAND_DISPLAY=edopal-test
-        weston --backend=headless-backend.so --width=1280 --height=800 --socket="$WAYLAND_DISPLAY" --idle-time=0 \
-          --no-config --log="$RUNNER_TEMP/weston.log" &
-        compositor=$!
-        trap 'kill "$compositor" 2>/dev/null || true' EXIT
-        for _ in {1..100}; do
-          [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] && break
-          kill -0 "$compositor" 2>/dev/null || break
-          sleep 0.1
-        done
-        if [[ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
-          cat "$RUNNER_TEMP/weston.log"
-          exit 1
-        fi
-        env -u DISPLAY QT_QPA_PLATFORM=wayland python -m tools.release verify
+      run: bash .github/workflows/verify-linux-displays.sh headless-backend.so
 
     - name: Upload the verified release zip
       uses: actions/upload-artifact@v7
@@ -146,6 +116,106 @@ jobs:
         path: dist/${{ env.APP_FILE }}-${{ matrix.platform }}-v${{ steps.release_version.outputs.value }}.zip
         if-no-files-found: error
         compression-level: 0
+
+  screenshots:
+    name: Overview on ${{ matrix.os }} (${{ matrix.platform }})
+    if: >-
+      github.ref_type == 'branch' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release-test/')))
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: offscreen
+          - os: ubuntu-latest
+            platform: xcb
+          - os: macos-latest
+            platform: cocoa
+    env:
+      QT_QPA_PLATFORM: ${{ matrix.platform }}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+        cache: pip
+        cache-dependency-path: requirements.txt
+
+    - name: Install Qt runtime, fonts and X server
+      if: runner.os == 'Linux'
+      run: bash .github/workflows/qt-linux.sh xvfb xauth
+
+    - name: Install renderer dependencies
+      run: python -m pip install -r requirements.txt pillow==13.0.0
+
+    - name: Render overview at 1280 by 800
+      shell: bash
+      run: |
+        command=(python tools/studio_screenshots.py --size 1280x800 --out build/overview)
+        if [[ "$QT_QPA_PLATFORM" == xcb ]]; then
+          xvfb-run -a -s "-screen 0 1280x800x24" "${command[@]}"
+        else
+          "${command[@]}"
+        fi
+
+    - name: Verify PNG dimensions and normalize Retina captures
+      shell: python
+      run: |
+        from pathlib import Path
+        import sys
+        from PIL import Image
+
+        folder = Path("build/overview/1280x800")
+        if not (folder / "01-hd-cards.png").is_file():
+            raise SystemExit("Missing HD Cards overview")
+        for path in sorted(folder.glob("*.png")):
+            with Image.open(path) as image:
+                image.load()
+                if image.format != "PNG":
+                    raise SystemExit(f"Unexpected format in {path}")
+                if image.size == (1280, 800):
+                    continue
+                if sys.platform != "darwin" or image.size != (2560, 1600):
+                    raise SystemExit(f"Unexpected capture size {image.size} in {path}")
+                scaled = image.resize((1280, 800), Image.Resampling.LANCZOS)
+            scaled.save(path)
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: overview-${{ matrix.os }}-${{ matrix.platform }}-1280x800
+        path: build/overview/1280x800/*.png
+        if-no-files-found: error
+        retention-days: 7
+        compression-level: 0
+
+  linux-compatibility:
+    name: Test the released Linux zip on ubuntu-latest
+    needs: build
+    if: >-
+      github.ref_type == 'branch' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release-test/')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - uses: actions/download-artifact@v8
+      with:
+        name: zip-Linux
+        path: dist
+    - name: Install host display libraries and archive inspector
+      run: |
+        bash .github/workflows/qt-linux.sh xvfb xauth weston
+        python -m pip install pyinstaller==6.20.0
+    - name: Test the downloaded zip on X11 and Wayland
+      run: bash .github/workflows/verify-linux-displays.sh headless
 
   # A manual dispatch can select a tag too. Only a pushed version tag can publish.
   release:

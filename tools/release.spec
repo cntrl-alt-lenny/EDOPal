@@ -74,6 +74,39 @@ if sys.platform == "darwin":
         if kind in ("EXTENSION", "BINARY") and dest.startswith(("PySide6/", "shiboken6/")):
             subprocess.run(["lipo", src, "-verify_arch", "arm64", "x86_64"], check=True)
 pyz = PYZ(a.pure)
+windows_version = None
+if sys.platform == "win32":
+    from packaging.version import Version
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo,
+        StringFileInfo,
+        StringStruct,
+        StringTable,
+        VarFileInfo,
+        VarStruct,
+        VSVersionInfo,
+    )
+
+    product_version = app_version()
+    release = Version(product_version).release
+    numbers = release + (0,) * (4 - len(release))
+    strings = {
+        "ProductName": APP_NAME,
+        "FileDescription": APP_NAME,
+        "InternalName": name,
+        "OriginalFilename": name + ".exe",
+        "ProductVersion": product_version,
+        "FileVersion": product_version,
+    }
+    windows_version = VSVersionInfo(
+        ffi=FixedFileInfo(filevers=numbers, prodvers=numbers),
+        kids=[
+            StringFileInfo(
+                [StringTable("040904B0", [StringStruct(k, v) for k, v in strings.items()])]
+            ),
+            VarFileInfo([VarStruct("Translation", [0x0409, 1200])]),
+        ],
+    )
 exe = EXE(
     pyz,
     a.scripts,
@@ -82,6 +115,7 @@ exe = EXE(
     [],
     name=name,
     console=False,
+    version=windows_version,
     upx=False,
     target_arch="universal2" if sys.platform == "darwin" else None,
     icon=str(stage / ("app-icon.icns" if sys.platform == "darwin" else "app-icon.ico")),
