@@ -486,14 +486,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only sync cards used in your EDOPro deck folder (much faster).",
     )
-    p.add_argument(
+    interface = p.add_mutually_exclusive_group()
+    interface.add_argument("--legacy-gui", action="store_true", help="Open the original Tk window.")
+    interface.add_argument(
         "--gui",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help=(
-            "Show the tick-box options window. The packaged app shows it by "
-            "default; use --no-gui to skip it."
-        ),
+        help=("Open EDOPro Studio. The packaged app shows it by default; use --no-gui to skip it."),
     )
     p.add_argument(
         "--prune",
@@ -551,7 +550,7 @@ def _build_parser() -> argparse.ArgumentParser:
 class Config:
     """Bag of settings built from defaults, then config.json, then CLI flags."""
 
-    def __init__(self, argv: list[str] | None = None):
+    def __init__(self, argv: list[str] | None = None, *, defer_discovery: bool = False) -> None:
         parser = _build_parser()
         self.argv: list[str] = list(sys.argv[1:] if argv is None else argv)
         self.cli = parser.parse_args(self.argv)
@@ -593,11 +592,15 @@ class Config:
             legacy_manual_map = os.path.join(_runtime_dir(), "manual_map.json")
             if os.path.exists(legacy_manual_map):
                 self.manual_map_file = legacy_manual_map
-        detected_edopro_path = (
-            _detect_packaged_edopro_path(sys.executable)
-            if getattr(sys, "frozen", False)
+        probe_runtime = (
+            getattr(sys, "frozen", False)
             and self.cli.edopro_path is None
             and file_cfg.get("edopro_path") is None
+        )
+        self._runtime_hint = sys.executable if probe_runtime and defer_discovery else None
+        detected_edopro_path = (
+            _detect_packaged_edopro_path(sys.executable)
+            if probe_runtime and not defer_discovery
             else None
         )
         self.set_edopro_path(
@@ -711,6 +714,12 @@ class Config:
         self.textures_pack: str | None = _pick_value(
             self.cli.textures_pack, file_cfg.get("textures_pack"), None
         )
+
+    def discovery_guess(self) -> str:
+        """Probe a portable app's neighbouring folders on the discovery worker."""
+        if self._runtime_hint:
+            return _detect_packaged_edopro_path(self._runtime_hint) or self.edopro_path
+        return self.edopro_path
 
     def set_edopro_path(self, edopro_path: str, save: bool = False) -> bool:
         """Update path-derived fields and optionally persist the new folder."""

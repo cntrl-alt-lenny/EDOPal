@@ -103,6 +103,8 @@ The packaged app needs no flags — the options window covers the common choices
 
 ## From source
 
+This checkout opens **EDOPro Studio** with `python main.py --gui`. HD Cards runs inside the resizable sidebar window. The original customization, music and tournament tools are available with `python main.py --legacy-gui` while their Studio pages are being ported. See the [Studio developer guide](studio/README.md) for local demos, tests and screenshots.
+
 ```bash
 git clone https://github.com/cntrl-alt-lenny/edopro-hd-cards.git
 cd edopro-hd-cards

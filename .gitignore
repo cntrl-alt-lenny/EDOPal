@@ -13,6 +13,7 @@ AppDir/
 
 # Generated output files (personal to each user's run)
 config.json
+*.studio.ini
 manual_map.json
 failed_cards.json
 sync-report-*.txt
