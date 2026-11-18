@@ -32,6 +32,22 @@ def rule_name(number: int) -> str:
 
 
 @dataclass(frozen=True)
+class Distance:
+    outside: int
+    excess: int
+    unknown: int
+
+    def describe(self) -> str:
+        parts = [
+            f"{self.outside} card{'s' if self.outside != 1 else ''} outside the pool",
+            f"{self.excess} over the limit",
+        ]
+        if self.unknown:
+            parts.append(f"{self.unknown} unchecked")
+        return " · ".join(parts)
+
+
+@dataclass(frozen=True)
 class Bot:
     name: str
     deck: str
@@ -42,6 +58,7 @@ class Bot:
     problem: str
     checks: tuple[Verdict, ...]
     search: str
+    distance: Distance | None = None
 
     def fit(self, index: int) -> str:
         return FIT[self.checks[index].status] if 0 <= index < len(self.checks) else "Cannot tell"
@@ -53,6 +70,7 @@ class Opponents:
     lists: list[str]
     warning: str
     runtime: str
+    catalog: Catalog | None = None
 
 
 def runtime_warning(game: Path) -> str:
@@ -163,7 +181,7 @@ def read_bots(game: Path, cancel: Event) -> Opponents:
             bots.append(_bot(row, files, catalog, lists))
         else:
             warning = "Some opponent entries had no readable name."
-    return Opponents(bots, names, warning, runtime)
+    return Opponents(bots, names, warning, runtime, catalog)
 
 
 def filter_bots(

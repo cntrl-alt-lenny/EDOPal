@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 
+from formats.catalogue import Catalogue
+
 from .bots import Opponents, read_bots
 from .puzzles import Puzzle, read_puzzles
 
@@ -14,6 +16,7 @@ class Library:
     opponents: Opponents
     puzzles: list[Puzzle]
     puzzle_warning: str
+    catalogue: Catalogue | None = None
 
 
 def scan(game: Path, cancel: Event, report: Callable[[str], None]) -> Library:
@@ -28,4 +31,8 @@ def scan(game: Path, cancel: Event, report: Callable[[str], None]) -> Library:
     puzzles, warning = read_puzzles(game, cancel)
     if cancel.is_set():
         raise InterruptedError("Scan cancelled.")
-    return Library(bots, puzzles, warning)
+    try:
+        catalogue = Catalogue.load()
+    except (OSError, ValueError, KeyError):
+        catalogue = None
+    return Library(bots, puzzles, warning, catalogue)

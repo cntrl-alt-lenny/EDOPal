@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPlainTextEdit, QWidget
 
 from config import APP_NAME
@@ -22,7 +22,7 @@ def rules(bot: Bot) -> str:
     return ", ".join(map(rule_name, bot.rules)) if bot.rules else "Rules not stated"
 
 
-def bot_guide(bot: Bot, index: int, list_name: str, runtime: str) -> QWidget:
+def bot_guide(bot: Bot, index: int, list_name: str, runtime: str, distance: str = "") -> QWidget:
     widget, layout = column()
     how = Panel(t.XL)
     unreadable = (
@@ -33,19 +33,28 @@ def bot_guide(bot: Bot, index: int, list_name: str, runtime: str) -> QWidget:
     )
     chosen_list = f" “{list_name}”" if list_name and not unreadable else ""
     rule = f" ({rules(bot)})" if bot.rules else ""
+    host = (
+        f"2. Use Open Formats for the {list_name} list and its room settings, then select OK."
+        if distance
+        else f"2. Choose a Rule{rule} and the Forbidden List{chosen_list}, then select OK."
+    )
     section(
         how,
         "Play in EDOPro",
         "1. Open LAN + AI and choose Host.\n\n"
-        f"2. Choose a Rule{rule} and the Forbidden List{chosen_list}, then select OK.\n\n"
+        f"{host}\n\n"
         f"3. In the room, open Local AI. Pick “{bot.name}” and choose Add AI player.\n\n"
         "4. Choose your own deck, mark yourself Ready and select Start.",
     )
     if runtime:
         how.body.addWidget(label(runtime, "notice", True))
     verdict = Panel(t.XL)
-    section(verdict, "Room list", list_name or "No installed list")
+    section(
+        verdict, "Bundled format" if distance else "Room list", list_name or "No installed list"
+    )
     verdict.body.addWidget(label(bot.fit(index), "heading"))
+    if distance:
+        verdict.body.addWidget(label(distance, "body", True))
     if bot.fit(index) == "Does not fit":
         verdict.body.addWidget(
             label(
@@ -81,8 +90,10 @@ def bot_guide(bot: Bot, index: int, list_name: str, runtime: str) -> QWidget:
 
 class Journal(QWidget):
     save_requested = Signal(object)
+    retry_requested = Signal()
+    undo_requested = Signal()
 
-    def __init__(self, puzzle: Puzzle, progress: Progress, *, available: bool = True) -> None:
+    def __init__(self, puzzle: Puzzle, progress: Progress, *, issue: str = "") -> None:
         super().__init__()
         outer = QHBoxLayout(self)
         margins(outer, 0)
@@ -90,6 +101,8 @@ class Journal(QWidget):
         left, reading = column()
         info = Panel(t.LG)
         section(info, "Objective", puzzle.error or puzzle.objective or "Not stated")
+        if puzzle.setup:
+            section(info, "From the starting setup", puzzle.setup)
         section(
             info,
             "Starting life points",
@@ -105,7 +118,9 @@ class Journal(QWidget):
         section(
             how,
             "Play in EDOPro",
-            "1. Choose Puzzles on the main menu.\n\n2. Open "
+            "Rescan the library after EDOPro updates this puzzle."
+            if puzzle.error
+            else "1. Choose Puzzles on the main menu.\n\n2. Open "
             + (
                 "the puzzle list"
                 if "/" not in puzzle.path
@@ -116,8 +131,18 @@ class Journal(QWidget):
         reading.addWidget(how)
         reading.addStretch()
         outer.addWidget(scroll(left), 1)
+        right, journal = column()
+        outer.addWidget(right, 1)
         editor = Panel(t.LG)
+        journal.addWidget(scroll(editor), 1)
         editor.body.addWidget(label("Practice journal", "heading"))
+        if issue:
+            editor.body.addWidget(label(issue, "body", True))
+            self.retry = Button("Retry journal", "primary")
+            self.retry.clicked.connect(self.retry_requested)
+            editor.body.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignLeft)
+            editor.body.addStretch()
+            return
         editor.body.addWidget(
             label(f"Saved in {APP_NAME}. You can change or clear every entry.", "muted", True)
         )
@@ -143,19 +168,27 @@ class Journal(QWidget):
         )
         editor.body.addWidget(self.note, 1)
         self.message = label("", "muted", True)
-        editor.body.addWidget(self.message)
+        journal.addWidget(self.message)
+        self.message.hide()
         self.save = Button("Save progress", "primary", "check")
-        self.undo = Button("Undo last save")
+        self.undo = Button("Undo last change")
         self.undo.setToolTip("Put back the previous status, date and personal note.")
-        editor.body.addLayout(across(self.save, self.undo))
+        self.undo.clicked.connect(self.undo_requested)
+        journal.addLayout(across(self.save, self.undo))
         self.undo.hide()
         self.save.clicked.connect(lambda: self.save_requested.emit(self.value()))
-        outer.addWidget(scroll(editor), 1)
         self.set_value(progress)
-        if not available:
-            self.state.addItem("Unavailable")
-            self.state.setCurrentText("Unavailable")
-            editor.setEnabled(False)
+        self.note.textChanged.connect(self._edited)
+        self.state.currentIndexChanged.connect(self._edited)
+        self.played.textChanged.connect(self._edited)
+
+    def _edited(self) -> None:
+        self.save.setText("Save progress")
+        self.save.setEnabled(True)
+
+    def saved(self) -> None:
+        self.save.setText("Saved")
+        self.save.setEnabled(False)
 
     @staticmethod
     def _reveal(panel: Panel, name: str, value: str) -> Button:

@@ -107,7 +107,7 @@ def filter_puzzles(
         for p in puzzles
         if (not collection or p.collection == collection)
         and (not state or progress.get(p.path, Progress()).status == state)
-        and query in (p.title + "\n" + p.objective).casefold()
+        and query in "\n".join((p.title, p.objective, p.setup)).casefold()
     ]
 
 
