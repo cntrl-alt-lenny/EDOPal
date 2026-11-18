@@ -5,6 +5,9 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+# Cards with the SPELL and FIELD bits also use separate playmat artwork.
+FIELD_SPELL_TYPE = 0x80002
+
 
 def get_db_files(edopro_path: str, *, unreadable: list[str] | None = None) -> list[str]:
     """Find card DBs in the EDOPro root, expansions/, and repository delta folders."""
