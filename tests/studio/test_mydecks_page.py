@@ -19,12 +19,15 @@ from studio.pages import mydecks_copies
 from studio.pages import mydecks_files as copies
 from studio.pages.mydecks import MyDecksPage
 from studio.pages.mydecks_checks import STATUS, FormatCheck
+from studio.pages.mydecks_duplicates import DuplicatesScreen
+from studio.pages.mydecks_history import HistoryScreen, MissingDecks
 from studio.pages.mydecks_library import Collection
 from studio.pages.mydecks_logic import change_lines, library_rows
+from studio.pages.mydecks_odds import OddsScreen
 from studio.pages.mydecks_widgets import Screen
 from studio.shell import StudioWindow
 from studio.widgets import Button
-from tools.studio_screenshots_mydecks import seed_game
+from tools.studio_screenshots_mydecks import seed_five_matches, seed_game, write_demo_deck
 
 
 @pytest.fixture
@@ -52,6 +55,137 @@ def open_row(view: Collection, title: str, qtbot: QtBot) -> None:
     qtbot.mouseClick(
         view.rows.viewport(), Qt.MouseButton.LeftButton, pos=view.rows.visualRect(index).center()
     )
+
+
+def test_history_compares_restores_and_recovers_missing_deck(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win, page = saved
+    deck = page.lib.search("Empty Jar - Athens")[0]
+    before = deck.preview.sections
+    open_row(page.view, deck.name, qtbot)
+    control(page.view, "History").click()
+    qtbot.waitUntil(lambda: page.view.status.text() == "No previous versions yet")
+    page.escape()
+    page.escape()
+    main = list(before.main)
+    main.remove(1026)
+    main.remove(1025)
+    main.append(1022)
+    after = Sections(tuple(main), before.extra, before.side + (1026,))
+    write_demo_deck(deck.path, after)
+    edited = deck.path.read_bytes()
+    page.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(page.view, Collection))
+    open_row(page.view, deck.name, qtbot)
+    control(page.view, "History").click()
+    history = page.view
+    assert isinstance(history, HistoryScreen)
+    qtbot.waitUntil(lambda: "Moved between sections" in history.report.toPlainText())
+    assert history.rows.count() == 1
+    assert "+1 Sangan" in history.rows.item(0).text()
+    assert "−1 Cyber Jar" in history.rows.item(0).text()
+    assert "1 card moved to Side" in history.rows.item(0).text()
+    for heading in ("Added", "Removed", "Moved between sections"):
+        assert heading in history.report.toPlainText()
+    monkeypatch.setattr(copies, "_game_running", lambda _: False)
+    history.name.setText("Recovered Athens")
+    history.restore.click()
+    qtbot.waitUntil(lambda: isinstance(page.view, Collection))
+    assert deck.path.read_bytes() == edited
+    assert page.lib.search("Recovered Athens")[0].preview.sections == before
+    deck.path.unlink()
+    page.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(page.view, Collection))
+    page.view.missing.click()
+    assert isinstance(page.view, MissingDecks)
+    qtbot.keyClick(page.view.rows, Qt.Key.Key_Return)
+    qtbot.waitUntil(lambda: isinstance(page.view, HistoryScreen) and len(page.view.versions) == 2)
+    assert "missing" in page.view.status.text()
+    assert page.view.versions[0].sections == after
+    assert page.store.path.parent == Path(win.ctx.cfg.config_path).parent
+
+
+def test_opening_odds_tags_update_before_write_and_survive_edit(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win, page = saved
+    deck = page.lib.search("Empty Jar - Athens")[0]
+    open_row(page.view, deck.name, qtbot)
+    control(page.view, "Opening odds").click()
+    odds = page.view
+    assert isinstance(odds, OddsScreen)
+    qtbot.waitUntil(lambda: odds.ready)
+    assert odds.table.item(0, 1).text() == "—"
+    odds.name.setText("Starters")
+    odds.add.click()
+    qtbot.waitUntil(lambda: not odds.saving and odds.group.currentText() == "Starters")
+    assert odds.table.item(0, 1).text() == "0.00%"
+    assert odds.table.item(2, 2).text() == "100.00%"
+    odds.search.setText("Sangan")
+    target = odds.filter.index(0, 0)
+    odds.cards.setCurrentIndex(target)
+    release = threading.Event()
+    commit = page.store.set_tags
+
+    def held(*args: object) -> object:
+        release.wait(5)
+        return commit(*args)
+
+    monkeypatch.setattr(page.store, "set_tags", held)
+    try:
+        qtbot.keyClick(odds.cards, Qt.Key.Key_Space)
+        assert odds.saving and odds.table.item(0, 1).text() == "23.72%"
+        assert odds.table.item(0, 2).text() == "28.08%"
+        assert not win.navigate("cards")
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not odds.saving)
+    assert page.escape() and page.escape()
+    sections = deck.preview.sections
+    write_demo_deck(deck.path, Sections(sections.main + (1022,), sections.extra, sections.side))
+    page.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(page.view, Collection))
+    open_row(page.view, deck.name, qtbot)
+    control(page.view, "Opening odds").click()
+    qtbot.waitUntil(lambda: isinstance(page.view, OddsScreen) and page.view.ready)
+    assert page.view.group.currentText() == "Starters"
+    assert "3 tagged copies" in page.view.marked.text()
+
+
+def test_duplicates_can_review_five_decks_and_open_folder(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, page = saved
+    deck = page.lib.search("Empty Jar - Athens")[0]
+    seed_five_matches(page.lib.game, deck.preview.sections)
+    page.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(page.view, Collection))
+    page.view.search.setText("Empty Jar")
+    assert len(page.view.model.rows) == 5
+    assert {row.match for row in page.view.model.rows} == {"Identical & similar", "Similar"}
+    paths = []
+    monkeypatch.setattr("studio.pages.mydecks.reveal_file", paths.append)
+    open_row(page.view, deck.name, qtbot)
+    control(page.view, "Similar decks").click()
+    group = page.view
+    assert isinstance(group, DuplicatesScreen)
+    group.search.setText("Empty Jar")
+    assert sum(not group.files.item(row).isHidden() for row in range(group.files.count())) == 5
+    group.base.setCurrentIndex(
+        next(i for i, member in enumerate(group.members) if member.name.endswith("Athens"))
+    )
+    group.files.setCurrentRow(
+        next(i for i, member in enumerate(group.members) if member.name.endswith("Spring"))
+    )
+    qtbot.waitUntil(lambda: group.summary.text() == "Identical cards and sections")
+    group.files.setCurrentRow(
+        next(i for i, member in enumerate(group.members) if member.name.endswith("Winter"))
+    )
+    qtbot.waitUntil(lambda: "moved from Main to Side" in group.report.toPlainText())
+    group.folder.click()
+    qtbot.waitUntil(lambda: len(paths) == 1)
+    assert paths[0].stem == "Empty Jar - Winter"
 
 
 def test_filter_sort_search_and_open_by_keyboard(saved: tuple, qtbot: QtBot) -> None:
@@ -287,15 +421,22 @@ def test_old_scan_ignored_after_installation_change(
     win, p = saved
     gate = threading.Event()
     old = p.lib
+    received: list[threading.Event] = []
 
-    def scan(_: DeckIndexer) -> Library:
+    def scan(_: DeckIndexer, *, cancel: threading.Event | None = None) -> Library:
+        if cancel is not None:
+            received.append(cancel)
         gate.wait(5)
         return old
 
     monkeypatch.setattr(DeckIndexer, "scan", scan)
     p.view.refresh.click()
-    win.ctx.set_installation(Installation())
-    gate.set()
+    try:
+        qtbot.waitUntil(lambda: bool(received))
+        win.ctx.set_installation(Installation())
+        assert received[0].is_set()
+    finally:
+        gate.set()
     qtbot.waitUntil(lambda: not win.ctx.tasks.jobs)
     assert p.lib is None and p.view.initial.text() == "Choose folder"
 
@@ -334,7 +475,7 @@ def test_hundreds_of_decks_sort_filter_and_open_last(
         replace(base, path=base.path.with_name(f"Version {i:03}.ydk")) for i in range(700)
     )
     many = Library(lib.game, decks, lib.catalog, lib.banlists, ())
-    monkeypatch.setattr(DeckIndexer, "scan", lambda _: many)
+    monkeypatch.setattr(DeckIndexer, "scan", lambda _, **_options: many)
     p.view.refresh.click()
     qtbot.waitUntil(lambda: isinstance(p.view, Collection))
     view = p.view

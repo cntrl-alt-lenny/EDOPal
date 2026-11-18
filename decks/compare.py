@@ -20,7 +20,9 @@ class Change:
     destination: str | None
 
 
-def compare(before: Sections, after: Sections) -> tuple[Change, ...]:
+def compare(
+    before: Sections, after: Sections, *, separate_counts: bool = False
+) -> tuple[Change, ...]:
     """Cancel retained copies, pair section transfers, then report net quantity changes."""
     old, new = [Counter(s) for s in before], [Counter(s) for s in after]
     changes = []
@@ -35,10 +37,10 @@ def compare(before: Sections, after: Sections) -> tuple[Change, ...]:
                     delta[j] -= amount
         for i, section in enumerate(Sections._fields):
             if delta[i] > 0:
-                kind = "count changed" if old[i][code] else "added"
+                kind = "count changed" if old[i][code] and not separate_counts else "added"
                 changes.append(Change(kind, code, delta[i], None, section))
             elif delta[i] < 0:
-                kind = "count changed" if new[i][code] else "removed"
+                kind = "count changed" if new[i][code] and not separate_counts else "removed"
                 changes.append(Change(kind, code, -delta[i], section, None))
     return tuple(changes)
 

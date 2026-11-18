@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from decks import Library, SavedDeck, Verdict, compare, preflight, version_groups
+from decks import Library, Preview, SavedDeck, Verdict, compare, preflight, version_groups
 from studio import theme as t
 from studio.icons import icon
 from studio.pages.decks_contents import paint_text
@@ -92,6 +92,22 @@ class ReadingPane(QTextBrowser):
             f"p {{ color:{t.TEXT}; margin: {t.SM}px 0 {t.LG}px 0; }}"
             f"h3 {{ color:{t.GOLD}; font-size:{t.SUBTITLE}px; }}"
         )
+
+
+def comparison_html(before: Preview, after: Preview, *, separate_counts: bool = False) -> str:
+    changes = compare(before.sections, after.sections, separate_counts=separate_counts)
+    lines = change_lines(before, after, changes)
+    html = []
+    for kind, heading in (
+        ("moved", "Moved between sections"),
+        ("added", "Added"),
+        ("removed", "Removed"),
+        ("count changed", "Changed in number"),
+    ):
+        group = [line for change, line in zip(changes, lines, strict=True) if change.kind == kind]
+        if group:
+            html.append(f"<h3>{heading}</h3>" + "".join(f"<p>{escape(line)}</p>" for line in group))
+    return "".join(html) or "<p>The same cards appear in the same quantities in each section.</p>"
 
 
 class FormatCheck(Screen):
@@ -333,21 +349,7 @@ class Comparison(Screen):
             self.report.setPlainText("Choose two different decks to see their changes.")
             return
         before, after = self.decks[a].preview, self.decks[b].preview
-        changes = compare(before.sections, after.sections)
-        lines = change_lines(before, after, changes)
-        html = []
-        for kind, heading in (
-            ("moved", "Moved between sections"),
-            ("added", "Added"),
-            ("removed", "Removed"),
-            ("count changed", "Changed in number"),
-        ):
-            group = [line for c, line in zip(changes, lines, strict=True) if c.kind == kind]
-            if group:
-                html.append(f"<h3>{heading}</h3>" + "".join(f"<p>{escape(s)}</p>" for s in group))
-        self.report.setHtml(
-            "".join(html) or "<p>The same cards appear in the same quantities in each section.</p>"
-        )
+        self.report.setHtml(comparison_html(before, after))
 
     def leave(self) -> None:
         self.live = False

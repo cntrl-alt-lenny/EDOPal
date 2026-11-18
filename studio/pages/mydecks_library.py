@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from decks import Library, SavedDeck
+from decks.duplicates import DuplicateIndex
 from studio import theme as t
 from studio.pages.mydecks_logic import library_rows, quantity
 from studio.pages.mydecks_widgets import DeckDelegate, DeckHero, RowModel, Screen, button, choice
@@ -33,9 +34,14 @@ class Collection(Screen):
         compare: Callable,
         import_code: Callable,
         refresh: Callable,
+        duplicates: DuplicateIndex,
+        show_duplicates: Callable[[], None],
+        missing: int,
+        show_missing: Callable[[], None],
     ) -> None:
         super().__init__()
         self.lib, self.open_deck = lib, open_deck
+        self.marks = duplicates.marks
         self.folders = sorted({d.folder for d in lib.decks}, key=lambda p: p.as_posix().casefold())
         summary = f"{quantity(len(lib.decks), 'deck')}   ·   {quantity(len(self.folders), 'folder')}   ·   {quantity(len(lib.banlists), 'installed list')}"
         self.hero = DeckHero(summary)
@@ -99,6 +105,12 @@ class Collection(Screen):
                 footer.addWidget(swatch)
                 footer.addWidget(label(word, "muted"))
         footer.addStretch()
+        self.duplicates = button("Duplicates", show_duplicates, "quiet", "deck")
+        self.duplicates.setEnabled(bool(lib.decks))
+        footer.addWidget(self.duplicates)
+        if missing:
+            self.missing = button(f"Missing decks ({missing})", show_missing, "quiet")
+            footer.addWidget(self.missing)
         self.refresh = button("Refresh", refresh, "quiet")
         footer.addWidget(self.refresh)
         panel.body.addLayout(footer)
@@ -185,7 +197,9 @@ class Collection(Screen):
         folder = (
             self.folders[self.folder.currentIndex() - 1] if self.folder.currentIndex() > 0 else None
         )
-        rows = library_rows(self.lib, self.search.text(), by_card, folder, self.sort.currentIndex())
+        rows = library_rows(
+            self.lib, self.search.text(), by_card, folder, self.sort.currentIndex(), self.marks
+        )
         self.model.replace(rows)
         self.summary.setText(
             f"{quantity(len(rows), 'deck').upper()}   /   "

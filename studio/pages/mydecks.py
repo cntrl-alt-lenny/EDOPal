@@ -17,13 +17,16 @@ from PySide6.QtWidgets import (
 )
 
 from artwork_flow import valid_decks
-from decks import DeckIndexer, Library, Preview, SavedDeck, encode_ydke
+from decks import DeckIndexer, Library, Preview, SavedDeck, Sections, encode_ydke, preview
+from decks.duplicates import DuplicateIndex
+from decks.history import DeckStore, Ledger, Track
 from studio import theme as t
 from studio.context import AppContext, Installation
 from studio.pages.base import Page
 from studio.pages.decks_handoff import HD_ARTWORK, saved_deck_selection
 from studio.pages.mydecks_checks import Comparison, FormatCheck
 from studio.pages.mydecks_copies import CopyReview
+from studio.pages.mydecks_duplicates import DuplicatesScreen
 from studio.pages.mydecks_files import (
     Receipt,
     publish,
@@ -31,9 +34,12 @@ from studio.pages.mydecks_files import (
     require_closed,
     reveal_file,
 )
+from studio.pages.mydecks_history import HistoryScreen, MissingDecks
 from studio.pages.mydecks_library import Collection
-from studio.pages.mydecks_logic import file_problem, quantity
+from studio.pages.mydecks_logic import file_problem, quantity, scan_collection
+from studio.pages.mydecks_odds import OddsScreen
 from studio.pages.mydecks_widgets import Contents, DeckHero, Screen, button
+from studio.tasks import Job, WorkerContext
 from studio.widgets import ElidedLabel, Panel, label, margins
 from tournament_decks import DeckError
 
@@ -47,7 +53,11 @@ class MyDecksPage(Page):
         self.epoch = 0
         self.active = self.writing = False
         self.index: DeckIndexer | None = None
+        self.scan_job: Job | None = None
         self.lib: Library | None = None
+        self.store = DeckStore(Path(context.cfg.config_path).parent / "deck-tools.sqlite3")
+        self.ledger = Ledger({}, ())
+        self.duplicates = DuplicateIndex((), {}, {})
         self.receipts: dict[Path, Receipt] = {}
         self.pending_selection: tuple[Path, ...] = ()
         self.retry_action: Callable | None = None
@@ -92,17 +102,21 @@ class MyDecksPage(Page):
             self.refresh()
 
     def hidden(self) -> bool:
-        if self.writing:
+        if self.writing or self._saving_odds():
             return False
+        self._cancel_scan()
         self.active = False
         self.epoch += 1
         return True
 
     def installation_changed(self, installation: Installation) -> None:
+        self._cancel_scan()
         self.epoch += 1
         self.pending_selection = ()
         self.index = DeckIndexer(Path(installation.path)) if installation.path else None
         self.lib = None
+        self.ledger = Ledger({}, ())
+        self.duplicates = DuplicateIndex((), {}, {})
         if self.active:
             self.refresh()
         else:
@@ -113,7 +127,10 @@ class MyDecksPage(Page):
             self.history.clear()
 
     def _forget(self, screen: Screen) -> None:
-        if isinstance(screen, (FormatCheck, Comparison, CopyReview)):
+        if isinstance(
+            screen,
+            (FormatCheck, Comparison, CopyReview, HistoryScreen, OddsScreen, DuplicatesScreen),
+        ):
             screen.leave()
         screen.hide()
         screen.deleteLater()
@@ -145,7 +162,7 @@ class MyDecksPage(Page):
         self.slide.start()
 
     def escape(self) -> bool:
-        if self.writing:
+        if self.writing or self._saving_odds():
             return True
         if len(self.history) < 2:
             return False
@@ -178,6 +195,7 @@ class MyDecksPage(Page):
         if self.writing:
             return
         self.epoch += 1
+        self._cancel_scan()
         epoch = self.epoch
         install = self.ctx.installation
         if not install.path:
@@ -200,14 +218,38 @@ class MyDecksPage(Page):
         if index is None:
             self.index = index = DeckIndexer(Path(install.path))
         self._state("Reading your decks", "Finding saved decks and looking up their cards.")
-        job = self.ctx.tasks.start(lambda _: index.scan())
+        store = self.store
+        state_available = True
+
+        def work(worker: WorkerContext) -> Library:
+            lib, ledger, duplicates, available = scan_collection(index, store, worker.cancel)
+            # Health check consumes the Library when it opens a specific deck or format.
+            worker.progress((ledger, duplicates, available))
+            return lib
+
+        def tools_ready(result: tuple[Ledger, DuplicateIndex, bool]) -> None:
+            nonlocal state_available
+            if self.epoch == epoch:
+                self.ledger, self.duplicates, state_available = result
+
+        self.scan_job = job = self.ctx.tasks.start(work)
 
         def ready(lib: Library) -> None:
             if self.epoch != epoch:
                 return
+            self.scan_job = None
             self.lib = lib
             view = Collection(
-                lib, self.detail, self.check, self.compare, self.import_code, self.refresh
+                lib,
+                self.detail,
+                self.check,
+                self.compare,
+                self.import_code,
+                self.refresh,
+                self.duplicates,
+                self.show_duplicates,
+                len(self.ledger.missing),
+                self.show_missing,
             )
             self._push(view, root=True)
             current_paths = {d.path for d in lib.decks}
@@ -221,7 +263,10 @@ class MyDecksPage(Page):
                 if found < len(self.pending_selection):
                     self._notice("Some saved decks are missing from this deck folder.")
                 self.pending_selection = ()
+            if not state_available:
+                self._notice("Deck history and card groups are unavailable. Refresh to try again.")
 
+        job.progress.connect(tools_ready)
         job.result.connect(ready)
         job.error.connect(
             lambda exc: (
@@ -230,6 +275,14 @@ class MyDecksPage(Page):
                 else None
             )
         )
+
+    def _cancel_scan(self) -> None:
+        if self.scan_job is not None:
+            self.scan_job.cancel()
+            self.scan_job = None
+
+    def _saving_odds(self) -> bool:
+        return bool(self.history and isinstance(self.view, OddsScreen) and self.view.saving)
 
     def _inspect(self) -> None:
         path, epoch = self.ctx.installation.path, self.epoch
@@ -251,6 +304,28 @@ class MyDecksPage(Page):
 
     def compare(self) -> None:
         self._push(Comparison(self.lib, self.ctx.tasks, self.escape))
+
+    def show_history(self, track: Track) -> None:
+        self._push(
+            HistoryScreen(
+                track, self.store, self.lib.catalog, self.ctx.tasks, self.escape, self._save
+            )
+        )
+
+    def show_missing(self) -> None:
+        self._push(MissingDecks(self.ledger.missing, self.lib.game, self.escape, self.show_history))
+
+    def show_odds(self, track: Track, deck: Preview) -> None:
+        self._push(
+            OddsScreen(track, deck, self.store, self.ctx.tasks, self.escape, self.ctx.confirm)
+        )
+
+    def show_duplicates(self, deck: SavedDeck | None = None) -> None:
+        self._push(
+            DuplicatesScreen(
+                self.duplicates, self.ctx.tasks, self.escape, self.detail, self._reveal, deck
+            )
+        )
 
     def import_code(self, deck: SavedDeck | None = None) -> None:
         screen = CopyReview(self.lib, self.ctx.tasks, self.escape, self._save, deck)
@@ -293,6 +368,24 @@ class MyDecksPage(Page):
             )
             buttons.addWidget(artwork)
         panel.body.addLayout(buttons)
+        track = self.ledger.active.get(deck.path)
+        similar = deck.path in self.duplicates.by_path
+        if track is not None or similar:
+            tools = QHBoxLayout()
+            if track is not None:
+                tools.addWidget(
+                    button("History", lambda: self.show_history(track), symbol="replays")
+                )
+                if deck.preview:
+                    tools.addWidget(
+                        button("Opening odds", lambda: self.show_odds(track, deck.preview))
+                    )
+            if similar:
+                tools.addWidget(
+                    button("Similar decks", lambda: self.show_duplicates(deck), symbol="deck")
+                )
+            tools.addStretch()
+            panel.body.addLayout(tools)
         screen.body.addWidget(panel)
         if deck.preview:
             screen.contents = Contents(self.ctx.tasks, self.lib.game, deck.preview)
@@ -354,15 +447,20 @@ class MyDecksPage(Page):
 
         self._write("Checking saved decks…", check, start)
 
-    def _save(self, name: str, preview: Preview) -> None:
+    def _save(self, name: str, contents: Preview | Sections) -> None:
         game = self.lib.game
+        catalog = self.lib.catalog
 
         def saved(receipt: Receipt) -> None:
             self.receipts[receipt.path] = receipt
             self.pending_selection = (receipt.path,)
             self.refresh()
 
-        self._write("Saving a new deck copy…", lambda: publish(game, name, preview), saved)
+        def work() -> Receipt:
+            reviewed = preview(contents, catalog) if isinstance(contents, Sections) else contents
+            return publish(game, name, reviewed)
+
+        self._write("Saving a new deck copy…", work, saved)
 
     def _receipt_bar(self, screen: Screen, receipt: Receipt) -> None:
         row = QHBoxLayout()

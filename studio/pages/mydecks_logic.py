@@ -3,14 +3,34 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from threading import Event
+from time import time_ns
 
-from decks import Change, Counts, Finding, Library, Preview, SavedDeck
+from decks import Change, Counts, DeckIndexer, Finding, Library, Preview, SavedDeck
+from decks.duplicates import DuplicateIndex, find_duplicates
+from decks.history import DeckStore, Ledger
 from studio.pages.decks_preview_data import PreviewCard, PreviewSection, local_artwork
+
+
+def scan_collection(
+    index: DeckIndexer, store: DeckStore, cancel: Event
+) -> tuple[Library, Ledger, DuplicateIndex, bool]:
+    started = time_ns()
+    lib = index.scan(cancel=cancel)
+    duplicates = find_duplicates(lib.decks, cancel)
+    try:
+        ledger = store.observe(lib, started, cancel)
+    except InterruptedError:
+        raise
+    except (OSError, ValueError, sqlite3.Error):
+        return lib, Ledger({}, ()), duplicates, False
+    return lib, ledger, duplicates, True
 
 
 def quantity(n: int, noun: str) -> str:
@@ -99,10 +119,16 @@ class LibraryRow:
     folder: str
     changed: str
     problem: str
+    match: str = ""
 
 
 def library_rows(
-    lib: Library, term: str, by_card: bool, folder: Path | None, sort: int
+    lib: Library,
+    term: str,
+    by_card: bool,
+    folder: Path | None,
+    sort: int,
+    marks: Mapping[Path, str] | None = None,
 ) -> list[LibraryRow]:
     term = term.strip()
     matches = {m.deck.path: m.counts for m in lib.by_card(term)} if by_card and term else {}
@@ -122,7 +148,14 @@ def library_rows(
         elif p.unresolved:
             problem = quantity(len(p.unresolved), "unknown card")
         rows.append(
-            LibraryRow(deck, counts, folder_name(deck), changed_date(deck.modified_ns), problem)
+            LibraryRow(
+                deck,
+                counts,
+                folder_name(deck),
+                changed_date(deck.modified_ns),
+                problem,
+                marks.get(deck.path, "") if marks else "",
+            )
         )
     rows.sort(key=lambda r: (r.deck.name.casefold(), r.folder.casefold()))
     if sort == 1:
