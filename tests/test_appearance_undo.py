@@ -13,9 +13,10 @@ class AppearanceUndoTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.game = Path(temp.name) / "Game"
+        root = Path(temp.name).resolve()
+        self.game = root / "Game"
         self.game.mkdir()
-        self.config = str(Path(temp.name) / "Config" / "config.json")
+        self.config = str(root / "Config" / "config.json")
         self.player = self.game / "textures/cover.png"
         self.player.parent.mkdir()
         self.opponent = self.player.with_name("cover2.png")

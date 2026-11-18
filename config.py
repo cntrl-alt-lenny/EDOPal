@@ -348,9 +348,18 @@ def _found_installations(first_guesses: list[str] | None) -> Iterator[tuple[int,
         seen.add(key)
         score = _edopro_folder_score(path)
         if score:
-            resolved = os.path.normcase(os.path.realpath(path))
-            if resolved not in found:
-                found.add(resolved)
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            # A case-insensitive volume can expose multiple spellings even on macOS.
+            identity = (
+                (stat.st_dev, stat.st_ino)
+                if stat.st_ino
+                else os.path.normcase(os.path.realpath(path))
+            )
+            if identity not in found:
+                found.add(identity)
                 yield score, path
 
 

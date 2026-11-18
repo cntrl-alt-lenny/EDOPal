@@ -24,7 +24,7 @@ class Soundtracks(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        base = Path(tmp.name)
+        base = Path(tmp.name).resolve()
         self.game = base / "Game"
         self.game.mkdir()
         self.library = base / "Library"

@@ -130,7 +130,7 @@ class SaveDeckTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.game = Path(tmp.name)
+        self.game = Path(tmp.name).resolve()
         self.cards = td.read_ydk(YDK)
 
     def save(self):

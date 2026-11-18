@@ -26,6 +26,8 @@
 
 ## Download
 
+[View the skin, soundtrack and tournament screenshots](docs/gallery.md)
+
 Download the portable app for your platform from the [Releases page](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest). The Windows and Linux archives include the executable and a ReadMe. The macOS archive contains one app. Settings, artwork retry caches, optional reports and imported soundtracks live in your per-user application-data folder.
 
 | Platform | Download | Then |
