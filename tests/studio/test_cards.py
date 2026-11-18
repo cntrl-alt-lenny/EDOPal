@@ -36,7 +36,7 @@ def test_real_coverage_and_settings_without_downloading(
     assert card.summary.second[0] == "62%"
     assert set(pics.rglob("*")) == before
     qtbot.keyClick(window, Qt.Key.Key_Escape)
-    assert card.state == "options"
+    assert card.state == "settings" and card.settings.coverage.hasFocus()
 
 
 def test_progress_to_failure_summary_and_report(
@@ -58,7 +58,7 @@ def test_progress_to_failure_summary_and_report(
     qtbot.waitUntil(lambda: card.state == "results")
     assert card.summary.first == ("125", "Downloaded")
     assert card.summary.second == ("4", "Unavailable")
-    assert ("Network errors (will retry)", "1") in card.summary.rows
+    assert ("Downloads interrupted by a connection error", "1") in card.summary.rows
     card.results.failures.click()
     assert card.results.list.isVisible()
     assert card.results.model.rowCount() == 4
@@ -80,7 +80,7 @@ def test_progress_to_failure_summary_and_report(
     assert window.change.isEnabled()
 
 
-def test_escape_cancels_and_next_run_gets_a_new_event(
+def test_only_cancel_sync_stops_work_and_next_run_gets_a_new_event(
     make_window: Callable[..., StudioWindow], qtbot: QtBot
 ) -> None:
     fake = DemoSync()
@@ -90,9 +90,11 @@ def test_escape_cancels_and_next_run_gets_a_new_event(
     qtbot.waitUntil(lambda: card.done == 78)
     previous = card.job.cancel_event
     qtbot.keyClick(window, Qt.Key.Key_Escape)
+    assert window.isVisible() and card.state == "progress" and not previous.is_set()
+    card.progress.cancel.click()
     qtbot.waitUntil(lambda: card.state == "results")
     assert previous.is_set()
-    assert card.summary.title == "Sync cancelled"
+    assert card.summary.title == "Sync canceled"
     card.results.done.click()
     fake.release.set()
     card.options.start.click()

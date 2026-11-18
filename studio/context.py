@@ -142,10 +142,10 @@ class AppContext(QObject):
             running = _game_running(game)
         except OSError as exc:
             raise GameOpenError(
-                "Could not check whether EDOPro is open. Close it and retry."
+                "EDOPal couldn’t check whether EDOPro is open. Close it, then choose Retry."
             ) from exc
         if running:
-            raise GameOpenError("EDOPro is open in the selected game folder.")
+            raise GameOpenError("EDOPro is open. Close this copy of EDOPro, then choose Retry.")
 
     def set_busy(self, value: bool) -> None:
         self.busy = value

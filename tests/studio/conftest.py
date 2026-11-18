@@ -49,6 +49,9 @@ def make_window(
         window.show()
         window.activateWindow()
         qapp.processEvents()
+        # Give tests a settled installation before they edit the synthetic fixture.
+        # On Windows an artwork snapshot can still have one of its images open.
+        qtbot.waitUntil(lambda: not ctx.tasks.jobs)
         return window
 
     windows: list[StudioWindow] = []
@@ -56,6 +59,8 @@ def make_window(
     # One owner controls shutdown, including any final jobs scheduled by a result.
     while windows:
         window = windows.pop()
+        # A failed assertion may leave an edited draft behind.
+        monkeypatch.setattr(window.ctx, "confirm", lambda *_: True)
         runner = window.ctx.tasks
         runner.cancel_all()
         if isValid(window):

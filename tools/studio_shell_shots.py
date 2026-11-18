@@ -21,7 +21,7 @@ def render_picker_states(
     picker = window.picker
     with patch("config.find_edopro_folders", return_value=[]):
         window.change.click()
-        settle(lambda: "No installations" in picker.hint.text())
+        settle(lambda: "No EDOPro folders" in picker.hint.text())
         shot("42-picker-empty")
         with patch.object(window.ctx, "choose_folder", return_value=str(root)):
             picker.browse.click()
@@ -121,6 +121,10 @@ def render_settings_states(
         page.check.click()
         settle(lambda: not ctx.checking_update)
     shot("30-update-available")
+    window.navigate("health")
+    settle(lambda: not ctx.tasks.jobs)
+    shot("46-release-and-navigation")
+    window.navigate("settings")
     with patch("main.check_for_update", new=AsyncMock(side_effect=OSError)):
         page.check.click()
         settle(lambda: not ctx.checking_update)

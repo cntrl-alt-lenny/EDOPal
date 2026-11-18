@@ -37,12 +37,12 @@ from studio.tasks import Job
 from studio.widgets import ActionTile, ElidedLabel, Hero, Panel, label, margins
 
 SECTIONS = {
-    "games": ("Game installations", "Select a game or find another copy.", "folder"),
+    "games": ("EDOPro folders", "Choose which copy of EDOPro EDOPal uses.", "folder"),
     "defaults": ("HD Cards defaults", "Choose what each artwork sync includes.", "cards"),
     "storage": ("Downloads and storage", "See what uses space and manage your packs.", "download"),
     "updates": ("Updates", "Check for a new release.", "spark"),
     "shortcuts": ("Shortcuts", "Open the portable app from your desktop.", "arrow"),
-    "about": ("About", "Credits, licences and project links.", "brand"),
+    "about": ("About", "Credits, licenses and project links.", "brand"),
 }
 
 
@@ -96,9 +96,10 @@ class SettingsPage(Page):
         detail = QWidget()
         content = page_layout(detail)
         content.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        self.back = button("Settings", self.home_view, "back", "quiet")
+        self.back = button("Back", self.home_view, "back", "quiet")
+        self.back.setAccessibleName("Back to Settings")
         content.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
-        detail.setMaximumWidth(t.WIDE_CONTENT)
+        detail.setMaximumWidth(t.CARDS_COLUMNS)
         self.heading = label("", "heading", True)
         content.addWidget(self.heading)
         self.inner = QVBoxLayout()
@@ -110,6 +111,7 @@ class SettingsPage(Page):
         self.detail = scroll(detail)
         self.stack.addWidget(self.detail)
         context.update_changed.connect(self._update_news)
+        self._update_news()
         context.busy_changed.connect(lambda busy: self.stack.setDisabled(busy))
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -123,7 +125,7 @@ class SettingsPage(Page):
         self.hero.setFixedHeight(t.landing_hero_height(self.width(), self.height()))
 
     def installation_changed(self, installation: Installation) -> None:
-        name = Path(installation.path).name if installation.path else "No game folder selected"
+        name = Path(installation.path).name if installation.path else "No EDOPro folder selected"
         self.tiles["games"].hint.setText(name)
         self.tiles["games"].hint.setToolTip(installation.path)
         if self.section == "games":
@@ -138,7 +140,7 @@ class SettingsPage(Page):
             self.open_section(self.section)
 
     def hidden(self) -> bool:
-        return not self.ctx.busy
+        return not self.ctx.busy and self._leave_defaults()
 
     def escape(self) -> bool:
         if self.ctx.busy:
@@ -148,7 +150,19 @@ class SettingsPage(Page):
         self.home_view()
         return True
 
+    def request_close(self) -> bool:
+        if self.section == "defaults" and self.ctx.busy and self.isVisible():
+            return False
+        return self._leave_defaults() and not any(
+            writing for _, writing, _ in self.pending.values()
+        )
+
+    def _leave_defaults(self) -> bool:
+        return self.section != "defaults" or self.defaults.discard(self.ctx)
+
     def home_view(self) -> None:
+        if not self._leave_defaults():
+            return
         previous = self.section
         self.section = "home"
         self.revision += 1
@@ -232,7 +246,7 @@ class SettingsPage(Page):
 
     def _games(self) -> None:
         current = self.ctx.installation
-        panel = self._panel("Known game folders")
+        panel = self._panel("Saved EDOPro folders")
         known = self.ctx.known_installations()
         if not known:
             panel.body.addWidget(label("Choose your EDOPro folder to get started.", "body", True))
@@ -249,7 +263,7 @@ class SettingsPage(Page):
             if selected:
                 panel.body.addWidget(
                     label(
-                        "Selected game"
+                        "Selected folder"
                         if current.ready
                         else "Selected · Open EDOPro once to get its card data.",
                         "goldKicker",
@@ -261,7 +275,7 @@ class SettingsPage(Page):
                 row.insertWidget(
                     0,
                     button(
-                        "Use this game",
+                        "Use this folder",
                         lambda path=path: self.ctx.select_installation_requested.emit(path),
                         "check",
                     ),
@@ -280,7 +294,7 @@ class SettingsPage(Page):
             )
             panel.body.addLayout(row)
         self.find_games = button(
-            "Add or rescan game folders", self.ctx.installations_requested.emit, "search"
+            "Find EDOPro folders", self.ctx.installations_requested.emit, "search"
         )
         panel.body.addWidget(self.find_games, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -322,7 +336,7 @@ class SettingsPage(Page):
                 button(
                     "Open folder", lambda: open_url(QUrl.fromLocalFile(root), self.ctx), "folder"
                 ),
-                button("Refresh sizes", lambda: self.open_section("storage")),
+                button("Refresh storage", lambda: self.open_section("storage")),
             )
         )
         self.message.setText("Measuring local files…")
@@ -372,7 +386,7 @@ class SettingsPage(Page):
     def _remove(self, key: str, title: str) -> None:
         if not self.ctx.confirm(
             "Remove downloaded files?",
-            f"Remove {title} from app storage? You can download these files again. Your applied game files stay in place.",
+            f"Remove {title} from app storage? Files already applied to EDOPro stay in place.",
         ):
             return
         self.message.setText("Removing downloaded files…")
@@ -394,7 +408,7 @@ class SettingsPage(Page):
             self.check.setEnabled(not self.ctx.checking_update)
             self.get_release.setVisible(bool(latest))
             self.offer.setText(
-                f"Get {latest} from GitHub Releases and replace your portable app."
+                f"Download version {latest} from GitHub Releases and replace your portable app."
                 if latest
                 else ""
             )
@@ -406,14 +420,18 @@ class SettingsPage(Page):
         self.offer = label("", "body", True)
         panel.body.addWidget(self.news)
         panel.body.addWidget(self.offer)
-        self.check = button("Check now", self.ctx.update_requested.emit, "search")
+        self.check = button("Check for updates", self.ctx.update_requested.emit, "search")
         self.get_release = button(
-            "Open Releases",
+            "View releases",
             lambda: open_url(QUrl(PROJECT + "/releases/latest"), self.ctx),
             "link",
             "primary",
         )
-        panel.body.addLayout(actions(self.check, self.get_release))
+        row = QHBoxLayout()
+        row.addStretch()
+        row.addWidget(self.check)
+        row.addWidget(self.get_release)
+        panel.body.addLayout(row)
         self._update_news()
 
     def _shortcuts(self) -> None:

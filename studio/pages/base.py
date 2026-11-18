@@ -1,3 +1,5 @@
+from collections.abc import Callable, Iterator, Mapping
+
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from studio.context import AppContext, Installation
@@ -40,3 +42,26 @@ class Placeholder(Page):
         layout = QVBoxLayout(self)
         margins(layout, 0)
         layout.addWidget(EmptyState(self.title, self.description, self.icon, self.category))
+
+
+class PageRegistry(Mapping[str, Page]):
+    """Keep sidebar order independent of which widgets the player has visited."""
+
+    def __init__(self, types: tuple[type[Page], ...], build: Callable[[type[Page]], Page]) -> None:
+        self.types = {page.id: page for page in types}
+        self.built: dict[str, Page] = {}
+        self._build = build
+
+    def __getitem__(self, key: str) -> Page:
+        if key not in self.built:
+            self.built[key] = self._build(self.types[key])
+        return self.built[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.types
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.types)
+
+    def __len__(self) -> int:
+        return len(self.types)

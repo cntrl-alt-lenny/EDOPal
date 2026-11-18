@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -239,3 +240,21 @@ class ElidedLabel(QLabel):
     def resizeEvent(self, event: QEvent) -> None:
         super().resizeEvent(event)
         self._fit()
+
+
+def confirm_action(parent: QWidget, title: str, message: str) -> bool:
+    discard = title.startswith("Discard ")
+    box = QMessageBox(QMessageBox.Icon.Question, title, message, parent=parent)
+    safe = box.addButton("Keep editing" if discard else "Cancel", QMessageBox.ButtonRole.RejectRole)
+    action = {
+        "Undo this import?": "Undo deck save",
+        "Restore to this installation?": "Restore backup",
+        "Undo the last artwork change?": "Undo last artwork sync",
+    }.get(title, title.removesuffix("?"))
+    commit = box.addButton(
+        "Discard changes" if discard else action, QMessageBox.ButtonRole.AcceptRole
+    )
+    box.setDefaultButton(safe)
+    box.setEscapeButton(safe)
+    box.exec()
+    return box.clickedButton() is commit

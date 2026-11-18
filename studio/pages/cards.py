@@ -5,23 +5,24 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import QTimer, Slot
 
 from artwork_flow import Summary, coverage_summary, make_run_config, sync_summary, valid_decks
 from config import Config
-from studio import theme as t
 from studio.context import AppContext, GameOpenError, Installation
-from studio.pages.base import Page
-from studio.pages.card_results import ResultView
-from studio.pages.card_views import OptionsView, SettingsView, page_layout, scroll
-from studio.pages.cards_library import LibrarySnapshot, inspect_library
+from studio.pages.card_results import player_summary
+from studio.pages.card_stage import CardStage
+from studio.pages.cards_library import (
+    LibrarySnapshot,
+    NoDecksFound,
+    inspect_library,
+    keep_deck_scope,
+)
 from studio.pages.cards_undo import remember_changes, restore_artwork
 from studio.tasks import FolderRequest, Job, WorkerContext
-from studio.widgets import Button, GameClosedBlock, Hero, ProgressBlock, margins
 
 
-class CardsPage(Page):
+class CardsPage(CardStage):
     id, title, icon = "cards", "HD Cards", "cards"
 
     def __init__(self, context: AppContext) -> None:
@@ -31,97 +32,46 @@ class CardsPage(Page):
         self.total = self.done = 0
         self.folder_cancelled = False
         self.scan: Job | None = None
+        self.origin = "options"
+        self.stale_coverage = False
+        self.no_decks = False
         self.block_reason = ""
         self.restoring = False
         self.retry_args: tuple[Path | None, tuple[Path, ...]] = (None, ())
-        self.options = OptionsView()
-        self.settings = SettingsView(context.cfg)
-        self.results = ResultView()
-        progress_view = QWidget()
-        stage = page_layout(progress_view)
-        progress_view.setMaximumWidth(t.WIDE_CONTENT)
-        self.banner = Hero(
-            "HD Cards", "Artwork sync", "Updating the selected installation.", "download"
-        )
-        stage.addWidget(self.banner)
-        self.progress = ProgressBlock()
-        stage.addWidget(self.progress)
-        stage.addStretch()
-        blocked = QWidget()
-        layout = page_layout(blocked)
-        self.back = Button("HD Cards", "quiet", "back")
-        layout.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(
-            Hero(
-                "HD Cards",
-                "Artwork changes",
-                "Close the game so its files can be changed safely.",
-                "download",
-            )
-        )
-        self.guard = GameClosedBlock()
-        blocked.setMaximumWidth(t.WIDE_CONTENT)
-        layout.addWidget(self.guard)
-        layout.addStretch()
         self.guard.retry.clicked.connect(self._retry)
-        self.back.clicked.connect(lambda: self.open_view("options"))
-        self.stack = QStackedWidget()
-        self.views = {
-            key: scroll(widget)
-            for key, widget in (
-                ("options", self.options),
-                ("settings", self.settings),
-                ("progress", progress_view),
-                ("results", self.results),
-                ("blocked", blocked),
-            )
-        }
-        for view in self.views.values():
-            self.stack.addWidget(view)
-        layout = QVBoxLayout(self)
-        margins(layout, 0)
-        layout.addWidget(self.stack)
-        self.results.close_button.clicked.connect(lambda: self.window().close())
+        self.back.clicked.connect(self._back_to_origin)
+        self.results.back.clicked.connect(self._back_to_origin)
+        self.results.decks.clicked.connect(lambda: context.navigate("decks"))
+        self.results.full_library.clicked.connect(self._sync_everything)
+        self.options.check_again.clicked.connect(
+            lambda: context.select_installation_requested.emit(context.installation.path)
+        )
         self.options.connect_game.clicked.connect(lambda: context.installations_requested.emit())
         self.options.start.clicked.connect(self.start_sync)
         self.options.settings.clicked.connect(lambda: self.open_view("settings"))
         for button in (self.options.coverage, self.settings.coverage):
             button.clicked.connect(self.show_coverage)
         self.settings.done.clicked.connect(
-            lambda: context.save_card_preferences(
-                self.settings.preferences(), lambda: self.open_view("options")
-            )
+            lambda: context.save_card_preferences(self.settings.preferences(), self._close_settings)
         )
         context.preferences_changed.connect(self._load_defaults)
-        context.busy_changed.connect(lambda busy: self.settings.setEnabled(not busy))
+        context.busy_changed.connect(self.settings.setDisabled)
+        context.busy_changed.connect(self.settings.actions.setDisabled)
         self.settings.back.clicked.connect(self._discard_settings)
-        self.results.done.clicked.connect(lambda: self.open_view("options"))
+        self.results.done.clicked.connect(self._back_to_origin)
         self.results.failures.clicked.connect(self._reveal_failures)
         self.options.undo.clicked.connect(self._confirm_restore)
         self.results.undo.clicked.connect(self._confirm_restore)
         self.progress.cancel.clicked.connect(self.cancel)
         self.options.scope.changed.connect(self._scope_status)
-        self.installation_changed(context.installation)
-
-    @property
-    def state(self) -> str:
-        return next(key for key, view in self.views.items() if view is self.stack.currentWidget())
-
-    def open_view(self, key: str) -> None:
-        self.stack.setCurrentWidget(self.views[key])
-        self.views[key].verticalScrollBar().setValue(0)
-        focus = {
-            "blocked": self.guard.retry,
-            "settings": self.settings.back,
-            "options": self.options.start,
-            "results": self.results.done,
-            "progress": self.progress.cancel,
-        }[key]
-        if focus.isEnabled():
-            focus.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def installation_changed(self, installation: Installation) -> None:
+        if self.job and self.run_config.stats:
+            self.stale_coverage = True
+            self.job.cancel()
+            self.open_view("options")
         self.options.connect_game.setVisible(not installation.path)
+        self.options.check_again.setVisible(bool(installation.path) and not installation.ready)
         self.options.scope.setVisible(bool(installation.path))
         self.options.start.setEnabled(installation.ready)
         self.options.coverage.setEnabled(installation.ready)
@@ -143,10 +93,30 @@ class CardsPage(Page):
     def _load_defaults(self) -> None:
         self.settings.load(self.ctx.cfg)
         self._load_scope()
+        if self.state == "blocked" and not self.restoring:
+            # Changed defaults invalidate the blocked operation's original inputs.
+            self.open_view("options")
+
+    def _close_settings(self) -> None:
+        self.open_view("options")
+        self.options.settings.setFocus()
 
     def _discard_settings(self) -> None:
-        self.settings.load(self.ctx.cfg)
-        self.open_view("options")
+        if self.settings.discard(self.ctx):
+            self._close_settings()
+
+    def _back_to_origin(self) -> None:
+        self.open_view(self.origin)
+        if self.origin == "settings":
+            self.settings.coverage.setFocus()
+        elif self.restoring and self.options.undo.isVisible():
+            self.options.undo.setFocus()
+        elif getattr(self, "run_config", None) and self.run_config.stats:
+            self.options.coverage.setFocus()
+
+    def _sync_everything(self) -> None:
+        self.options.scope.select(0)
+        self.start_sync()
 
     def _history_key(self) -> str:
         path = os.path.normcase(self.ctx.installation.path)
@@ -195,9 +165,11 @@ class CardsPage(Page):
     def _scope_status(self) -> None:
         install = self.ctx.installation
         if not install.path:
-            message = "Choose a game folder above to enable artwork sync."
+            message = "Choose your EDOPro folder to enable artwork sync."
         elif not install.ready:
-            message = "Open EDOPro once to download its card databases."
+            message = (
+                "Finish setting up EDOPro. Let its card databases update, then choose Check again."
+            )
         elif install.recommend_decks and self.options.scope.group.checkedId() == 1:
             message = "My decks is recommended here. New art appears next time you start EDOPro."
         else:
@@ -224,7 +196,7 @@ class CardsPage(Page):
     def _launch(
         self, stats_only: bool, game_path: Path | None = None, paths: tuple[Path, ...] = ()
     ) -> bool:
-        if self.ctx.busy or not self.ctx.installation.ready:
+        if self.job or self.ctx.busy or not self.ctx.installation.ready:
             return False
         picks = {key: switch.isChecked() for key, switch in self.settings.toggles.items()}
         picks.update(my_decks=self.options.scope.group.checkedId() == 1, stats=stats_only)
@@ -234,7 +206,12 @@ class CardsPage(Page):
         self.imported_run = bool(paths)
         self.run_config = cfg = make_run_config(self.ctx.cfg, picks, self.ctx.apply_choices, paths)
         cfg.update_checked_by_shell = True
-        self.ctx.set_busy(True)
+        if not stats_only:
+            self.ctx.set_busy(True)
+        if self.state in ("options", "settings"):
+            self.origin = self.state
+        self.stale_coverage = self.no_decks = False
+        self.progress.cancel.setText("Cancel coverage check" if stats_only else "Cancel sync")
         self.ctx.exit_code = self.done = self.total = 0
         self.summary = None
         self.folder_cancelled = False
@@ -244,7 +221,7 @@ class CardsPage(Page):
         self.banner.description.setText(
             "Reading artwork already on disk."
             if stats_only
-            else f"{scope}  ·  Keep this folder selected until the sync finishes."
+            else f"Updating artwork for {scope}… You can change folders when this finishes."
         )
         self.progress.begin(
             "Measuring artwork coverage…" if stats_only else "Reading card databases…"
@@ -265,6 +242,7 @@ class CardsPage(Page):
                     return replacement
 
                 cfg.folder_picker = checked_folder
+                keep_deck_scope(cfg)
             if game_path is not None and not valid_decks(cfg.edopro_path, game_path, paths):
                 raise ValueError("Choose saved decks in the selected installation’s deck folder.")
 
@@ -303,7 +281,8 @@ class CardsPage(Page):
             request: FolderRequest = event[1]
             path = None
             try:
-                if not cancelling and not self.imported_run:
+                can_pick = not self.run_config.stats or (self.isVisible() and not self.ctx.busy)
+                if can_pick and not cancelling and not self.imported_run:
                     path = self.ctx.choose_folder(request.initial)
             finally:
                 self.folder_cancelled = path is None
@@ -316,6 +295,13 @@ class CardsPage(Page):
 
     @Slot(object)
     def _error(self, exc: BaseException) -> None:
+        if isinstance(exc, NoDecksFound):
+            self.no_decks = True
+            self.summary = Summary(
+                "No decks found — nothing was synced",
+                note="Save a deck containing cards in EDOPro, or choose a different artwork selection.",
+            )
+            return
         if isinstance(exc, GameOpenError):
             self.block_reason = str(exc)
             return
@@ -341,17 +327,22 @@ class CardsPage(Page):
     def _finish(self) -> None:
         self.job = None
         cfg = self.run_config
-        self.ctx.cfg.saved_original_text = cfg.saved_original_text
-        self.ctx.cfg.era_art_applied = cfg.era_art_applied
+        if cfg.stats and self.stale_coverage:
+            return
+        if not cfg.stats:
+            self.ctx.cfg.saved_original_text = cfg.saved_original_text
+            self.ctx.cfg.era_art_applied = cfg.era_art_applied
         if cfg.edopro_path != self.ctx.installation.path:
             # The backend only adopts a replacement after validating its databases.
             self.ctx.set_installation(Installation(cfg.edopro_path, ready=True))
-        self.ctx.set_busy(False)
+        if not cfg.stats:
+            self.ctx.set_busy(False)
         if self.block_reason:
             self.open_view("blocked")
             self.guard.show_reason(self.block_reason)
             return
-        if not cfg.stats and self.summary:
+        self.summary = player_summary(self.summary)
+        if not cfg.stats and not self.no_decks and self.summary:
             when = datetime.now().strftime("%d %b %Y at %H:%M")
             detail = self.summary.title
             if self.summary.first[1] == "Downloaded":
@@ -359,8 +350,15 @@ class CardsPage(Page):
             self.ctx.state.setValue(self._history_key(), f"Last sync   ·   {when}   ·   {detail}")
             self._snapshot(self.ctx.installation)
         self.results.undo.setVisible(not cfg.stats and getattr(cfg, "artwork_changed", False))
-        self.results.show_result(self.summary)
+        scope = "My decks" if cfg.my_decks and not cfg.stats else "Full library"
+        self.results.show_result(
+            self.summary,
+            no_decks=self.no_decks,
+            scope="Selected decks" if self.imported_run else scope,
+        )
         self.open_view("results")
+        if self.no_decks and self.isVisible():
+            self.results.decks.setFocus()
 
     def _retry(self) -> None:
         if self.restoring:
@@ -380,10 +378,13 @@ class CardsPage(Page):
         if self.ctx.busy or not self.ctx.installation.path:
             return
         self.restoring = True
+        self.origin = "options"
         self.ctx.set_busy(True)
         self.progress.begin("Restoring previous artwork…")
         self.progress.cancel.setEnabled(False)
-        self.banner.description.setText("Keep this folder selected until the restore finishes.")
+        self.banner.description.setText(
+            "Restoring artwork… You can change folders when this finishes."
+        )
         self.open_view("progress")
         cfg = copy(self.ctx.cfg)
 
@@ -428,7 +429,7 @@ class CardsPage(Page):
         if self.job:
             self.job.cancel()
             self.progress.cancel.setEnabled(False)
-            self.progress.phase.setText("Finishing current work…")
+            self.progress.phase.setText("Canceling… Finishing the current file.")
 
     def _reveal_failures(self, expanded: bool) -> None:
         target = self.results.list if expanded else self.results.failures
@@ -445,6 +446,11 @@ class CardsPage(Page):
             else:
                 self.ctx.notify("Saving your artwork defaults…")
             return False
+        return self._may_leave_editor()
+
+    def _may_leave_editor(self) -> bool:
+        if self.state == "settings" or (self.state != "options" and self.origin == "settings"):
+            return self.settings.discard(self.ctx)
         return True
 
     def shown(self) -> None:
@@ -457,21 +463,23 @@ class CardsPage(Page):
             control.setFocus()
 
     def request_close(self) -> bool:
+        if self.state == "settings" and self.ctx.busy and self.isVisible():
+            return False
+        if not self._may_leave_editor():
+            return False
         if self.job:
             self.cancel()
         return True
 
     def escape(self) -> bool:
-        if self.job:
-            self.cancel()
-        elif self.ctx.busy:
+        if self.job or self.ctx.busy:
             return True
         elif self.state == "settings":
             self._discard_settings()
         elif self.state == "results" and self.results.failures.isChecked():
             self.results.failures.click()
         elif self.state != "options":
-            self.open_view("options")
+            self._back_to_origin()
         else:
             return False
         return True

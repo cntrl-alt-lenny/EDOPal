@@ -4,6 +4,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from PIL import Image
 from pytestqt.qtbot import QtBot
 
@@ -15,7 +16,11 @@ def test_small_window_capture_settles_the_music_grid(
     make_window: Callable[..., StudioWindow], qtbot: QtBot
 ) -> None:
     window = make_window()
+    from tools.music_screenshots import recording
+
     window.resize(960, 600)
+    # The empty-library view deliberately hides the scene grid.
+    recording(Path(window.ctx.installation.path) / "sound/BGM/menu/Welcome.wav", 1)
     window.navigate("music")
     page = window.current
     qtbot.waitUntil(lambda: page.state == "home")
@@ -114,3 +119,42 @@ def test_screenshot_cli_writes_all_views_at_requested_size(tmp_path: Path) -> No
         with Image.open(path) as image:
             assert image.size == (1280, 800)
             assert image.getbbox() is not None
+
+
+@pytest.mark.parametrize(
+    "page,last_state",
+    [
+        ("skins", "skins-pack-restored"),
+        ("backup", "backup-14-interrupted"),
+        ("health", "health-evidence"),
+        ("replays", "replays-large-library"),
+    ],
+)
+def test_cli_renders_only_selected_page_scenarios(
+    tmp_path: Path, page: str, last_state: str
+) -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            "tools/studio_screenshots.py",
+            "--page",
+            page,
+            "--out",
+            str(tmp_path),
+            "--size",
+            "960x600",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        timeout=90,
+    )
+    images = list((tmp_path / "960x600").glob("*.png"))
+    assert len(images) > 5
+    prefixes = (page + "-", "wallpaper-catalogue-") if page == "skins" else (page + "-",)
+    assert all(
+        path.stem.startswith(prefixes)
+        or (page == "skins" and path.stem == "sleeves-with-active-theme")
+        for path in images
+    )
+    assert last_state in {p.stem for p in images}

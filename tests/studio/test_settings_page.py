@@ -52,7 +52,9 @@ def test_about_shows_brand_credits_and_independence(make_window: Callable, qtbot
     assert window.windowIcon().pixmap(38, 38).toImage() in marks
 
 
-def test_both_editors_save_all_choices_across_relaunch(make_window: Callable, qtbot: QtBot) -> None:
+def test_both_editors_save_all_choices_across_relaunch(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
     window = make_window()
     window.nav["settings"].click()
     page = window.current
@@ -81,6 +83,7 @@ def test_both_editors_save_all_choices_across_relaunch(make_window: Callable, qt
     page.tiles["defaults"].click()
     assert not page.defaults.toggles["force"].isChecked()
     page.defaults.toggles["force"].click()
+    monkeypatch.setattr(window.ctx, "confirm", lambda *_: True)
     qtbot.keyClick(window, Qt.Key.Key_Escape)
     assert not config.Config(cfg.argv).force
 
@@ -120,7 +123,7 @@ def test_game_folders_switch_forget_and_readd(
     qtbot.waitUntil(lambda: window.ctx.installation.path == str(second))
     assert not window.ctx.installation.ready
     assert window.ctx.known_installations() == [first, str(second)]
-    control(window, "Use this game", qtbot).click()
+    control(window, "Use this folder", qtbot).click()
     qtbot.waitUntil(lambda: window.ctx.installation.path == first)
     monkeypatch.setattr(window.ctx, "confirm", lambda *_: True)
     control(window, "Forget", qtbot).click()
@@ -128,7 +131,7 @@ def test_game_folders_switch_forget_and_readd(
     assert window.ctx.known_installations() == [str(second)]
     assert Path(first, "cards.cdb").is_file()
     assert json.loads(Path(window.ctx.cfg.config_path).read_text())["edopro_path"] is None
-    control(window, "Use this game", qtbot).click()
+    control(window, "Use this folder", qtbot).click()
     qtbot.waitUntil(lambda: window.ctx.installation.path == str(second))
 
 
@@ -293,3 +296,30 @@ def test_source_shortcuts_and_classic_handoff(
         "--edopro-path",
         window.ctx.installation.path,
     ]
+
+
+@pytest.mark.parametrize("section", ["cards", "settings"])
+def test_editors_guard_every_exit_and_restore_opener(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, section: str
+) -> None:
+    window = make_window()
+    window.navigate(section)
+    page = window.current
+    opener = page.tiles["defaults"] if section == "settings" else page.options.settings
+    editor = page.defaults if section == "settings" else page.settings
+    opener.click()
+    editor.toggles["force"].click()
+    decisions = Mock(return_value=False)
+    monkeypatch.setattr(window.ctx, "confirm", decisions)
+    editor.back.click()
+    qtbot.keyClick(window, Qt.Key.Key_Escape)
+    assert not window.navigate("skins")
+    window.open_picker()
+    assert window.content.currentWidget() is window.stack
+    assert not window.close()
+    assert decisions.call_count == 5
+    assert all(c.args[0] == "Discard unsaved changes?" for c in decisions.call_args_list)
+    assert editor.isVisible() and editor.toggles["force"].isChecked()
+    decisions.return_value = True
+    editor.back.click()
+    assert opener.hasFocus() and not editor.toggles["force"].isChecked()

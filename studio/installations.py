@@ -31,8 +31,11 @@ class InstallationPicker(QWidget):
         body = QVBoxLayout(self)
         margins(body, t.XXL)
         body.setSpacing(t.LG)
-        body.addWidget(label("GAME FOLDERS", "goldKicker"))
-        body.addWidget(label("Choose your installation", "display", True))
+        self.back = Button("Back", "quiet", "back")
+        self.back.setAccessibleName("Back to the current page")
+        self.back.clicked.connect(self.close_picker)
+        body.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
+        body.addWidget(label("Choose your EDOPro folder", "display", True))
         body.addWidget(
             label("Artwork, customization and decks use the folder you select.", "body", True)
         )
@@ -48,7 +51,7 @@ class InstallationPicker(QWidget):
         self.list.setSpacing(t.XS)
         self.list.setIconSize(QSize(t.ICON_BIG, t.ICON_BIG))
         self.list.setTextElideMode(Qt.TextElideMode.ElideMiddle)
-        self.list.setAccessibleName("Discovered installations")
+        self.list.setAccessibleName("EDOPro folders found")
         self.list.itemDoubleClicked.connect(self._use)
         self.list.itemActivated.connect(self._use)
         self.list.currentRowChanged.connect(lambda row: self.use.setEnabled(row >= 0))
@@ -56,13 +59,10 @@ class InstallationPicker(QWidget):
         actions = QHBoxLayout()
         self.browse = Button("Browse…", "secondary", "folder")
         self.browse.clicked.connect(self._browse)
-        self.back = Button("Cancel", "quiet")
-        self.back.clicked.connect(self.close_picker)
         self.use = Button("Use this folder", "primary", "check")
         self.use.clicked.connect(self._use)
         actions.addWidget(self.browse)
         actions.addStretch()
-        actions.addWidget(self.back)
         actions.addWidget(self.use)
         body.addLayout(actions)
         body.addStretch()
@@ -77,7 +77,7 @@ class InstallationPicker(QWidget):
         self.use.setEnabled(False)
         self.browse.setEnabled(True)
         self.back.setEnabled(True)
-        self.hint.setText("Searching your usual game folders…")
+        self.hint.setText("Searching for EDOPro folders…")
         if selected:
             self.validate(selected)
             return
@@ -103,9 +103,11 @@ class InstallationPicker(QWidget):
         if paths:
             current = self.ctx.installation.path
             self.list.setCurrentRow(paths.index(current) if current in paths else 0)
-            self.hint.setText("Nearby installations")
+            self.hint.setText("EDOPro folders found")
         else:
-            self.hint.setText("No installations found nearby. Browse to your ProjectIgnis folder.")
+            self.hint.setText(
+                "No EDOPro folders found. Browse to the folder where you open EDOPro."
+            )
 
     def _failed(self, serial: int, error: Exception) -> None:
         if self.serial == serial:
@@ -132,7 +134,7 @@ class InstallationPicker(QWidget):
         self.use.setEnabled(False)
         self.back.setEnabled(False)
         self.browse.setEnabled(False)
-        self.hint.setText("Checking game folder…")
+        self.hint.setText("Checking EDOPro folder…")
         self.loading.show()
         self.list.setEnabled(False)
         settings = self.ctx.cfg.config_path

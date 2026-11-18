@@ -1,5 +1,7 @@
 """Render measured coverage and sync outcomes from the shared display model."""
 
+from dataclasses import replace
+
 from PySide6.QtCore import QStringListModel, Qt
 from PySide6.QtWidgets import QHBoxLayout, QListView, QProgressBar, QWidget
 
@@ -7,6 +9,24 @@ from artwork_flow import Summary
 from studio import theme as t
 from studio.pages.card_views import line, page_layout
 from studio.widgets import Button, ElidedLabel, Hero, Panel, glyph, label, margins
+
+
+def player_summary(summary: Summary) -> Summary:
+    labels = {
+        "Known-missing (cached)": "Previously unavailable artwork",
+        "Queued downloads skipped (file already present)": "Images already present",
+        "Network errors (will retry)": "Downloads interrupted by a connection error",
+    }
+    if summary.title == "Already up to date":
+        return Summary("No artwork to download for this selection")
+    return replace(
+        summary,
+        title=summary.title.replace("cancelled", "canceled"),
+        rows=tuple((labels.get(name, name), count) for name, count in summary.rows),
+        note=summary.note.replace(
+            "Known-missing artwork", "Previously unavailable artwork"
+        ).replace("Sync again to retry interrupted downloads.", "Sync again to retry."),
+    )
 
 
 class Metric(Panel):
@@ -43,6 +63,8 @@ class ResultView(QWidget):
         super().__init__()
         self.body = body = page_layout(self)
         self.setMaximumWidth(t.WIDE_CONTENT)
+        self.back = Button("Back", "quiet", "back")
+        body.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
         self.title = label("", "display", True)
         self.kicker = label("HD CARDS", "goldKicker")
         body.addWidget(self.kicker)
@@ -84,33 +106,43 @@ class ResultView(QWidget):
         path.addWidget(self.path, 1)
         body.addWidget(self.location)
 
-        actions = QHBoxLayout()
-        self.done = Button("Back to HD Cards", "primary", "back")
-        self.close_button = Button("Close", "quiet")
-        self.undo = Button("Undo this sync", "secondary", "back")
+        self.actions = QWidget()
+        actions = QHBoxLayout(self.actions)
+        margins(actions, 0)
+        self.done = Button("Done", "primary", "check")
+        self.decks = Button("Open Tournament decks", "primary", "decks")
+        self.full_library = Button("Sync everything instead", "secondary", "download")
+        self.undo = Button("Undo last artwork sync", "secondary", "back")
         self.undo.setToolTip("Put back replaced artwork and remove files added by this sync.")
         self.undo.hide()
-        actions.addWidget(self.close_button)
         actions.addStretch()
+        actions.addWidget(self.full_library)
+        actions.addWidget(self.decks)
         actions.addWidget(self.undo)
         actions.addWidget(self.done)
-        body.addLayout(actions)
         body.addStretch(1)
 
     def _expand(self, expand: bool) -> None:
         self.list.setVisible(expand)
         self.failures.setText("Hide unavailable artwork" if expand else "Show unavailable artwork")
 
-    def show_result(self, summary: Summary) -> None:
+    def show_result(self, summary: Summary, *, no_decks: bool = False, scope: str = "") -> None:
+        category = f"HD CARDS  ·  {scope.upper()}" if scope else "HD CARDS"
+        self.kicker.setText(category)
+        self.outcome.category.setText(category)
+        self.decks.setVisible(no_decks)
+        self.full_library.setVisible(no_decks)
+        self.done.setVisible(not no_decks)
         message_only = not (summary.first[0] or summary.second[0] or summary.rows)
         self.title.setText(summary.title)
         self.title.setVisible(not message_only)
         self.kicker.setVisible(not message_only)
         self.outcome.setVisible(message_only)
         if message_only:
-            self.outcome.symbol = "warning" if summary.warning else "check"
+            self.outcome.symbol = "decks" if no_decks else "warning" if summary.warning else "check"
             self.outcome.headline.setText(summary.title)
             self.outcome.description.setText(summary.note)
+            self.outcome.description.setVisible(bool(summary.note))
             self.outcome.update()
         self.first.set_value(summary.first, False)
         self.second.set_value(summary.second, summary.warning)

@@ -12,11 +12,11 @@ $py = 'python'
 & $py main.py --gui --config build/demo/config.json --edopro-path build/demo/Games/ProjectIgnis
 ```
 
-The source app uses real downloads when you press **Sync HD cards**. **Show coverage** only measures the local files. The screenshot tool below simulates downloads. Geometry lives in `config.studio.ini` beside the supplied config. Sync reports, retry caches and preferences continue to use the backend's config location.
+The source app uses real downloads when you press **Sync HD cards**. **Check artwork coverage** only measures the local files. The screenshot tool below simulates downloads. Geometry lives in `config.studio.ini` beside the supplied config. Sync reports, retry caches and preferences continue to use the backend's config location.
 
 ## Add or replace a page
 
-The shell creates each class in `studio.shell.PAGES` once, in sidebar order. For a new section, register its class in that tuple and add an original 24-unit SVG path in `studio/icons.py`. Supply plain text for the page title. The scrolling rail starts groups at `cards` (Customise), `decks` (Decks) and `replays` (Tools). Settings stays pinned below the scroll area. Up and Down move focus through all groups, and Enter selects the focused section.
+The shell constructs HD Cards at startup and builds each other page on its first visit or lookup in `window.pages`. Iterating the mapping lists all IDs in sidebar order. For a new section, register its class in `studio.shell.PAGES` and add an original 24-unit SVG path in `studio/icons.py`. Supply plain text for the page title. The scrolling rail starts groups at `cards` (Customize), `decks` (Decks) and `replays` (Tools). Settings stays pinned below the scroll area. Up and Down move focus through all groups, and Enter selects the focused section.
 
 The shell switches shared `Hero` banners to compact type and spacing at window heights of 800 logical pixels or less. This also applies to banners created during navigation. A page can use `hero.setVisible(is_home)` when opening a subview, or put the banner in the home widget of a stack. Resizing preserves that choice and restores the page’s preferred tall-window dimensions.
 
@@ -48,10 +48,10 @@ class SkinsPage(Page):
 
 - `shown()` runs on entry. Use it to resume previews or refresh stale data.
 - `hidden() -> bool` runs before navigation or opening the folder chooser. Stop previews here. Return `False` to keep the page visible during work that owns the installation.
-- `request_close() -> bool` runs before shutdown. Cards requests cooperative cancellation and permits closing. The shell waits for the pool to finish before saving geometry and closing.
-- `escape() -> bool` handles an inline view's Back or Cancel action. Return `True` when handled.
-- `installation_changed(installation)` runs on every page after selection. An empty `installation.path` means no game. A selected game can still be waiting for databases. `installation.ready` gates artwork jobs.
-- `ctx.navigate("cards")` returns whether navigation succeeded. `ctx.notify(message)` displays a shell notice. `ctx.confirm(title, message)` asks a yes/no question on the UI thread.
+- `request_close() -> bool` runs before shutdown. Cards requests cooperative cancellation and permits closing. The shell checks built pages and waits for the pool before closing. Wayland restores the saved size and maximized state and leaves placement to the compositor.
+- `escape() -> bool` handles one inline Back action or pending choice. Escape at the page root leaves the window open. Keep cancellation and playback controls explicit.
+- `installation_changed(installation)` receives the current folder when a page is built and every subsequent selection. An empty `installation.path` means no game. A selected game can still be waiting for databases. `installation.ready` gates artwork jobs.
+- `ctx.navigate("cards")` returns whether navigation succeeded. `ctx.notify(message)` displays a shell notice. `ctx.confirm(title, message)` shows a named confirmation on the UI thread. Use an action question for the title, such as `Remove downloaded files?`. The safe button is the default, and Escape dismisses the dialog.
 - `ctx.sync_deck_files(game_path, tuple(ydk_paths))` hands a tournament import to HD Cards. A true return means a job was scheduled. The worker validates the installation and deck paths before calling the backend. Invalid input produces an inline error. The handoff preserves the next normal run's scope and options.
 
 ## Run background work
@@ -131,7 +131,7 @@ Import these from `studio.widgets`. Layout dimensions and colours come from `stu
 | Panel with a vertical body layout | `panel = Panel(t.XL)` |
 | Section heading | `SectionHeader("Sync settings", "Choose artwork and maintenance options.")` |
 | Search field | `SearchField("Search sleeves")` |
-| Action tile | `ActionTile("Show coverage", "See what’s on disk", "coverage")` |
+| Action tile | `ActionTile("Check artwork coverage", "See what’s on disk", "coverage")` |
 | Progress with cancel | `progress = ProgressBlock()` then `progress.begin("Reading databases…")` and `progress.advance_to(done, total)` |
 | Illustrated empty state | `EmptyState("Skins", "Skin previews will live here.", "skins", "Appearance")` |
 | Illustrated banner | `Hero("Audio", "Music library", "Choose your duel soundtrack.", "music")` |
@@ -175,7 +175,7 @@ $env:TEMP = $env:TMP = [IO.Path]::GetFullPath('build/tmp')
 
 The renderer creates its game under the clone, injects a simulated download coroutine and uses the real coverage pipeline. It suppresses startup discovery and update requests. The output directory contains one folder per size.
 
-`--page cards` covers artwork and the installation picker, `--page settings` covers preferences, and `--page shell` renders both.
+`--page cards` covers artwork and the installation picker, `--page settings` covers preferences, and `--page shell` renders both. Every sidebar ID selects its full scenarios. Omit `--page` or use `--page all` for the overview.
 
 Use `make_window` in `tests/studio/` to build the real shell against a synthetic installation and optional fake coroutine. Activate normal controls and wait for observable state with `qtbot.waitUntil` or `waitSignal`.
 

@@ -32,7 +32,8 @@ class Hero(ArchiveArt):
         rule.setFixedSize(t.XL, t.HAIR)
         rule.setStyleSheet(f"background: {t.GOLD};")
         overline.addWidget(rule)
-        overline.addWidget(label(category.upper(), "goldKicker"))
+        self.category = label(category.upper(), "goldKicker")
+        overline.addWidget(self.category)
         overline.addStretch()
         copy.addLayout(overline)
         self.headline = label(title, "heroTitle", True)
@@ -80,12 +81,20 @@ class Hero(ArchiveArt):
         else:
             low, high = self._normal_heights
             self._normal_heights = None
+            self.headline.setMinimumHeight(0)
+            self.description.setMinimumHeight(0)
             super().setMinimumHeight(low)
             super().setMaximumHeight(high)
         self.updateGeometry()
 
     def _fit_compact(self) -> None:
         # Keep long titles and error descriptions readable after wrapping.
+        # Qt can give surplus space to the two stretches before satisfying a
+        # wrapped label's height-for-width. Reserve the actual lines first.
+        for item in (self.headline, self.description):
+            needed = max(0, item.heightForWidth(item.width()))
+            if needed != item.minimumHeight():
+                item.setMinimumHeight(needed)
         height = max(t.TILE_H + t.LG, self.layout().totalHeightForWidth(self.width()))
         if self.minimumHeight() != height or self.maximumHeight() != height:
             super().setFixedHeight(height)
@@ -146,7 +155,7 @@ class GameClosedBlock(Panel):
         self.detail = label("", "body", True)
         self.body.addWidget(self.detail)
         self.retry = Button("Retry", "primary")
-        self.body.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignLeft)
+        self.body.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignRight)
 
     def show_reason(self, reason: str) -> None:
         self.detail.setText(reason)
@@ -172,7 +181,7 @@ class ProgressBlock(Panel):
         self.detail = label("", "body", True)
         self.body.addWidget(self.detail)
         self.cancel = Button("Cancel")
-        self.body.addWidget(self.cancel, 0, Qt.AlignmentFlag.AlignLeft)
+        self.body.addWidget(self.cancel, 0, Qt.AlignmentFlag.AlignRight)
 
     def begin(self, phase: str) -> None:
         self.phase.setText(phase)
