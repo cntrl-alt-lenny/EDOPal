@@ -24,8 +24,8 @@ def scroll(content: QWidget) -> QScrollArea:
     area = QScrollArea()
     area.setWidgetResizable(True)
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    content.setMaximumWidth(t.CONTENT_MAX)
-    area.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+    content.setMaximumWidth(min(content.maximumWidth(), t.CONTENT_MAX))
+    area.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
     area.setWidget(content)
     return area
 
@@ -48,7 +48,6 @@ class OptionsView(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.body = page_layout(self)
-        self.body.addStretch(0)
         self.hero = Hero(
             "HD Cards",
             "Your cards,",
@@ -131,7 +130,6 @@ class OptionsView(QWidget):
         super().resizeEvent(event)
         width = self.width()
         wide = width >= t.CARDS_COLUMNS
-        self.body.setStretch(0, int(width >= t.ROOMY_WIDTH and self.height() >= t.TALL_HEIGHT))
         self.groups.setDirection(
             QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
         )
@@ -153,6 +151,7 @@ class OptionsView(QWidget):
 class SettingsView(QWidget):
     def __init__(self, cfg: Config, *, global_defaults: bool = False) -> None:
         super().__init__()
+        self.setMaximumWidth(t.WIDE_CONTENT)
         body = page_layout(self)
         self.back = Button("Settings" if global_defaults else "HD Cards", "quiet", "back")
         body.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)

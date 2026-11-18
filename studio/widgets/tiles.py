@@ -65,7 +65,7 @@ class _Tiles(QAbstractListModel):
             return self.cache[path]
         key = (self.generation, path)
         if key not in self.pending.values() and len(self.pending) < 4:
-            job = self.runner.start(item.render or (lambda ctx: self.loader(path, ctx)))
+            job = self.runner.start(item.render or (lambda ctx: self.loader(path, ctx)), owner=self)
             self.pending[job] = key
             job.result.connect(self._loaded)
             job.error.connect(self._failed)

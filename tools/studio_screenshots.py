@@ -20,7 +20,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QEventLoop, Qt  # noqa: E402
+from PySide6.QtGui import QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import main  # noqa: E402
@@ -31,7 +32,11 @@ from studio.shell import StudioWindow  # noqa: E402
 from tools.studio_backup_screenshots import capture_backup  # noqa: E402
 from tools.studio_decks_screenshots import render_decks  # noqa: E402
 from tools.studio_health_replays_shots import render_tools  # noqa: E402
-from tools.studio_shell_shots import render_shell_states  # noqa: E402
+from tools.studio_shell_shots import (  # noqa: E402
+    render_artwork_recovery,
+    render_picker_states,
+    render_settings_states,
+)
 from tools.studio_skins_screenshots import render_skins  # noqa: E402
 
 PAGE_RENDERERS = {"decks": render_decks}
@@ -118,6 +123,14 @@ def settle(predicate: Callable[[], bool], timeout: float = 6) -> None:
         time.sleep(0.01)
 
 
+def grab_window(window: StudioWindow) -> QPixmap:
+    window.setFocus(Qt.FocusReason.MouseFocusReason)
+    window.animation.setCurrentTime(theme.MOTION_MS)
+    # Nested layouts can post another resize when their scrollbars appear.
+    QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents, theme.MOTION_MS)
+    return window.grab()
+
+
 def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = None) -> list[Path]:
     app = QApplication.instance() or QApplication([APP_NAME])
     theme.apply(app)
@@ -132,10 +145,7 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
     files: list[Path] = []
 
     def shot(name: str) -> None:
-        window.setFocus(Qt.FocusReason.MouseFocusReason)
-        window.animation.setCurrentTime(theme.MOTION_MS)
-        app.processEvents()
-        pixmap = window.grab()
+        pixmap = grab_window(window)
         target = out / f"{name}.png"
         if not pixmap.save(str(target), "PNG"):
             raise OSError(f"Could not save {target}")
@@ -150,7 +160,10 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
 
             render_sounds(window, root, selected, shot, settle)
             return files
-        if page:
+        if page == "settings":
+            render_settings_states(window, shot, settle, root, selected)
+            return files
+        if page in PAGE_RENDERERS:
             PAGE_RENDERERS[page](window, selected, shot, settle)
             return files
         settle(lambda: card.options.values[0].text() == "75%")
@@ -173,28 +186,28 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
         card.results.done.click()
         ctx.set_installation(Installation())
         shot("06-no-installation")
+        render_picker_states(window, shot, settle, root)
         ctx.set_installation(selected)
         with patch("config.find_edopro_folders", return_value=[cfg.edopro_path]):
             window.open_picker()
             settle(lambda: window.picker.list.count() == 1)
             shot("07-installation-picker")
             window.picker.close_picker()
-        for number, key in enumerate(
-            ("skins", "sleeves", "sounds", "music", "decks", "settings"), 8
-        ):
-            if renderer := PAGE_RENDERERS.get(key):
-                renderer(window, selected, shot, settle, overview=f"{number:02}-{key}")
-                continue
-            window.navigate(key)
-            if key == "skins":
-                render_skins(window, shot, settle)
-            if key == "music":
-                settle(lambda: window.current.state == "home")
-            if key in PAGE_PROOFS:
-                import_module(PAGE_PROOFS[key]).prepare_overview(window)
-            if key == "sounds":
-                settle(lambda: not ctx.tasks.jobs)
-            shot(f"{number:02}-{key}")
+        if page is None:
+            for number, key in enumerate(("skins", "sleeves", "sounds", "music", "decks"), 8):
+                if renderer := PAGE_RENDERERS.get(key):
+                    renderer(window, selected, shot, settle, overview=f"{number:02}-{key}")
+                    continue
+                window.navigate(key)
+                if key == "skins":
+                    render_skins(window, shot, settle)
+                if key == "music":
+                    settle(lambda: window.current.state == "home")
+                if key in PAGE_PROOFS:
+                    import_module(PAGE_PROOFS[key]).prepare_overview(window)
+                if key == "sounds":
+                    settle(lambda: not ctx.tasks.jobs)
+                shot(f"{number:02}-{key}")
         window.navigate("cards")
         fake.release.clear()
         card.options.start.click()
@@ -211,9 +224,17 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
         card.results.done.click()
         ctx.set_installation(Installation(selected.path))
         shot("18-awaiting-databases")
-        render_shell_states(window, shot, settle, root, selected)
-        render_tools(window, selected, shot, settle)
-        capture_backup(window, root, shot, settle)
+        render_artwork_recovery(window, shot, settle, selected)
+        if page is None:
+            for i, key in enumerate(("mydecks", "replays", "backup", "health"), 21):
+                window.navigate(key)
+                settle(lambda: not ctx.tasks.jobs)
+                shot(f"{i}-{key}")
+        if page != "cards":
+            render_settings_states(window, shot, settle, root, selected)
+        if page is None:
+            render_tools(window, selected, shot, settle)
+            capture_backup(window, root, shot, settle)
     finally:
         fake.release.set()
         settle(lambda: not ctx.tasks.jobs)
@@ -253,7 +274,9 @@ def main_cli() -> None:
     parser.add_argument("--size", type=parse_size, action="append", help="WxH, repeatable")
     parser.add_argument(
         "--page",
-        choices=sorted({*PAGE_RENDERERS, *STANDALONE_RENDERERS, "sounds"}),
+        choices=sorted(
+            {*PAGE_RENDERERS, *STANDALONE_RENDERERS, "sounds", "cards", "settings", "shell"}
+        ),
         help="Render the full set of states for one page",
     )
     args = parser.parse_args()

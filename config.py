@@ -1,5 +1,5 @@
 """
-Configuration management for EDOPro HD Cards Downloader.
+Configuration management for EDOPal.
 
 Loads settings from (in priority order):
   1. CLI arguments (highest priority)
@@ -68,7 +68,7 @@ CONFIG_FILENAME = "config.json"
 # Keep this directory name for compatibility with existing packaged installs.
 # The name players see. The data folder below keeps its original name so
 # existing settings, caches and soundtrack libraries are found unchanged.
-APP_NAME = "EDOPro Studio"
+APP_NAME = "EDOPal"
 APP_DATA_NAME = "EDOPro HD Sync"
 
 
@@ -403,8 +403,8 @@ def find_edopro_folders(first_guesses: list[str] | None = None) -> list[str]:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="EDOPro HD Cards Downloader",
-        description="Automatically download missing HD card artwork for EDOPro.",
+        prog=APP_NAME,
+        description="Your unofficial companion for EDOPro. Download missing HD card artwork.",
     )
     p.add_argument(
         "--force",
@@ -513,7 +513,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--gui",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help=("Open EDOPro Studio. The packaged app shows it by default; use --no-gui to skip it."),
+        help=(f"Open {APP_NAME}. The packaged app shows it by default; use --no-gui to skip it."),
     )
     p.add_argument(
         "--prune",

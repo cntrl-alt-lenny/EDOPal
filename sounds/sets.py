@@ -12,6 +12,7 @@ from zipfile import ZipFile
 import miniaudio
 
 import extras
+from config import APP_NAME
 
 from .audio import Clip, Credits, decode_clip, load_clip
 from .catalogue import CHANT_TYPES, EVENT_BY_STEM, FORMATS, chant_key, cue_filename, event_for
@@ -22,7 +23,7 @@ _THONK_CREDITS = Credits(
     "Adapted from Kenney's Casino Audio, Interface Sounds and UI Audio. "
     "https://kenney.nl/assets/category:Audio",
 )
-_SYNTH_CREDITS = Credits("Unknown", "Undocumented", "Bundled with EDOPro HD Sync.")
+_SYNTH_CREDITS = Credits("Unknown", "Undocumented", f"Bundled with {APP_NAME}.")
 _PASSCODE_PREFIX = re.compile(r"^[ \t\r\n\v\f]*([+-]?[0-9]+)")
 _ULONG_MAX = 0xFFFFFFFF if sys.platform == "win32" else 0xFFFFFFFFFFFFFFFF
 

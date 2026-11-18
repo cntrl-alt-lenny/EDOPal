@@ -10,7 +10,7 @@ from pytestqt.qtbot import QtBot
 from studio import theme as t
 from studio.shell import StudioWindow
 from studio.tasks import TaskRunner, WorkerContext
-from studio.widgets import ImageTileGrid, SearchField, SwatchButton, Tile
+from studio.widgets import Hero, ImageTileGrid, SearchField, SwatchButton, Tile
 from studio.widgets import tiles as tiles_module
 
 
@@ -80,3 +80,27 @@ def test_keyboard_scope_toggle_and_settings_return(
     assert switch.isChecked() != before
     qtbot.keyClick(window, Qt.Key.Key_Escape)
     assert card.state == "options"
+
+
+def test_compact_hero_restores_page_sizes_and_respects_hidden_subviews(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot
+) -> None:
+    window = make_window()
+    window.resize(1600, 1000)
+    window.navigate("music")
+    qtbot.waitUntil(lambda: window.current.state == "home")
+    hero = window.current.hero
+    normal = hero.minimumHeight(), hero.maximumHeight()
+    window.resize(1280, 800)
+    qtbot.waitUntil(lambda: hero.height() < normal[0])
+    assert hero.headline.isVisible() and hero.description.isVisible()
+    new = Hero("Section", "New view", "Created after the window was resized.")
+    new.setParent(window.current)
+    new.setFixedHeight(240)
+    new.show()
+    assert new.maximumHeight() < 240
+    new.setFixedHeight(260)
+    new.hide()
+    window.resize(1600, 1000)
+    assert new.isHidden() and new.minimumHeight() == new.maximumHeight() == 260
+    assert (hero.minimumHeight(), hero.maximumHeight()) == normal

@@ -90,33 +90,47 @@ class Job(QObject):
     cancelled = Signal()
     finished = Signal()
     _packet = Signal(str, object)
+    _settled = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, owner: QObject | None = None) -> None:
         super().__init__()
         self.cancel_event = threading.Event()
         self.active = True
+        self._deliver_to_ui = True
+        if owner is not None:
+            owner.destroyed.connect(self.abandon)
         self._packet.connect(self._deliver, Qt.ConnectionType.QueuedConnection)
 
     def cancel(self) -> None:
         self.cancel_event.set()
 
+    @Slot()
+    def abandon(self) -> None:
+        """The receiver is gone. Still drain the worker and release it from the pool."""
+        self._deliver_to_ui = False
+        if self.active:
+            self.cancel()
+
     @Slot(str, object)
     def _deliver(self, kind: str, value: object) -> None:
         if kind == "progress":
+            if not self._deliver_to_ui:
+                return
             if isinstance(value, _SyncEvents):
                 for event in value.drain():
-                    self.progress.emit(event)
+                    if self._deliver_to_ui:
+                        self.progress.emit(event)
             else:
                 self.progress.emit(value)
             return
         self.active = False
-        if kind == "error":
-            self.error.emit(value)
-        else:
-            self.result.emit(value)
-        if self.cancel_event.is_set():
+        if self._deliver_to_ui:
+            (self.error if kind == "error" else self.result).emit(value)
+        if self._deliver_to_ui and self.cancel_event.is_set():
             self.cancelled.emit()
-        self.finished.emit()
+        if self._deliver_to_ui:
+            self.finished.emit()
+        self._settled.emit()
 
 
 class _Worker(QRunnable):
@@ -143,16 +157,20 @@ class TaskRunner(QObject):
         self.pool = QThreadPool(self)
         self.jobs: set[Job] = set()
 
-    def start(self, work: Work) -> Job:
-        job = Job()
+    def start(self, work: Work, *, owner: QObject | None = None) -> Job:
+        job = Job(owner)
+        job.setParent(self)
         self.jobs.add(job)
-        job.finished.connect(self._release)
+        job._settled.connect(self._release)
         self.pool.start(_Worker(job, work))
         return job
 
     @Slot()
     def _release(self) -> None:
-        self.jobs.discard(self.sender())
+        job = self.sender()
+        self.jobs.discard(job)
+        # Subscribers can capture widgets. Release their Qt connections on the GUI thread.
+        job.deleteLater()
         if not self.jobs:
             self.idle.emit()
 
@@ -192,3 +210,8 @@ class TaskRunner(QObject):
     def cancel_all(self) -> None:
         for job in self.jobs:
             job.cancel()
+
+    @Slot()
+    def abandon_all(self) -> None:
+        for job in self.jobs:
+            job.abandon()

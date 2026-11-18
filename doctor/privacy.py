@@ -4,6 +4,8 @@ import re
 import sys
 from collections import Counter
 
+from config import APP_NAME
+
 from .model import CATALOGUE, DoctorReport
 
 
@@ -27,8 +29,8 @@ def support_summary(report: DoctorReport) -> str:
         else "Other"
     )
     lines = [
-        "EDOPro Studio installation report",
-        f"Studio {_version(report.studio_version)} | EDOPro {_version(report.game_version)} | {platform}",
+        f"{APP_NAME} installation report",
+        f"{APP_NAME} {_version(report.studio_version)} | EDOPro {_version(report.game_version)} | {platform}",
     ]
     occurrences = Counter(item.id for item in report.findings if item.id in CATALOGUE)
     shown: set[str] = set()

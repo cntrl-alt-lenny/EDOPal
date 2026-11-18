@@ -47,6 +47,7 @@ WIDE_CONTENT, TILE_LARGE, PICKER_ROWS = 1250, 144, 5
 CONTENT_MAX, ROOMY_WIDTH, TALL_HEIGHT = 1920, 1750, 1000
 DEFAULT_SIZE, MIN_SIZE = (1180, 760), (960, 600)
 COMPACT_WIDTH = 1100
+COMPACT_HERO_HEIGHT = 800
 TILE_SIZE = (154, 176)
 THUMB_SIZE = (130, 132)
 MOTION_MS, NOTICE_MS = 150, 6500
@@ -133,6 +134,7 @@ def stylesheet() -> str:
     }}
     QLabel[role="brand"] {{ font-size: {HEADING}px; font-weight: 700; letter-spacing: 0.4px; }}
     QLabel[role="heroTitle"] {{ font-family: "{SERIF}", "DejaVu Serif", serif; font-weight: bold; font-size: {HUGE}px; }}
+    QLabel[role="heroTitle"][compact="true"] {{ font-size: {XXL}px; }}
     QLabel[role="metric"] {{ color: {GOLD}; }}
     QLabel[role="warnMetric"] {{ color: {RED}; }}
     QFrame[role="panel"] {{ background: {PANEL}; border-radius: {R_PANEL}px; }}
