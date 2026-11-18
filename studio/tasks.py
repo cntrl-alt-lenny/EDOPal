@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
 
 from artwork_flow import GuiProgress
 from config import Config
+from studio import gc_guard
 
 
 @dataclass
@@ -157,6 +158,8 @@ class TaskRunner(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        # Worker threads must never run the cyclic collector over Qt objects.
+        gc_guard.install()
         self.pool = QThreadPool(self)
         self.jobs: set[Job] = set()
 
