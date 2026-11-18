@@ -118,6 +118,8 @@ class Installation:
 def read_small(path: Path, limit: int) -> bytes:
     if not path.is_file():
         raise ValueError(f"Expected a regular file: {path}")
+    if path.stat().st_size > limit:
+        raise ValueError(f"File too large: {path}")
     with path.open("rb") as stream:
         data = stream.read(limit + 1)
     if len(data) > limit:

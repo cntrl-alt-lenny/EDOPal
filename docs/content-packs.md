@@ -150,7 +150,7 @@ the small licence file from `assets/appearance/`, which packaging needs
 to retain if it removes the ZIPs.
 
 ```powershell
-$py = 'C:/Users/leona/Dev/edopro-agents/venv/Scripts/python.exe'
+$py = 'python'
 & $py tools/build_content_release.py assets/appearance --preview-root assets/window/gallery --out build/content-proof --draft
 ```
 

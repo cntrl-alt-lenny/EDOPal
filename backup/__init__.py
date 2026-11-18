@@ -4,7 +4,7 @@ from .archive import Entry, Manifest, create, inspect
 from .core import CATEGORIES, DEFAULTS, Cancelled, GameRunning, Installation
 from .inventory import Total, inventory
 from .plan import Difference, Item, Plan, Policy, compare, plan_restore
-from .restore import Transaction, execute, recover, transactions
+from .restore import Transaction, UndoPreview, execute, preview_undo, recover, transactions
 
 __all__ = [
     "CATEGORIES",
@@ -20,12 +20,14 @@ __all__ = [
     "Policy",
     "Total",
     "Transaction",
+    "UndoPreview",
     "compare",
     "create",
     "execute",
     "inspect",
     "inventory",
     "plan_restore",
+    "preview_undo",
     "recover",
     "transactions",
 ]

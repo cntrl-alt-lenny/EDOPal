@@ -8,6 +8,9 @@ import pytest
 
 import backup
 from backup import archive as format_v1
+from backup import plan as planner
+from backup.core import MAX_FILE, Cancel, read_small
+from backup.inventory import Source
 
 
 def write_archive(
@@ -155,3 +158,55 @@ def test_destination_repo_protected(pair: tuple, snapshot: Path) -> None:
     config.write_text('{"repos":[{"repo_path":"./puzzles/a"}]}')
     with pytest.raises(ValueError, match="Managed puzzle"):
         backup.plan_restore(snapshot, dest)
+
+
+def test_oversize_compare_refused_before_read(pair: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    src, dst = pair
+    path = src.target("game/deck/large.ydk")
+    path.parent.mkdir()
+    with path.open("wb") as file:
+        file.truncate(MAX_FILE + 1)
+    monkeypatch.setattr(Source, "open", lambda *_: pytest.fail("Opened oversized payload"))
+    with pytest.raises(ValueError, match="limit"):
+        backup.compare(src, dst)
+
+
+def test_metadata_budget_before_read(snapshot: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    snapshot.write_bytes(b"too large")
+    monkeypatch.setattr(Path, "open", lambda *_: pytest.fail("Opened oversized metadata"))
+    with pytest.raises(ValueError, match="large"):
+        read_small(snapshot, 8)
+
+
+def test_merged_index_exceeds_track_budget(pair: tuple, snapshot: Path) -> None:
+    src, _ = pair
+    folder = src.target("studio/soundtracks")
+    (folder / "local/duel").mkdir(parents=True)
+    (folder / "local/duel/new.ogg").write_bytes(b"track")
+    tracks = [f"local/duel/{i}.ogg" for i in range(format_v1.MAX_FILES)]
+    (folder / "index.json").write_text(json.dumps(tracks))
+    with pytest.raises(ValueError, match="Too many"):
+        backup.create(src, snapshot, ["studio"])
+    assert not snapshot.exists()
+
+
+def test_preview_bounds_existing_files_before_hashing(
+    pair: tuple, snapshot: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src, dst = pair
+    for installation, content in [(src, b"x"), (dst, b"local")]:
+        folder = installation.target("game/deck")
+        folder.mkdir()
+        for name in ("a.ydk", "b.ydk"):
+            (folder / name).write_bytes(content)
+    backup.create(src, snapshot)
+    monkeypatch.setattr(planner, "MAX_TOTAL", 8)
+    original_signature = planner.signature
+
+    def bounded_signature(path: Path, cancel: Cancel) -> str | None:
+        assert path.name != "b.ydk", "Read beyond the cumulative preview budget"
+        return original_signature(path, cancel)
+
+    monkeypatch.setattr(planner, "signature", bounded_signature)
+    with pytest.raises(ValueError, match="limit"):
+        backup.plan_restore(snapshot, dst)
