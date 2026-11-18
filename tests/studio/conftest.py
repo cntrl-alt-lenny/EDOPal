@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 import main
+import tournament_decks
 from config import Config
 from studio import theme
 from studio.context import AppContext, Installation
@@ -25,8 +26,14 @@ def game(tmp_path: Path) -> Config:
 
 
 @pytest.fixture
-def make_window(qapp: QApplication, qtbot: QtBot, game: Config) -> Callable:
+def make_window(qapp: QApplication, qtbot: QtBot, game: Config, monkeypatch) -> Callable:
     theme.apply(qapp)
+
+    def offline(url: str, *, limit: int) -> bytes:
+        raise tournament_decks.DeckError("No Format Library response configured for this test.")
+
+    # Other page tests can navigate through Tournament decks on the way to Cards.
+    monkeypatch.setattr(tournament_decks, "_fetch", offline)
 
     def factory(run: RunCoro | None = None) -> StudioWindow:
         ctx = AppContext(game, main.VERSION, run or DemoSync(), main._apply_gui_choices)

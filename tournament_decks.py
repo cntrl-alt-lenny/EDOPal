@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -330,6 +331,14 @@ def match_local_printings(
     return tuple(sections), changed
 
 
+@dataclass(frozen=True)
+class DeckPublication:
+    path: Path
+    added: bool
+    kept: tuple[Path, ...]
+    digest: str
+
+
 def save_deck(
     game_path: str | Path,
     event: Event,
@@ -338,6 +347,18 @@ def save_deck(
     *,
     goat_versions: bool = False,
 ) -> tuple[Path, bool]:
+    saved = publish_deck(game_path, event, deck, cards, goat_versions=goat_versions)
+    return saved.path, saved.added
+
+
+def publish_deck(
+    game_path: str | Path,
+    event: Event,
+    deck: Deck,
+    cards: tuple[tuple[str, ...], ...],
+    *,
+    goat_versions: bool = False,
+) -> DeckPublication:
     """Publish a complete YDK, preserving personal edits and deduplicating repeat imports."""
     title = _filename(event, deck)
     if goat_versions:
@@ -346,13 +367,21 @@ def save_deck(
     lines = [header]
     for marker, entries in zip(SECTIONS, cards, strict=True):
         lines.extend((marker, *entries))
-    return publish_ydk(game_path, title, ("\n".join(lines) + "\n").encode(), reuse_identical=True)
+    return _publish(game_path, title, ("\n".join(lines) + "\n").encode(), reuse_identical=True)
 
 
 def publish_ydk(
     game_path: str | Path, title: str, content: bytes, *, reuse_identical: bool = False
 ) -> tuple[Path, bool]:
     """Publish a complete copy under a portable filename using exclusive creation."""
+    saved = _publish(game_path, title, content, reuse_identical=reuse_identical)
+    return saved.path, saved.added
+
+
+def _publish(
+    game_path: str | Path, title: str, content: bytes, *, reuse_identical: bool
+) -> DeckPublication:
+    """Create the file without ever replacing one, and report what was kept beside it."""
     if (
         not title.strip(". ")
         or title != title.rstrip(". ")
@@ -370,6 +399,8 @@ def publish_ydk(
     if not folder.is_relative_to(base):
         raise DeckError("The deck folder points outside the selected EDOPro installation.")
     folder.mkdir(exist_ok=True)
+    digest = hashlib.sha256(content).hexdigest()
+    kept: list[Path] = []
     temp = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -398,12 +429,13 @@ def publish_ydk(
                         except OSError:
                             target.unlink(missing_ok=True)
                             raise
-                return target, True
+                return DeckPublication(target, True, tuple(kept), digest)
             except FileExistsError:
                 if reuse_identical and target.is_file() and not target.is_symlink():
                     with contextlib.suppress(OSError), target.open("rb") as original:
                         if original.read(len(content) + 1) == content:
-                            return target, False
+                            return DeckPublication(target, False, tuple(kept), digest)
+                kept.append(target)
         raise DeckError("Too many different copies of this deck are already in the deck folder.")
     finally:
         if temp is not None:
