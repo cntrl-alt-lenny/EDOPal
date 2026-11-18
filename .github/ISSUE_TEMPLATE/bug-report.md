@@ -25,7 +25,7 @@ Describe the problem and what you expected to happen. If you saw an error, inclu
 
 ## Health check support summary
 
-If EDOPal opens, find **Health check**, copy the **support summary** and paste it here. It omits personal details such as paths, filenames and settings. If EDOPal won’t open or the action is unavailable, leave this section blank.
+If EDOPal opens, choose **Health check → Support summary → Copy support summary** and paste it here. It omits personal details such as paths, filenames and settings. If the action is unavailable, leave this section blank.
 
 ## Optional screenshot or public example
 
