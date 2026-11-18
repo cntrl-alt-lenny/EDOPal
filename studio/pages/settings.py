@@ -25,6 +25,7 @@ from studio import theme as t
 from studio.context import AppContext, Installation
 from studio.pages.base import Page
 from studio.pages.card_views import SettingsView, line, page_layout, scroll
+from studio.pages.settings_display import DISPLAY_SECTION, open_display
 from studio.pages.settings_shortcuts import (
     Shortcut,
     change_shortcut,
@@ -39,6 +40,7 @@ from studio.widgets import ActionPage, ActionTile, ElidedLabel, Hero, Panel, lab
 SECTIONS = {
     "games": ("EDOPro folders", f"Choose which copy of EDOPro {config.APP_NAME} uses.", "folder"),
     "defaults": ("HD Cards defaults", "Choose what each artwork sync includes.", "cards"),
+    "display": DISPLAY_SECTION,
     "storage": ("Downloads and storage", "See what uses space and manage your packs.", "download"),
     "updates": ("Updates", "Check for a new release.", "spark"),
     "shortcuts": ("Shortcuts", "Open the portable app from your desktop.", "arrow"),
@@ -188,6 +190,7 @@ class SettingsPage(Page):
         {
             "games": self._games,
             "updates": self._updates,
+            "display": lambda: open_display(self),
             "storage": self._storage,
             "shortcuts": self._shortcuts,
             "about": lambda: add_about(self.ctx, self._panel),
