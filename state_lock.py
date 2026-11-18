@@ -3,7 +3,6 @@
 import contextlib
 import functools
 import os
-import sys
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -52,7 +51,9 @@ def locked(directory: Path, filename: str = ".music.lock"):
     """An OS-owned lock is automatically released if this process exits."""
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / filename).open("a+b") as handle:
-        if sys.platform == "win32":
+        # os.name, not sys.platform: the choice must follow the real OS even when a test
+        # simulates another platform's folder layout.
+        if os.name == "nt":
             import msvcrt
 
             if handle.tell() == 0:
