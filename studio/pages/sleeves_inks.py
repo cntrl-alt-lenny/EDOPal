@@ -1,4 +1,4 @@
-"""Inline ink colours keep the designer in the Studio window."""
+"""Inline ink colors keep the designer in the Studio window."""
 
 from PySide6.QtCore import QSignalBlocker, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
@@ -27,7 +27,7 @@ class Inks(QWidget):
         for i, name in enumerate(("Base", "Shade", "Ink", "Foil")):
             btn = Button(name)
             btn.setCheckable(True)
-            btn.setAccessibleName(f"Adjust {name.lower()} colour")
+            btn.setAccessibleName(f"Adjust {name.lower()} color")
             btn.clicked.connect(
                 lambda checked=False, index=i: self.choose(index if checked else -1, focus=checked)
             )

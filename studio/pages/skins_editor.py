@@ -55,7 +55,7 @@ class ColourMixer(Panel):
             self.body.addLayout(line)
             self.channels.append(slider)
         self.hex = QLineEdit()
-        self.hex.setAccessibleName("Hex colour")
+        self.hex.setAccessibleName("Hex color")
         self.hex.setMaxLength(7)
         self.hex.editingFinished.connect(self._hex)
         self.body.addWidget(self.hex)
@@ -108,7 +108,7 @@ class Maker(QWidget):
         self.name.setMaxLength(64)
         self.name.textChanged.connect(self.changed)
         body.addWidget(self.name)
-        body.addWidget(label("Base colours", "subheading"))
+        body.addWidget(label("Base colors", "subheading"))
         self.swatches: dict[str, Button] = {}
         self.resets: dict[str, Button] = {}
         for key, name in BASE.items():
@@ -127,7 +127,7 @@ class Maker(QWidget):
         adv = QVBoxLayout(self.advanced)
         margins(adv, 0)
         adv.setSpacing(t.SM)
-        adv.addWidget(label("Colour overrides", "subheading"))
+        adv.addWidget(label("Color overrides", "subheading"))
         for key, name in EXTRA.items():
             row = QHBoxLayout()
             row.addWidget(self._swatch(key, name), 1)
@@ -230,7 +230,7 @@ class Maker(QWidget):
             self.update_theme(wallpaper="image", image=digest)
 
     def update_samples(self) -> None:
-        if self.fine.isChecked():
+        if self.fine.isChecked() and self.isVisible():
             for style, button in self.styles.items():
                 sample = themes.wallpaper(
                     replace(self.theme, wallpaper=style, image=None), (96, 60)
@@ -311,7 +311,8 @@ class Maker(QWidget):
                 control.setChecked(on)
         for style, button in self.styles.items():
             button.setText(style.title() + (" ✓" if style == theme.wallpaper else ""))
-        self.samples.start(t.MOTION_MS)
+        if self.fine.isChecked() and self.isVisible():
+            self.samples.start(t.MOTION_MS)
         self._select_wallpaper()
         self.inherit.setText(
             "Use game backgrounds" + (" ✓" if theme.wallpaper == "inherit" else "")

@@ -9,11 +9,11 @@ from content.download import DownloadError, DownloadFailure
 from themes import PRESETS, InstallState, Theme
 from themes.colors import luminance
 
-FILTERS = ("All looks", "Dark", "Light", "Mine", "Downloadable")
+FILTERS = ("All", "Dark", "Light", "My themes", "Downloadable")
 STATE_NAMES = {
     PackState.NOT_DOWNLOADED: "Not downloaded",
     PackState.DOWNLOADING: "Downloading",
-    PackState.DOWNLOADED: "Ready",
+    PackState.DOWNLOADED: "Downloaded",
     PackState.UPDATE_AVAILABLE: "Update available",
     PackState.INCOMPATIBLE: "Needs a newer app",
 }
@@ -61,13 +61,15 @@ class Look:
     @property
     def caption(self) -> str:
         if self.active_pack:
-            return f"Active · {self.availability}"
+            return f"Applied · {self.availability}"
         if self.active:
-            return "Active in game"
+            return "Applied"
         if self.pack:
             return self.availability
         return (
-            "My theme" if self.group == "Mine" else ("Light theme" if self.light else "Dark theme")
+            "My theme"
+            if self.group == "My themes"
+            else ("Light theme" if self.light else "Dark theme")
         )
 
 
@@ -83,7 +85,7 @@ def filter_looks(looks: list[Look], group: str, query: str) -> list[Look]:
         for look in looks
         if query in look.name.casefold()
         and (
-            group == "All looks"
+            group == "All"
             or group == look.group
             or (group in ("Light", "Dark") and not look.pack and look.light == (group == "Light"))
         )
@@ -108,12 +110,12 @@ def pack_availability(skin: PackStatus, shared: PackStatus | None) -> str:
     ):
         if state in (skin.state, shared.state):
             return STATE_NAMES[state]
-    return "Ready"
+    return "Downloaded"
 
 
 def download_message(exc: DownloadError) -> str:
     return {
-        DownloadFailure.NOT_FOUND: "This pack is no longer available. Refresh the pack catalogue.",
+        DownloadFailure.NOT_FOUND: "This pack is no longer available. Refresh the pack catalog.",
         DownloadFailure.DISK_SPACE: "There is not enough free space for this pack. Free some space and retry.",
         DownloadFailure.INTEGRITY: "The downloaded files failed verification. Retry to get a fresh copy.",
         DownloadFailure.TRANSIENT: "The download was interrupted. Retry to continue.",

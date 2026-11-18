@@ -54,6 +54,7 @@ class ArtUnavailable(OSError):
     """Transient network, image or storage problem. The player can retry immediately."""
 
 
+ART_CACHE_BYTES = 128 * 1024**2
 _gate = threading.Lock()
 
 
@@ -78,6 +79,27 @@ class CardArt:
         ensure_gui()
         return await asyncio.to_thread(self._fetch, passcode)
 
+    def _trim(self, keep: Path) -> Path:
+        # Only numeric provider downloads belong to this disposable cache.
+        rows = []
+        for file in self._dir.glob("*.jpg"):
+            if (
+                file.stem.isascii()
+                and file.stem.isdigit()
+                and file.is_file()
+                and not file.is_symlink()
+            ):
+                info = file.stat()
+                rows.append((info.st_mtime_ns, file, info.st_size))
+        total = sum(size for _, _, size in rows)
+        for _, file, size in sorted(rows):
+            if total <= ART_CACHE_BYTES:
+                break
+            if file != keep:
+                file.unlink(missing_ok=True)
+                total -= size
+        return keep
+
     def _fetch(self, passcode: int) -> Path:
         from main import load_failure_cache
 
@@ -89,11 +111,11 @@ class CardArt:
                     and path.stat().st_size <= MAX_BYTES
                     and _valid(read_source(path))
                 ):
-                    return path
+                    return self._trim(path)
                 misses = load_failure_cache(str(self._dir / "missing.json"))
                 if passcode in misses:
                     raise ArtMissing("No cropped art is available for this card.")
-                return asyncio.run(self._request(passcode, path, misses))
+                return self._trim(asyncio.run(self._request(passcode, path, misses)))
         except (OSError, ValueError) as error:
             raise ArtUnavailable("Could not load the artwork. Please try again.") from error
 

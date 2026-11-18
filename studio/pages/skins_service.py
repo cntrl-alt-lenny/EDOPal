@@ -15,11 +15,11 @@ from content import catalogue, download
 from content.cache import PackCache
 from content.manifest import Pack
 from content.media import Media
-from music import settings
 from state_lock import appearance_lock
 from studio import theme as t
-from studio.context import Installation
+from studio.context import AppContext, Installation
 from studio.tasks import WorkerContext
+from themes.library import ThemeIssue
 
 from .skins_model import EMPTY_STATE, PACK_PALETTES, Look, pack_availability, preset_id
 
@@ -36,6 +36,7 @@ class Collection:
     active_name: str
     wallpapers: tuple[Media, ...]
     sleeve_summary: str
+    issues: tuple[ThemeIssue, ...]
 
 
 def sleeve_summary(library: sleeves.Library, game: Path | None) -> str:
@@ -58,15 +59,6 @@ def sleeve_summary(library: sleeves.Library, game: Path | None) -> str:
         return "    ·    ".join(parts)
     except (OSError, ValueError, KeyError):
         return "Could not read assigned sleeves"
-
-
-def ensure_closed(game: Path) -> None:
-    try:
-        running = settings._game_running(game)
-    except OSError as exc:
-        raise OSError("Could not check whether EDOPro is open. Close the game and retry.") from exc
-    if running:
-        raise OSError("EDOPro is running. Close this copy of the game, then choose Retry.")
 
 
 def read_image(path: Path, width: int) -> QImage:
@@ -105,14 +97,16 @@ class SkinStore:
         if game is not None and not game.is_dir():
             game = None
         entries = [(preset_id(p), p, "Preset") for p in themes.PRESETS]
-        saved = self.library.entries()
-        entries.extend((key, value, "Mine") for key, value in saved.items())
+        preset_ids = {uid for uid, _, _ in entries}
+        issues: list[ThemeIssue] = []
+        saved = self.library.entries(issues, reserved=preset_ids)
+        entries.extend((key, value, "My themes") for key, value in saved.items())
         looks = [
             Look(key, value, group, themes.install_state(game, key) if game else EMPTY_STATE)
             for key, value, group in entries
         ]
         if game:
-            for key, value in self.library.removed_entries().items():
+            for key, value in self.library.removed_entries(issues, reserved=preset_ids).items():
                 if key not in saved and (state := themes.install_state(game, key)).folder:
                     looks.append(Look(key, value, "Installed", state))
         statuses = source.list_packs(self.cache, app_version=self.version)
@@ -153,6 +147,7 @@ class SkinStore:
             ),
             self.library.wallpapers(),
             sleeve_summary(sleeves.Library(self.root / "sleeves"), game),
+            tuple(issues),
         )
 
     def backdrop(self, game: Path | None, scene: str) -> QImage | None:
@@ -229,6 +224,8 @@ class SkinStore:
         return themes.render_preview(theme, "menu", (480, 300), image=image, scale_background=scale)
 
     async def download(self, skin: Pack, shared: Pack, worker: WorkerContext) -> None:
+        if max(skin.size_bytes, shared.size_bytes) > extras.MAX_SKIN_ZIP:
+            raise ValueError("The appearance pack exceeds 128 MiB.")
         for pack, name in ((skin, skin.title), (shared, "Shared fonts")):
 
             def progress(value: download.Progress, name: str = name) -> None:
@@ -246,7 +243,7 @@ class SkinStore:
                 "The game folder is no longer ready. Reconnect it or choose another folder."
             )
         with appearance_lock(game):
-            ensure_closed(game)
+            AppContext.require_game_closed(game)
             if action == "sleeves":
                 sleeves.reapply(sleeves.Library(self.root / "sleeves"), game, self.config)
                 return "Your assigned sleeves are back in game."
@@ -275,7 +272,7 @@ class SkinStore:
             extras.apply_appearance(
                 str(game), str(self.config), restore=True, pack_cache=self.cache
             )
-            message = "Restored the look and fonts you used before the skin packs."
+            message = "Restored the appearance from before skin packs. Later changes were kept."
         else:
             assert look
             if action in ("apply", "highlight") and look.pack:
@@ -300,8 +297,8 @@ class SkinStore:
                 }[action](game, look.key)
             message = {
                 "apply": f"{look.name} is set for the next time you start EDOPro.",
-                "highlight": "Turn colours updated for the next time you start EDOPro.",
-                "back": "Your previous look and its fonts are selected again.",
+                "highlight": "Turn colors updated for the next time you start EDOPro.",
+                "back": "Restored the previous skin settings this theme still controlled.",
                 "undo": f"Reversed the last change to {look.name} in the game.",
                 "remove": f"Removed {look.name} from the game.",
             }[action]
