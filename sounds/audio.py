@@ -28,6 +28,9 @@ class Credits:
     attribution: str = ""
 
 
+NO_CREDITS = Credits()
+
+
 @dataclass(frozen=True, slots=True)
 class Clip:
     format: str
@@ -54,7 +57,7 @@ def read_bounded(path: Path, limit: int) -> bytes:
     return data
 
 
-def decode_clip(data: bytes, format: str, credits: Credits = Credits()) -> Clip:
+def decode_clip(data: bytes, format: str, credits: Credits = NO_CREDITS) -> Clip:
     """Verify declared container, metadata and playable samples before accepting bytes."""
     if format not in FORMATS:
         raise ValueError("Choose a WAV, MP3, Ogg Vorbis, or FLAC audio file.")
@@ -92,7 +95,7 @@ def decode_clip(data: bytes, format: str, credits: Credits = Credits()) -> Clip:
     return Clip(format, data, info.duration, hashlib.sha256(data).hexdigest(), credits)
 
 
-def load_clip(path: Path, *, credits: Credits = Credits()) -> Clip:
+def load_clip(path: Path, *, credits: Credits = NO_CREDITS) -> Clip:
     """Copy and validate a player-selected audio file."""
     try:
         return decode_clip(read_bounded(path, MAX_CLIP_BYTES), path.suffix[1:].lower(), credits)
