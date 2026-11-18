@@ -47,7 +47,12 @@ from music.discovery import (
     tracks,
     validate_records,
 )
-from music.settings import _game_running, music_disabled, music_enabled, write_music_enabled
+from music.settings import (
+    _game_running,
+    music_disabled,
+    music_enabled,
+    write_music_enabled,
+)
 from state_lock import locked
 
 __all__ = [

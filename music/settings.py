@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from state_lock import appearance_lock
 
@@ -30,15 +31,43 @@ def music_disabled(game: Path) -> bool:
     return music_enabled(game) is False
 
 
+def _linux_game_running(root: Path, processes: Path) -> bool:
+    for proc in processes.iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            exe = (proc / "exe").readlink()
+        except OSError:
+            # A sandbox may hide the path while still reporting the process name.
+            with contextlib.suppress(OSError):
+                if (proc / "comm").read_bytes().strip().lower() in {
+                    b"edopro",
+                    b"ygopro",
+                    b"edopro.exe",
+                    b"ygopro.exe",
+                }:
+                    return True
+            continue
+        if exe.stem.casefold() in {"edopro", "ygopro"} and exe.resolve().is_relative_to(root):
+            return True
+        if exe.name.startswith("wine"):
+            # Proton may expose the Wine loader as /proc/PID/exe. Its Windows
+            # drive letters cannot reliably be compared with a native game path.
+            with contextlib.suppress(OSError), (proc / "cmdline").open("rb") as stream:
+                for arg in stream.read(8192).split(b"\0"):
+                    if PureWindowsPath(os.fsdecode(arg)).name.lower() in {
+                        "edopro.exe",
+                        "ygopro.exe",
+                    }:
+                        return True
+    return False
+
+
 def _game_running(game: Path) -> bool:
     """Match the executable path so an unrelated portable installation can remain open."""
     root = game.resolve()
     if sys.platform.startswith("linux"):
-        executables = []
-        for proc in Path("/proc").iterdir():
-            if proc.name.isdigit():
-                with contextlib.suppress(OSError):
-                    executables.append((proc / "exe").readlink())
+        return _linux_game_running(root, Path("/proc"))
     else:
         if sys.platform == "win32":
             command = [
@@ -64,7 +93,7 @@ def _game_running(game: Path) -> bool:
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise OSError(
-                "Could not check whether EDOPro is open. Change Music in EDOPro’s audio settings instead."
+                "Could not check whether EDOPro is open. Close the game and try again."
             ) from exc
         executables = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
     return any(
