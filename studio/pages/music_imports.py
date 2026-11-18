@@ -138,17 +138,9 @@ class ImportViews:
             self.tools[name] = tile
         layout.addLayout(grid, 1)
         self.undo_button(layout)
-        layout.addWidget(self.pack_section())
+        packs = action("Get more music", p.packs.open, icon="download")
+        layout.addWidget(packs, 0, Qt.AlignmentFlag.AlignRight)
         self.tools["Add a folder"].setFocus()
-
-    def pack_section(self) -> Panel:
-        """Integration point for the content catalogue's music-pack installer."""
-        panel = Panel(t.LG)
-        panel.body.addWidget(label("Get more music", "subheading"))
-        panel.body.addWidget(
-            label("Downloadable music packs will appear here when available.", "muted", True)
-        )
-        return panel
 
     def new_game(self) -> None:
         p = self.page

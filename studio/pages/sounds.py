@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 import sounds
 from studio import theme as t
-from studio.context import AppContext, Installation
+from studio.context import AppContext, GameOpenError, Installation
 from studio.pages.base import Page
 from studio.pages.card_views import scroll
 from studio.pages.sounds_auditions import SoundAuditions
@@ -20,7 +20,6 @@ from studio.pages.sounds_model import (
     NEW_MIX,
     Downloadable,
     FilesChanged,
-    GameRunning,
     Snapshot,
     Source,
     coverage,
@@ -38,7 +37,7 @@ from studio.pages.sounds_views import (
     empty_layout,
 )
 from studio.tasks import Job
-from studio.widgets import margins
+from studio.widgets import GameClosedBlock, margins
 
 
 class SoundsPage(Page):
@@ -55,7 +54,9 @@ class SoundsPage(Page):
         )
         self.bar = ActionBar()
         self.feedback = Feedback()
-        for bordered in (self.bar, self.feedback):
+        self.closed = GameClosedBlock()
+        self.closed.hide()
+        for bordered in (self.bar, self.feedback, self.closed):
             bordered.setMaximumWidth(t.CONTENT_MAX - 2 * t.XXL)
         self.collections = SoundCollections(self)
         self.state = "overview"
@@ -95,7 +96,11 @@ class SoundsPage(Page):
         self.messages = QHBoxLayout()
         self.messages.setContentsMargins(t.XXL, 0, t.XXL, 0)
         self.messages.addStretch()
-        self.messages.addWidget(self.feedback, 1)
+        notices = QVBoxLayout()
+        notices.setSpacing(t.XS)
+        notices.addWidget(self.feedback)
+        notices.addWidget(self.closed)
+        self.messages.addLayout(notices, 1)
         self.messages.addStretch()
         body.addLayout(self.messages)
         body.addWidget(self.stack, 1)
@@ -125,7 +130,7 @@ class SoundsPage(Page):
             (self.bar.restore, "restore"),
         ):
             button.clicked.connect(partial(self.change_game, action))
-        self.feedback.retry.clicked.connect(self.retry)
+        self.closed.retry.clicked.connect(self.retry)
         self.feedback.dismiss.clicked.connect(self.clear_feedback)
         self.update_controls()
 
@@ -151,6 +156,12 @@ class SoundsPage(Page):
         compact = self.width() < t.COMPACT_WIDTH - t.RAIL_COMPACT
         if self.overview.compact_tools != compact:
             self.overview.place_tools(compact)
+        columns = 1 if compact else max(1, len(self.cards))
+        if self.overview.columns != columns:
+            self.overview.columns = columns
+            add_section(self.overview.cards, self.cards.values(), columns)
+            for col in range(3):
+                self.overview.cards.setColumnStretch(col, int(col < columns))
         self.overview.compact_banner = self.height() < t.TALL_HEIGHT - t.HUGE and (
             self.write_job or self.feedback.isVisible() or (self.snapshot and self.snapshot.undo)
         )
@@ -197,6 +208,7 @@ class SoundsPage(Page):
         self.stop_audio()
         self.clear_feedback()
         self.open_view("overview")
+        self.views["overview"].verticalScrollBar().setValue(0)
         self.show_cards()
         if self.isVisible() and installation.ready:
             self.refresh()
@@ -258,7 +270,14 @@ class SoundsPage(Page):
     def escape(self) -> bool:
         if self.write_job:
             return True
+        if self.closed.isVisible():
+            self.clear_feedback()
+            return True
         if self.state == "event":
+            if self.events.clip_job:
+                self.events.clip_job.cancel()
+                self.events.clip_job = None
+                self.clear_feedback()
             self.events.return_to_event()
         elif self.state == "name":
             self.open_view(self.name_parent)
@@ -279,6 +298,7 @@ class SoundsPage(Page):
 
     def clear_feedback(self) -> None:
         self.retry_action = ""
+        self.closed.hide()
         self.feedback.show_message("")
 
     def retry(self) -> None:
@@ -323,9 +343,7 @@ class SoundsPage(Page):
             for source in self.sources()
             if source.category in ("Installed", "Built in")
         }
-        add_section(self.overview.cards, self.cards.values(), max(1, len(self.cards)))
-        for col in range(3):
-            self.overview.cards.setColumnStretch(col, int(col < len(self.cards)))
+        self.overview.columns = 0
         self.update_controls()
 
     def use_set(self, source: Source) -> None:
@@ -445,12 +463,10 @@ class SoundsPage(Page):
         self.ctx.set_busy(True)
 
         def error(exc: BaseException) -> None:
-            if isinstance(exc, GameRunning) or "Close this EDOPro installation" in str(exc):
+            if isinstance(exc, GameOpenError) or "Close this EDOPro installation" in str(exc):
                 self.retry_action = action
-                self.feedback.show_message(
-                    "Close EDOPro, then choose Retry. Your changes take effect next time you start the game.",
-                    retry=True,
-                )
+                self.feedback.hide()
+                self.closed.show_reason(str(exc))
             elif isinstance(exc, FilesChanged):
                 self.feedback.show_message(
                     "The game’s sounds changed outside the app. Your files were kept. Check the installed sounds before applying again."

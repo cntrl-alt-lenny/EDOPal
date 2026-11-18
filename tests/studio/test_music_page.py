@@ -20,7 +20,7 @@ from studio.context import Installation
 from studio.pages import music as music_page
 from studio.pages.music import MusicPage
 from studio.widgets import Button
-from tools.music_screenshots import recording
+from tools.music_screenshots import recording, seed_music
 
 
 def wait(qtbot: QtBot, page: MusicPage, state: str) -> None:
@@ -373,3 +373,69 @@ def test_cancel_partial_import_reports_every_selected_file(
         release.set()
     wait(qtbot, p, "results")
     assert [r.status for r in imp.results] == ["imported", "cancelled", "cancelled"]
+
+
+def test_scaled_library_loads_on_worker_and_switches_without_rescanning(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    page = window.pages["music"]
+    seed_music(page.game, page.root)
+    read = music_page.read_library
+    entered, release = Event(), Event()
+
+    def delayed(game: Path, root: Path, checkpoint: Callable) -> music_page.Library:
+        assert get_ident() != ui_thread
+        entered.set()
+        release.wait(4)
+        return read(game, root, checkpoint)
+
+    ui_thread = get_ident()
+    monkeypatch.setattr(music_page, "read_library", delayed)
+    window.nav["music"].click()
+    try:
+        qtbot.waitUntil(entered.is_set)
+        assert page.state == "busy" and window.navigate("cards")
+        assert window.navigate("music")
+    finally:
+        release.set()
+    wait(qtbot, page, "home")
+    assert page.toggle_music.mapTo(page, page.toggle_music.rect().topLeft()).y() < page.hero.y()
+    assert len(list(page.root.rglob("*.wav"))) == 84
+    assert len({p.parent.parent for p in page.root.rglob("*.wav")}) == 19
+    assert len(page.data.albums["forbidden"].tracks) == 12
+    assert len(page.data.albums) >= 69
+
+    def unexpected(*args: object) -> None:
+        pytest.fail("Switching a scene or album started a new scan")
+
+    monkeypatch.setattr(music_page, "read_library", unexpected)
+    page.browse.click()
+    page.albums.field.setText("Satellite rendezvous")
+    assert [album.game.id for album in page.albums.grid.albums] == ["tf5"]
+    page.albums.open_game("forbidden")
+    assert page.albums.tracks.rowCount() == 12
+    page.open_scene("duel")
+    assert page.albums.list.rowCount() == 5
+    assert len({page.albums.list.item(i, 1).text() for i in range(5)}) == 5
+
+
+def test_failed_process_check_is_retryable(
+    ready: MusicPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def denied(_: Path) -> bool:
+        raise OSError("Process inspection unavailable")
+
+    p = ready
+    monkeypatch.setattr(settings, "_game_running", denied)
+    p.toggle_music.click()
+    wait(qtbot, p, "error")
+    from studio.widgets import GameClosedBlock
+
+    block = p.scroll.widget().findChild(GameClosedBlock)
+    assert "Could not check" in block.detail.text()
+    assert settings.music_enabled(p.game) is False
+    monkeypatch.setattr(settings, "_game_running", lambda _: False)
+    block.retry.click()
+    wait(qtbot, p, "home")
+    assert settings.music_enabled(p.game)

@@ -2,24 +2,38 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import shutil
 import wave
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
+from zipfile import ZipFile
 
 import miniaudio
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 import main
 import music_import
 import music_library
+from content.cache import PackCache
+from content.catalogue import Catalogue, CatalogueSource
+from content.download import DownloadError, DownloadFailure, Progress, ProgressCallback
+from content.libraries import make_available
+from content.manifest import Manifest, Pack
+from content.media import Changes
 from studio import theme
 from studio.context import AppContext, Installation
+from studio.pages.music import MusicPage
 from studio.shell import StudioWindow
+from studio.widgets import Button, Panel, ProgressBlock
 from tools.studio_screenshots import DemoSync, create_demo, settle
 
 
@@ -58,14 +72,50 @@ def seed_music(game: Path, library: Path) -> None:
         10,
     ):
         recording(library / key / scene / f"{title}.wav", i)
+    # 84 distinct lossless recordings across 19 of the catalogue's games.
+    titles = (
+        "After the gates",
+        "Arena lights",
+        "Blue horizon",
+        "Crossroads",
+        "Dawn patrol",
+        "Evening match",
+        "Final round",
+        "Last train",
+        "North tower",
+        "Quiet streets",
+        "River crossing",
+        "Wild cards",
+    )
+    seeded = ("forbidden", "roses", "wc2011", "tf5", "masterduel")
+    keys = [
+        *seeded,
+        *(
+            key
+            for key in music_library.catalog(root=library)
+            if key not in (*seeded, "local", "dm3")
+        ),
+    ][:19]
+    tone = 42
+    for key in keys:
+        existing = len(list((library / key).rglob("*.wav")))
+        for title in titles[: (12 if key == "forbidden" else 4) - existing]:
+            recording(library / key / "duel" / f"{title}.wav", tone)
+            tone += 1
     conf = game / "config/system.conf"
     conf.parent.mkdir()
     conf.write_text("enable_music = 0\n")
-    music_library.use_game(game, "duel", "forbidden", root=library, all_scenes=True)
-    track = next(
-        row for row in music_library.tracks(game, "duel", root=library) if row.game == "tf5"
-    )
-    music_library.add_to_playlist(game, track, root=library)
+    playlist = []
+    for key, scene, title in (
+        ("forbidden", "duel", "Temple of the sun"),
+        ("roses", "duel", "Lancastrian rose"),
+        ("wc2011", "menu", "City lights"),
+        ("tf5", "duel", "Satellite rendezvous"),
+        ("masterduel", "menu", "Overture"),
+    ):
+        rows = music_library.tracks(game, scene, root=library)
+        playlist.append(next(row for row in rows if (row.game, row.title) == (key, title)))
+    music_library.set_playlist(game, "duel", playlist, root=library)
 
 
 def pause_progress(operation: Callable, at: int, release: Event) -> Callable:
@@ -78,6 +128,157 @@ def pause_progress(operation: Callable, at: int, release: Event) -> Callable:
         return operation(*args, progress=report, **kwargs)
 
     return run
+
+
+def demo_pack(root: Path, kind: str) -> tuple[Pack, Path]:
+    path = root / f"{kind}.zip"
+    if kind == "music":
+        member = "dm3/Night.wav"
+        media = recording(root / "Pack source/Night.wav", 117)
+        item = {"file": member, "scenes": ["deck", "duel"], "title": "Night in the city"}
+    else:
+        member = "dm3/cover.png"
+        media = root / "Alternate cover.png"
+        image = QImage(64, 96, QImage.Format.Format_RGB32)
+        image.fill(QColor(theme.BRONZE))
+        if not image.save(str(media)):
+            raise OSError(f"Could not create {media}")
+        item = {"file": member}
+    with ZipFile(path, "w") as archive:
+        archive.write(media, member)
+        archive.writestr("pack.json", json.dumps({"items": [item]}))
+    title = "City sessions" if kind == "music" else "City sessions cover"
+    pack = Pack(
+        f"city-{kind}",
+        kind,
+        title,
+        "A new recording for Dark Duel Stories."
+        if kind == "music"
+        else "Alternate album artwork for Dark Duel Stories.",
+        "Studio demo",
+        "CC0-1.0",
+        f"{title} by Studio demo.",
+        "https://example.test/studio",
+        "1.0.0",
+        f"https://example.test/{kind}.zip",
+        path.stat().st_size,
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+        (),
+        "5.5.0",
+    )
+    return pack, path
+
+
+def render_packs(p: MusicPage, root: Path, shot: Callable[[str], None]) -> None:
+    packs = p.packs
+    music, archive = demo_pack(root, "music")
+    covers, _ = demo_pack(root, "covers")
+    listing = Catalogue(Manifest(1, ()), CatalogueSource.BUNDLED, "Offline")
+    outcome = "pause"
+    release = {"verifying": Event(), "installing": Event()}
+
+    async def fetch(*args: object, **kwargs: object) -> Catalogue:
+        return listing
+
+    async def transfer(
+        cache: PackCache,
+        pack: Pack,
+        *,
+        progress: ProgressCallback,
+        cancel: Event,
+        **kwargs: object,
+    ) -> Path:
+        progress(Progress(pack.size_bytes // 2, pack.size_bytes, 65536))
+        if outcome == "pause":
+            while not cancel.is_set():
+                await asyncio.sleep(0.01)
+            raise DownloadError(DownloadFailure.CANCELLED, "Download cancelled.")
+        if outcome == "error":
+            raise DownloadError(DownloadFailure.TRANSIENT, "The connection closed.")
+        folder = cache.root / f"pack-{pack.id}"
+        folder.mkdir(parents=True, exist_ok=True)
+        return Path(shutil.copyfile(archive, folder / f"{pack.version}--{pack.sha256}.zip"))
+
+    async def install(*args: object, phase: Callable[[str], None], **kwargs: object) -> Changes:
+        def show(name: str) -> None:
+            phase(name)
+            if name in release:
+                release[name].wait(6)
+
+        return await make_available(*args, phase=show, **kwargs)
+
+    def click(text: str) -> None:
+        next(b for b in p.scroll.widget().findChildren(Button) if b.text() == text).click()
+
+    def idle() -> None:
+        settle(lambda: packs.job is None)
+
+    with (
+        patch("studio.pages.music_packs.fetch_catalogue", fetch),
+        patch("content.libraries.download_pack", transfer),
+        patch("studio.pages.music_packs.make_available", install),
+        patch.object(p.ctx, "confirm", return_value=True),
+    ):
+        click("Get more music")
+        idle()
+        shot("23-pack-catalogue-offline")
+        listing = Catalogue(Manifest(1, ()), CatalogueSource.LIVE)
+        click("Refresh catalogue")
+        idle()
+        shot("24-pack-catalogue-empty")
+        listing = Catalogue(Manifest(1, (music, covers)), CatalogueSource.LIVE)
+        click("Refresh catalogue")
+        idle()
+        shot("25-music-and-cover-packs")
+        click("Download")
+        panel = p.scroll.widget().findChild(Panel, music.id)
+        meter = panel.findChild(ProgressBlock)
+        try:
+            settle(lambda: meter.bar.value() > 0)
+            shot("26-pack-downloading")
+        finally:
+            meter.cancel.click()
+            idle()
+        shot("27-pack-cancelled")
+        outcome = "error"
+        click("Resume")
+        idle()
+        shot("31-pack-error")
+        outcome = "success"
+        click("Retry")
+        meter = packs.progress
+        try:
+            for phase, filename in (
+                ("verifying", "32-pack-verifying"),
+                ("installing", "33-pack-installing"),
+            ):
+                settle(lambda phase=phase: meter.phase.text().lower().startswith(phase))
+                shot(filename)
+                release[phase].set()
+        finally:
+            for gate in release.values():
+                gate.set()
+        idle()
+        shot("28-pack-installed")
+        click("View album")
+        settle(lambda: p.state == "album")
+        shot("29-pack-album")
+        p.escape()
+        idle()
+        listing = Catalogue(
+            Manifest(
+                1, (replace(music, version="2.0.0"), replace(covers, min_app_version="99.0.0"))
+            ),
+            CatalogueSource.LIVE,
+        )
+        click("Refresh catalogue")
+        idle()
+        shot("34-update-and-incompatible")
+        click("Remove pack")
+        idle()
+        shot("30-pack-removed")
+        p.escape()
+        settle(lambda: p.state == "manage")
 
 
 def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
@@ -158,6 +359,7 @@ def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         shot("11-empty-album")
         p.imports.manage()
         shot("12-add-music")
+        render_packs(p, root, shot)
         p.imports.tools["Create a game"].click()
         p.imports.name.setText("Duel night mixtape")
         shot("13-create-game")
@@ -214,6 +416,10 @@ def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         shot("17-no-installation")
         ctx.set_installation(Installation(str(game)))
         shot("18-waiting-for-game")
+        clean = create_demo(root / "Second installation")
+        ctx.set_installation(Installation.inspect(clean.edopro_path))
+        settle(lambda: p.state == "home")
+        shot("35-no-assigned-music")
     finally:
         release.set()
         settle(lambda: not ctx.tasks.jobs)

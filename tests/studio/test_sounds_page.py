@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFileDialog
+from pytestqt.qtbot import QtBot
 
 import sounds
 from content.catalogue import Catalogue, CatalogueSource, PackState, PackStatus
@@ -19,6 +20,7 @@ from content.manifest import Manifest, Pack
 from studio.context import Installation
 from studio.pages import sounds_collections, sounds_model
 from studio.pages.sounds import SoundsPage
+from studio.shell import StudioWindow
 from studio.widgets import Button
 
 
@@ -81,7 +83,6 @@ def sound_window(make_window, game, qtbot, monkeypatch):
     settings.parent.mkdir()
     settings.write_bytes(b"enable_sound = 0\nsound_volume = 0\nsound_backend = miniaudio\n")
     monkeypatch.setattr(sounds, "AuditionPlayer", Player)
-    monkeypatch.setattr(sounds_model, "_game_running", lambda _: False)
     monkeypatch.setattr("music_library._game_running", lambda _: False)
     window = make_window()
     window.nav["sounds"].click()
@@ -194,13 +195,13 @@ def test_apply_retry_busy_drift_undo_and_restore(sound_window, qtbot, monkeypatc
     available[0].click()
     draft = page.draft.assignments["draw"].data
 
-    monkeypatch.setattr(sounds_model, "_game_running", lambda _: True)
+    monkeypatch.setattr("music.settings._game_running", lambda _: True)
     page.bar.apply.click()
     idle(qtbot, page)
-    assert page.feedback.retry.isVisible()
-    assert "Close EDOPro" in page.feedback.copy.text()
+    assert page.closed.retry.isVisible()
+    assert "EDOPro is open" in page.closed.detail.text()
     assert draw.read_bytes() == original
-    monkeypatch.setattr(sounds_model, "_game_running", lambda _: False)
+    monkeypatch.setattr("music.settings._game_running", lambda _: False)
     started, release = threading.Event(), threading.Event()
     real_apply = sounds.apply_set
 
@@ -210,7 +211,7 @@ def test_apply_retry_busy_drift_undo_and_restore(sound_window, qtbot, monkeypatc
         real_apply(*args)
 
     monkeypatch.setattr(sounds, "apply_set", blocking_apply)
-    page.feedback.retry.click()
+    page.closed.retry.click()
     try:
         qtbot.waitUntil(started.is_set)
         assert not window.change.isEnabled()
@@ -397,3 +398,71 @@ def test_offline_catalogue_download_cancel_retry_and_use(sound_window, qtbot, mo
     click_text(card, "Use set")
     assert page.state == "overview"
     assert page.draft.name == "Night duel"
+
+
+def test_mixer_keeps_edit_column_and_stops_replaced_preview(
+    sound_window: tuple[StudioWindow, SoundsPage, Path], qtbot: QtBot
+) -> None:
+    _, page, _ = sound_window
+    page.cards["builtin:Thonk"].use.click()
+    page.open_mixer()
+    first, second, *_, last = page.mixer.rows.values()
+    first.edit.setFocus()
+    qtbot.keyClick(first.edit, Qt.Key.Key_Down)
+    assert QApplication.focusWidget() is second.edit
+    qtbot.keyClick(second.edit, Qt.Key.Key_End)
+    assert QApplication.focusWidget() is last.edit
+    assert page.views["mix"].verticalScrollBar().value() > 0
+    qtbot.keyClick(last.edit, Qt.Key.Key_Home)
+    assert QApplication.focusWidget() is first.edit
+    first.edit.click()
+    click_text(page.picker, "Play")
+    assert page.audio.player.active is not None
+    page.events.fill_picker()
+    assert page.audio.player.active is None
+
+
+@pytest.mark.parametrize("size", [(960, 600), (1280, 800)])
+def test_overview_controls_fit_when_selected(
+    sound_window: tuple[StudioWindow, SoundsPage, Path], qtbot: QtBot, size: tuple[int, int]
+) -> None:
+    window, page, _ = sound_window
+    window.resize(*size)
+    card = page.cards["builtin:Synth"]
+    card.use.click()
+    qtbot.waitUntil(lambda: page.overview.width() <= size[0])
+    for button in (page.overview.downloads, page.overview.chants, card.play, card.use):
+        assert button.width() >= button.sizeHint().width(), button.text()
+    assert page.views["overview"].horizontalScrollBar().maximum() == 0
+
+
+def test_escape_during_clip_read_keeps_event_unchanged(
+    sound_window: tuple[StudioWindow, SoundsPage, Path],
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, page, _ = sound_window
+    file = audio_file(tmp_path / "New.wav")
+    clip = sounds.load_clip(file)
+    entered, release = threading.Event(), threading.Event()
+
+    def read(_: Path) -> sounds.Clip:
+        entered.set()
+        assert release.wait(5)
+        return clip
+
+    monkeypatch.setattr(sounds, "load_clip", read)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_: (str(file), ""))
+    page.open_mixer()
+    page.mixer.rows["summon"].edit.click()
+    page.picker.import_clip.click()
+    try:
+        qtbot.waitUntil(entered.is_set)
+        assert page.escape() and page.state == "mix"
+        assert not page.feedback.isVisible()
+        page.mixer.rows["summon"].edit.click()
+    finally:
+        release.set()
+    idle(qtbot, page)
+    assert page.state == "event" and "summon" not in page.draft.assignments

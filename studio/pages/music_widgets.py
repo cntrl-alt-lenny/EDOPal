@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QModelIndex, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -124,13 +124,15 @@ class SceneButton(Button):
         layout.setSpacing(t.XS)
         line = QHBoxLayout()
         line.addWidget(glyph(symbol))
-        line.addStretch()
-        line.addWidget(label(status, "muted"))
+        line.addWidget(label(title, "subheading", True), 1)
         layout.addLayout(line)
-        layout.addWidget(label(title, "subheading", True))
         self.detail = ElidedLabel()
         self.detail.set_value(detail)
-        layout.addWidget(self.detail)
+        details = QHBoxLayout()
+        details.addWidget(self.detail, 1)
+        if status:
+            details.addWidget(label(status, "muted"))
+        layout.addLayout(details)
         for child in self.findChildren(QWidget):
             child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -190,25 +192,27 @@ class AlbumDelegate(QStyledItemDelegate):
         p.setPen(QPen(QColor(t.GOLD if selected else t.EDGE), t.FOCUS if selected else t.HAIR))
         p.setBrush(QColor(t.ACTIVE if selected else t.PANEL))
         p.drawRoundedRect(rect, t.R_SMALL, t.R_SMALL)
-        sleeve = rect.adjusted(t.SM, t.SM, -t.SM, -t.HUGE - t.SM)
-        pix = index.data(Qt.ItemDataRole.DecorationRole) if album.game.cover_page else None
+        p.setFont(t.font(t.BODY, bold=True))
+        caption_height = p.fontMetrics().lineSpacing() * 3 + t.LG + t.SM
+        sleeve = rect.adjusted(t.SM, t.SM, -t.SM, -caption_height)
+        pix = (
+            index.data(Qt.ItemDataRole.DecorationRole)
+            if album.cover or album.game.cover_page
+            else None
+        )
         paint_sleeve(p, sleeve, album, pix)
         caption = rect.adjusted(t.SM, 0, -t.SM, -t.SM)
         caption.setTop(sleeve.bottom() + t.XS)
         p.setFont(t.font(t.BODY, bold=True))
-        title = p.fontMetrics().elidedText(
-            album.game.title, Qt.TextElideMode.ElideRight, int(caption.width())
-        )
         p.setPen(QColor(t.INK))
-        p.drawText(caption, Qt.AlignmentFlag.AlignTop, title)
+        p.drawText(
+            caption.adjusted(0, 0, 0, -t.LG),
+            Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+            album.game.title,
+        )
         p.setFont(t.font(t.SMALL))
         p.setPen(QColor(t.GOLD if album.tracks else t.MUTED))
-        details = track_count(len(album.tracks)) + "  ·  " + album.game.series
-        p.drawText(
-            caption,
-            Qt.AlignmentFlag.AlignBottom,
-            p.fontMetrics().elidedText(details, Qt.TextElideMode.ElideRight, int(caption.width())),
-        )
+        p.drawText(caption, Qt.AlignmentFlag.AlignBottom, track_count(len(album.tracks)))
         p.restore()
 
 
@@ -220,6 +224,12 @@ class AlbumGrid(ImageTileGrid):
         self.setItemDelegate(AlbumDelegate(self))
         self.setMinimumHeight(t.TILE_SIZE[1] + t.XL)
         self.setStyleSheet(f"QListView {{background:{t.CANVAS};padding:0;border:none;}}")
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        width = max(1, self.viewport().width() - t.HAIR)
+        columns = max(1, width // (t.TILE_SIZE[0] + t.XL))
+        self.setGridSize(QSize(width // columns, t.TILE_SIZE[1] + t.XL))
 
     def populate(self, albums: list[Album]) -> None:
         self.albums = albums
@@ -242,4 +252,4 @@ class AlbumGrid(ImageTileGrid):
 
 
 def cover(album: Album) -> Path:
-    return t.ASSETS / "music/grid" / (album.game.id + ".png")
+    return album.cover or t.ASSETS / "music/grid" / (album.game.id + ".png")

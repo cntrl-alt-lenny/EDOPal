@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import music_library as music
+from content.media import Origin
 from music.catalogue import Game, normalized
-from music.discovery import Track
+from music.discovery import Track, physical_tracks
 from music.importing import ImportItem
-from music.view import LibraryView
+from music.packs import pack_media
 
 SCENES = {
     "menu": ("Main menu", "library"),
@@ -25,6 +26,7 @@ SOURCES = {
     "installed": "Installed in game",
     "parked": "Original game music",
     "personal": "Your library",
+    "pack": "Music pack",
     "bundled": "Bundled music",
 }
 
@@ -63,6 +65,8 @@ class Album:
     game: Game
     tracks: tuple[Track, ...]
     terms: tuple[str, ...]
+    cover: Path | None = None
+    cover_origin: Origin | None = None
 
     @property
     def edition(self) -> str:
@@ -97,26 +101,30 @@ class Library:
 
 
 def read_library(game: Path, root: Path, checkpoint: Callable[[], None]) -> Library:
-    view = LibraryView(game, root=root)
-    view.refresh(checkpoint=checkpoint)
-    grouped: dict[Game, dict[str, Track]] = {}
+    games = music.catalog(root=root)
+    grouped: dict[Game, dict[str, Track]] = {g: {} for g in games.values()}
+    covers = {
+        row.item.game: row
+        for row in pack_media(root)
+        if row.item.role == "cover" and row.path.is_file()
+    }
     titles: dict[str, set[str]] = {}
     scenes = {}
     for scene in SCENES:
+        active = []
         checkpoint()
+        for row in physical_tracks(game, scene, root, games):
+            checkpoint()
+            if row.in_playlist:
+                active.append(row)
+            album = games.get(row.game) or Game(row.game, row.game)
+            recordings = grouped.setdefault(album, {})
+            titles.setdefault(row.game, set()).add(row.title)
+            if row.digest not in recordings or row.source in {"personal", "pack"}:
+                recordings[row.digest] = row
         scenes[scene] = Scene(
-            tuple(music.playlist(game, scene, root=root)),
-            music.can_undo(game, scene),
-            music.can_restore(game, scene),
+            tuple(active), music.can_undo(game, scene), music.can_restore(game, scene)
         )
-        for entry in view.query(scene).games:
-            recordings = grouped.setdefault(entry.game, {})
-            if entry.counts[scene]:
-                for row in view.query(scene, game=entry.game.id).tracks:
-                    titles.setdefault(entry.game.id, set()).add(row.title)
-                    # Keep a stable library source when an identical copy is installed elsewhere.
-                    if row.digest not in recordings or row.source == "personal":
-                        recordings[row.digest] = row
     albums = {}
     for item, recordings in sorted(
         grouped.items(),
@@ -138,7 +146,14 @@ def read_library(game: Path, root: Path, checkpoint: Callable[[], None]) -> Libr
             *item.aliases,
             *titles.get(item.id, ()),
         )
-        albums[item.id] = Album(item, tracks, tuple(term(f) for f in fields))
+        cover = covers.get(item.id)
+        albums[item.id] = Album(
+            item,
+            tracks,
+            tuple(term(f) for f in fields),
+            cover.path if cover else None,
+            cover.origin if cover else None,
+        )
     return Library(albums, scenes, music.music_enabled(game))
 
 
