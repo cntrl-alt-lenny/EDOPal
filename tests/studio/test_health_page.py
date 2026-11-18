@@ -86,6 +86,46 @@ def test_inspect_support_storage_and_navigation(
     assert QApplication.focusWidget() is window.current.toggle_music
 
 
+def test_revisit_reuses_report_until_another_page_changes_the_game(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    game = Path(window.ctx.installation.path)
+    (game / "config").mkdir()
+    (game / "config/system.conf").write_text("enable_music = 0\n", encoding="utf-8")
+    monkeypatch.setattr("doctor.report._game_running", lambda _: False)
+    now = 100.0
+    monkeypatch.setattr(health, "time", lambda: now)
+
+    assert window.navigate("health")
+    page = window.current
+    qtbot.waitUntil(lambda: page.state == "overview" and page.scan_job is None)
+    original = page.report
+    assert any(item.id == "music.disabled" for item in original.findings)
+    fresh_labels = {item.text() for item in page.scroll.widget().findChildren(QLabel)}
+
+    now += 180
+    assert window.navigate("cards") and window.navigate("health")
+    assert page.report is original and page.scan_job is None
+    cached_labels = {item.text() for item in page.scroll.widget().findChildren(QLabel)}
+
+    assert window.navigate("music")
+    music = window.current
+    qtbot.waitUntil(lambda: music.state == "home")
+    music.toggle_music.click()
+    qtbot.waitUntil(lambda: music.state == "home" and music.data.enabled is True)
+
+    assert window.navigate("health")
+    qtbot.waitUntil(lambda: page.state == "overview" and page.scan_job is None)
+    assert page.report is not original
+    assert all(item.id != "music.disabled" for item in page.report.findings)
+    assert "Checked just now" in fresh_labels
+    assert "Checked 3 minutes ago" in cached_labels
+    assert any(
+        item.text() == "Checked just now" for item in page.scroll.widget().findChildren(QLabel)
+    )
+
+
 def test_selection_errors_and_stale_results(
     make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -1,6 +1,7 @@
 from pathlib import Path
+from time import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QGridLayout,
@@ -27,6 +28,7 @@ from studio.pages.health_report import (
     PAGE_NAMES,
     byte_size,
     category_folder,
+    check_age,
     evidence,
     evidence_page,
     groups,
@@ -50,10 +52,12 @@ class HealthPage(ToolPage):
         super().__init__(context)
         self.report: DoctorReport | None = None
         self.storage: StorageBreakdown | None = None
-        self.reports: dict[Path, DoctorReport] = {}
+        self.reports: dict[Path, tuple[DoctorReport, float]] = {}
+        self.write_path: str | None = None
         self.scan_job: Job | None = None
         self.scan_path: Path | None = None
         self.evidence_finding: Finding | None = None
+        context.busy_changed.connect(self._installation_busy)
 
     def shown(self) -> None:
         self.entered = True
@@ -72,12 +76,31 @@ class HealthPage(ToolPage):
             self._show_report()
 
     def _show_report(self) -> None:
-        self.report = self.reports.get(Path(self.ctx.installation.path))
+        cached = self.reports.get(Path(self.ctx.installation.path))
+        self.report = cached[0] if cached is not None else None
         self.storage = None
         if self.report is None:
             self.refresh()
         else:
             self.overview()
+
+    def _installation_busy(self, busy: bool) -> None:
+        selected = self.ctx.installation.path
+        if busy:
+            if self.write_path is None:
+                self.write_path = selected
+            return
+        if self.write_path is None:
+            return
+        # A write may be partial, and HD Cards can adopt a replacement folder during it.
+        affected = {Path(path) for path in (self.write_path, selected) if path}
+        self.write_path = None
+        for path in affected:
+            self.reports.pop(path, None)
+        if self.scan_job is not None and self.scan_path in affected:
+            self.scan_job.cancel()
+        if self.entered and selected:
+            self.refresh()
 
     def refresh(self) -> None:
         self.stop_read()
@@ -109,7 +132,7 @@ class HealthPage(ToolPage):
         if self.scan_job is None or self.scan_job.cancel_event.is_set():
             return
         assert self.scan_path is not None
-        self.reports[self.scan_path] = report
+        self.reports[self.scan_path] = (report, time())
         self.report = report
         self.overview()
 
@@ -157,8 +180,21 @@ class HealthPage(ToolPage):
         self.disk.clicked.connect(self.open_storage)
         self.support = Button("Support summary", "secondary", "library")
         self.support.clicked.connect(self.open_support)
+        age = label("", "muted")
+        _, checked_at = self.reports[Path(self.ctx.installation.path)]
+        timer = QTimer(age)
+        timer.setSingleShot(True)
+
+        def update_age() -> None:
+            elapsed = max(0, int(time() - checked_at))
+            age.setText(check_age(elapsed))
+            timer.start((60 - elapsed % 60) * 1000)
+
+        timer.timeout.connect(update_age)
+        update_age()
         tools.addWidget(self.disk)
         tools.addWidget(self.support)
+        tools.addWidget(age)
         tools.addWidget(self.rerun)
         self.body.addLayout(tools)
         self.disclosures: list[tuple[Finding, Button]] = []
