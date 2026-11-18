@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QSignalBlocker
 from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from shiboken6 import isValid
 
 import themes
 from content.download import DownloadError, DownloadFailure, Progress
@@ -202,7 +203,8 @@ class SkinsPage(Page):
         job = self.ctx.tasks.start(lambda _: self.store.collection(installation, source, online))
 
         def loaded(data: Collection) -> None:
-            if generation != self.generation or not self.entered:
+            # A result can arrive after the window has been torn down.
+            if generation != self.generation or not self.entered or not isValid(self.gallery):
                 return
             self.data = data
             self.gallery.set_collection(data, self.game)

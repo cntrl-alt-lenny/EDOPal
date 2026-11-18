@@ -152,14 +152,17 @@ class Library:
         source: Source | None = None,
         favourites: bool = False,
         recent: bool = False,
+        in_bin: bool = False,
     ) -> list[Entry]:
         """Search name, tags, source or passcode. recent lists applied entries, newest first."""
         with self._store.open() as state:
             terms = query.casefold().split()
+            removed = set(state.bin)
             found = []
             for e in state.entries.values():
                 if (
-                    (source and e.source != source)
+                    (e.id in removed) != in_bin
+                    or (source and e.source != source)
                     or (favourites and not e.favourite)
                     or (recent and not e.last_used)
                 ):
@@ -195,10 +198,22 @@ class Library:
             state.entries[e.id] = e
             return e
 
+    def set_in_bin(self, entry_id: str, in_bin: bool) -> None:
+        """Remove or restore a collection item without losing its print or assignments."""
+        with self._store.transaction() as state:
+            if entry_id not in state.entries:
+                raise KeyError(entry_id)
+            if in_bin and entry_id not in state.bin:
+                state.bin.append(entry_id)
+            elif not in_bin and entry_id in state.bin:
+                state.bin.remove(entry_id)
+
     def delete(self, entry_id: str) -> None:
         """Forget this entry and its assignments. Remove unshared blobs after the manifest commits."""
         with self._store.open(writable=True) as state:
             e = state.entries.pop(entry_id)
+            if entry_id in state.bin:
+                state.bin.remove(entry_id)
             for installs in (state.assignments, state.undo):
                 for slots in installs.values():
                     for slot in [slot for slot, ref in slots.items() if ref == entry_id]:

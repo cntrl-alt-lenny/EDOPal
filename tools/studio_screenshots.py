@@ -34,6 +34,8 @@ from tools.studio_skins_screenshots import render_skins  # noqa: E402
 
 PAGE_RENDERERS = {"decks": render_decks}
 
+PAGE_PROOFS = {"sleeves": "tools.studio_sleeves_shots"}
+
 
 def create_demo(root: Path) -> Config:
     """Create a small, usable CDB and decks. Refuse to overwrite an existing game."""
@@ -181,6 +183,8 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
                 render_skins(window, shot, settle)
             if key == "music":
                 settle(lambda: window.current.state == "home")
+            if key in PAGE_PROOFS:
+                import_module(PAGE_PROOFS[key]).prepare_overview(window)
             shot(f"{number:02}-{key}")
         window.navigate("cards")
         fake.release.clear()
@@ -223,6 +227,7 @@ def parse_size(raw: str) -> tuple[int, int]:
 STANDALONE_RENDERERS = {
     "mydecks": ("tools.studio_screenshots_mydecks", "render"),
     "music": ("tools.music_screenshots", "render_music"),
+    "sleeves": ("tools.studio_sleeves_shots", "render"),
 }
 
 
