@@ -2,12 +2,28 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from time import perf_counter_ns
 from zipfile import ZipFile
 
 import pytest
 
+import config
 import extras
 from tools import release
+
+
+@pytest.mark.parametrize(
+    ("platform", "program"),
+    [("Windows", "EDOPal.exe"), ("macOS", "EDOPal.app"), ("Linux", "./EDOPal")],
+)
+def test_shipped_readme_names_program_and_existing_data_location(
+    platform: str, program: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(release, "PLATFORM", platform)
+    instructions = release.readme()
+    assert instructions.splitlines()[0] == f"{config.APP_NAME} for {platform}"
+    assert program in instructions and config.APP_DATA_NAME in instructions
+    assert "@APP_" not in instructions
 
 
 @pytest.mark.parametrize(
@@ -64,6 +80,7 @@ with patch.object(StudioWindow, "_startup", side_effect=AssertionError("online s
 """.replace("if MISSING:", f"if {missing_assets}:")
     game = tmp_path / "ProjectIgnis"
     game.mkdir()
+    started = perf_counter_ns()
     result = subprocess.run(
         [
             sys.executable,
@@ -82,6 +99,9 @@ with patch.object(StudioWindow, "_startup", side_effect=AssertionError("online s
     )
     assert result.returncode == int(missing_assets), (result.stdout, result.stderr)
     assert b"Qt platform: offscreen" in result.stdout
+    marker = b"First visible window perf_counter_ns="
+    stamp = next(line for line in result.stdout.splitlines() if line.startswith(marker))
+    assert started < int(stamp.removeprefix(marker)) <= perf_counter_ns()
     if missing_assets:
         assert b"Could not decode app-icon.png" in result.stderr
     else:

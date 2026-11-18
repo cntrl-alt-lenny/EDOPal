@@ -24,6 +24,7 @@ from studio.context import Installation
 from studio.pages.skins import SkinsPage
 from studio.pages.skins_model import Look, filter_looks, preset_id, surprise
 from studio.shell import StudioWindow
+from themes import PRESETS
 from themes.transaction import Store
 from tools.studio_skins_screenshots import sample_pack
 
@@ -34,7 +35,7 @@ def page(
 ) -> Iterator[SkinsPage]:
     window = make_window()
     monkeypatch.setattr(settings, "_game_running", lambda _: False)
-    monkeypatch.setattr(window, "confirm", lambda *_: True)
+    monkeypatch.setattr(window.pages["skins"], "confirm", lambda *_: True)
     window.nav["skins"].click()
     page = window.current
     qtbot.waitUntil(lambda: page.data is not None)
@@ -62,8 +63,8 @@ def test_model_filters_and_palette_only_surprise() -> None:
     looks = [Look(preset_id(p), p, "Preset") for p in themes.PRESETS]
     light = filter_looks(looks, "Light", "")
     dark = filter_looks(looks, "Dark", "")
-    assert light and dark and len(light) + len(dark) == 16
-    assert filter_looks(light, "All looks", "  pOrCeLaIn ")[0].name == "Porcelain Blue"
+    assert light and dark and len(light) + len(dark) == len(PRESETS)
+    assert filter_looks(light, "All", "  pOrCeLaIn ")[0].name == "Porcelain Blue"
     original = replace(themes.PRESETS[0], text="#123456", depth=99)
     changed = surprise(original)
     assert original.accent != changed.accent
@@ -100,16 +101,21 @@ def test_invalid_catalogue_keeps_local_looks(
     page: SkinsPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        catalogue, "fetch_catalogue", AsyncMock(side_effect=ValueError("Invalid catalogue URL"))
+        catalogue, "fetch_catalogue", AsyncMock(side_effect=ValueError("Invalid catalog URL"))
     )
     page.gallery.refresh.click()
-    qtbot.waitUntil(lambda: "Invalid catalogue URL" in page.gallery.info.text())
-    assert page.gallery.grid.model().rowCount() == 16
+    qtbot.waitUntil(
+        lambda: (
+            "Offline catalog" in page.gallery.info.text()
+            and "Invalid catalog URL" in page.gallery.info.toolTip()
+        )
+    )
+    assert page.gallery.grid.model().rowCount() == len(PRESETS)
 
 
 def test_gallery_keyboard_empty_and_game_changes(page: SkinsPage, qtbot: QtBot) -> None:
-    assert page.gallery.grid.model().rowCount() == 16
-    page.gallery.filters.buttons["Mine"].click()
+    assert page.gallery.grid.model().rowCount() == len(PRESETS)
+    page.gallery.filters.buttons["My themes"].click()
     assert page.gallery.empty.isVisible()
     page.gallery.filters.buttons["Light"].click()
     select(page, qtbot, "Porcelain Blue")
@@ -124,12 +130,12 @@ def test_gallery_keyboard_empty_and_game_changes(page: SkinsPage, qtbot: QtBot) 
     game = page.game
     page.ctx.set_installation(Installation())
     qtbot.waitUntil(lambda: page.data is not None)
-    assert "Choose a game folder" in page.install_hint.text()
+    assert "Choose your EDOPro folder" in page.install_hint.text()
     select(page, qtbot, "Porcelain Blue")
     assert not page.view.inspector.apply.isEnabled()
     page.ctx.set_installation(Installation(str(game)))
     qtbot.waitUntil(lambda: page.data is not None)
-    assert "Open EDOPro once" in page.install_hint.text()
+    assert "Finish setting up EDOPro" in page.install_hint.text()
     select(page, qtbot, "Porcelain Blue")
     assert not page.view.inspector.apply.isEnabled()
 
@@ -142,7 +148,7 @@ def test_maker_edit_and_share(
     page.view.inspector.edit.click()
     ui.surprise.click()
     assert page.dirty
-    monkeypatch.setattr(page.ctx, "confirm", lambda *_: False)
+    monkeypatch.setattr(page, "confirm", lambda *_: False)
     assert not page.ctx.navigate("music")
     page.view.back.click()
     assert page.mode == "maker" and "UNSAVED" in page.view.kicker.text()
@@ -169,6 +175,7 @@ def test_maker_edit_and_share(
     ui.name.setText("My photo")
     ui.save_btn.click()
     saved(page, qtbot, "My photo")
+    assert page.message.text() == "Theme saved in My themes."
     original = page.look
     assert original.theme.image and original.theme.font == "inter" and original.theme.depth == 73
     assert original.theme.roundness == 2 and not original.theme.highlight_turn
@@ -198,7 +205,7 @@ def test_maker_edit_and_share(
     saved(page, qtbot, "Platinum")
     imported = page.look
     assert imported.key != photo_theme.key and imported.theme == photo_theme.theme
-    monkeypatch.setattr(page.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr(page, "confirm", lambda *_: True)
     inspector.tools["Delete"].click()
     qtbot.waitUntil(lambda: page.retry_button.text() == "Undo delete" and page.mode == "gallery")
     assert imported.key not in page.store.library.entries()
@@ -222,7 +229,7 @@ def test_install_retry_sleeves_and_three_recoveries(
     assert not info.back.isVisible() and not info.remove.isVisible() and not info.undo.isVisible()
     monkeypatch.setattr(settings, "_game_running", lambda _: True)
     info.apply.click()
-    qtbot.waitUntil(lambda: "EDOPro is running" in page.message.text() and page.job is None)
+    qtbot.waitUntil(lambda: "Close EDOPro to continue" in page.message.text() and page.job is None)
     assert extras.current_skin(str(game)) == "Old"
 
     main_thread = get_ident()
@@ -268,7 +275,7 @@ def test_recover_on_entry(page: SkinsPage, qtbot: QtBot, monkeypatch: pytest.Mon
     assert themes.install_state(game, key).recovery_pending
     monkeypatch.setattr(settings, "_game_running", lambda _: True)
     assert page.ctx.navigate("skins")
-    qtbot.waitUntil(lambda: "EDOPro is running" in page.message.text())
+    qtbot.waitUntil(lambda: "Close EDOPro to continue" in page.message.text())
     assert themes.install_state(game, key).recovery_pending
     monkeypatch.setattr(settings, "_game_running", lambda _: False)
     page.retry_button.click()
@@ -293,10 +300,12 @@ def test_import_and_collection_errors_stay_recoverable(
             page.store.library, "entries", Mock(side_effect=OSError("Storage unavailable"))
         )
         page.reload()
-        qtbot.waitUntil(lambda: "Storage unavailable" in page.message.text())
+        qtbot.waitUntil(
+            lambda: "Storage unavailable" in page.details.toolTip() and page.details.isVisible()
+        )
     page.retry_button.click()
     qtbot.waitUntil(lambda: page.gallery.refresh.isEnabled())
-    assert len(page.data.looks) == 16
+    assert len(page.data.looks) == len(PRESETS)
 
 
 def test_pack_download_cancel_resume_apply_highlight_restore(
@@ -356,7 +365,7 @@ def test_pack_download_cancel_resume_apply_highlight_restore(
     qtbot.waitUntil(lambda: page.gallery.grid.model().rowCount() == 1)
     select(page, qtbot, "Moon")
     info = page.view.inspector
-    assert "Licence" in info.description.text()
+    assert "License" in info.description.text()
     assert info.apply.text() == "Download skin"
     info.highlight.click()
     info.apply.click()
@@ -366,7 +375,7 @@ def test_pack_download_cancel_resume_apply_highlight_restore(
     qtbot.waitUntil(lambda: page.retry_button.text() == "Resume" and not page.job)
     hold = False
     page.retry_button.click()
-    qtbot.waitUntil(lambda: page.look.availability == "Ready")
+    qtbot.waitUntil(lambda: page.look.availability == "Downloaded")
     assert info.highlight.isChecked()
     info.apply.click()
     qtbot.waitUntil(lambda: page.look.active)
@@ -416,7 +425,7 @@ def test_dirty_maker_survives_every_exit_and_async_folder_change(
     page.gallery.create.click()
     page.maker.name.setText("Keep this draft")
     confirm = Mock(return_value=False)
-    monkeypatch.setattr(page.ctx, "confirm", confirm)
+    monkeypatch.setattr(page, "confirm", confirm)
     for leave in (
         page.view.back.click,
         lambda: qtbot.keyClick(page.maker.name, Qt.Key.Key_Escape),
@@ -526,7 +535,7 @@ def test_missing_game_and_unreadable_sleeves_leave_the_gallery_usable(
     monkeypatch.setattr(sleeves, "status", Mock(side_effect=ValueError("Unreadable library")))
     page.reload()
     qtbot.waitUntil(lambda: "Could not read assigned sleeves" in page.gallery.info.text())
-    assert len(page.data.looks) == 16
+    assert len(page.data.looks) == len(PRESETS)
     missing = tmp_path / "Disconnected game"
     page.ctx.set_installation(Installation(str(missing), True))
     qtbot.waitUntil(lambda: page.data is not None)
@@ -534,3 +543,94 @@ def test_missing_game_and_unreadable_sleeves_leave_the_gallery_usable(
     page.view.inspector.apply.click()
     qtbot.waitUntil(lambda: page.retry_button.isVisible() and not page.job)
     assert "no longer ready" in page.message.text() and not missing.exists()
+
+
+def test_unreadable_entries_leave_valid_themes_visible(page: SkinsPage, qtbot: QtBot) -> None:
+    lib = page.store.library
+    key = lib.save(themes.PRESETS[0])
+    invalid = lib.directory / (key + " (incoming).json")
+    invalid.write_bytes(b"invalid")
+    assert key in lib.entries()
+    page.reload()
+    qtbot.waitUntil(lambda: invalid.name in page.message.text())
+    assert key in {v.key for v in page.data.looks}
+    assert page.retry_button.text() == "Set aside file"
+    page.retry_button.click()
+    qtbot.waitUntil(lambda: not invalid.exists() and not page.job)
+    assert any(f.read_bytes() == b"invalid" for f in (lib.directory / "quarantine").iterdir())
+
+
+def test_removed_recipe_cannot_duplicate_an_installed_preset(page: SkinsPage, qtbot: QtBot) -> None:
+    preset = page.data.looks[0]
+    themes.install_theme(page.game, preset.key, preset.theme)
+    page.store.library.save(preset.theme, preset.key)
+    page.store.library.delete(preset.key)
+    page.reload()
+    qtbot.waitUntil(page.gallery.refresh.isEnabled)
+    assert sum(look.key == preset.key for look in page.data.looks) == 1
+    assert any(issue.filename == f"removed/{preset.key}.json" for issue in page.data.issues)
+
+
+def test_appearance_pages_start_light(
+    make_window: Callable[..., StudioWindow],
+    qtbot: QtBot,
+) -> None:
+    from PySide6.QtWidgets import QWidget
+
+    window = make_window()
+    for section in ("skins", "sleeves"):
+        page = window.pages[section]
+        assert len(page.findChildren(QWidget)) < 10
+
+
+@pytest.mark.parametrize("section", ("skins", "sleeves"))
+def test_filter_reuses_thumbnail(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot, section: str
+) -> None:
+    window = make_window()
+    page = window.pages[section]
+    window.navigate(section)
+    gallery = page.gallery
+    grid = gallery.grid
+    qtbot.waitUntil(lambda: bool(grid.tiles.cache), timeout=8000)
+    key, pix = next(iter(grid.tiles.cache.items()))
+    row = next(i for i, v in enumerate(grid.tiles.items) if v.path == key)
+    gallery.search.setText(grid.tiles.items[row].title)
+    assert grid.tiles.cache[key].cacheKey() == pix.cacheKey()
+    assert grid.model().index(0, 0).data(Qt.ItemDataRole.DecorationRole) is not None
+    window.navigate("cards")
+
+
+def test_gallery_glossary(page: SkinsPage) -> None:
+    assert page.gallery.create.text() == "Create theme"
+    assert page.gallery.search.placeholderText() == "Search skins and themes"
+    assert "My themes" in page.gallery.filters.buttons
+
+
+def test_pack_budget_precedes_network(page: SkinsPage, monkeypatch: pytest.MonkeyPatch) -> None:
+    from studio.tasks import WorkerContext
+
+    pack = replace(sample_pack("Moon"), size_bytes=2**30)
+    transfer = AsyncMock()
+    monkeypatch.setattr(download, "download_pack", transfer)
+    with pytest.raises(ValueError):
+        asyncio.run(
+            page.store.download(pack, sample_pack("Shared"), WorkerContext(Event(), lambda _: None))
+        )
+    transfer.assert_not_awaited()
+
+
+def test_stale_theme_editor_preserves_other_instance(page: SkinsPage, qtbot: QtBot) -> None:
+    lib = page.store.library
+    key = lib.save(replace(themes.PRESETS[0], name="Shared theme"))
+    page.reload(select=key)
+    qtbot.waitUntil(lambda: page.mode == "detail" and page.look.key == key)
+    page.view.inspector.edit.click()
+    other = themes.ThemeLibrary(lib.directory)
+    published = replace(other.load(key), name="Saved elsewhere")
+    other.save(published, key)
+    page.maker.name.setText("My draft")
+    page.maker.save_btn.click()
+    qtbot.waitUntil(lambda: not page.job)
+    assert lib.load(key) == published
+    assert page.mode == "maker" and page.maker.name.text() == "My draft"

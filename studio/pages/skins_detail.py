@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import config
 import extras
 import themes
 from studio import theme as t
@@ -48,10 +47,10 @@ class Inspector(Panel):
         self.source = ElidedLabel()
         self.hint = label("", "muted", True)
         self.highlight = ToggleSwitch(
-            "Highlight the turn player", "Emphasise the active life bar.", False
+            "Highlight the turn player", "Emphasize the active life bar.", False
         )
-        self.apply = Button("Apply to game", "primary", "check")
-        self.edit = Button("Customise", "secondary", "settings")
+        self.apply = Button("Apply theme", "primary", "check")
+        self.edit = Button("Customize theme", "secondary", "settings")
         for item in (
             self.kind,
             self.sample,
@@ -61,20 +60,19 @@ class Inspector(Panel):
             self.highlight,
             self.hint,
             self.edit,
-            self.apply,
         ):
             self.body.addWidget(item)
         self.history = label("Game changes", "subheading")
-        self.back = Button("Go back to my previous look")
-        self.undo = Button("Undo the last game edit")
-        self.remove = Button("Remove this theme from game")
-        self.restore = Button("Restore look from before packs")
+        self.back = Button("Restore previous skin")
+        self.undo = Button("Undo last theme change")
+        self.remove = Button("Remove theme from EDOPro")
+        self.restore = Button("Restore appearance from before skin packs")
         for item in (self.history, self.back, self.undo, self.remove, self.restore):
             self.body.addWidget(item)
         self.manage = QWidget()
         grid = QGridLayout(self.manage)
         grid.setContentsMargins(0, t.SM, 0, 0)
-        grid.addWidget(label("My library", "subheading"), 0, 0, 1, 2)
+        grid.addWidget(label("My themes", "subheading"), 0, 0, 1, 2)
         self.tools = {}
         for i, name in enumerate(("Rename", "Duplicate", "Export", "Delete")):
             btn = Button(name)
@@ -88,20 +86,20 @@ class Inspector(Panel):
         generated = not pack and not look.state.folder and look.theme.wallpaper in themes.STYLES
         self.sample.setVisible(generated)
         if generated:
-            self.sample.setFixedHeight(t.HUGE if look.group == "Mine" else t.TILE_H)
+            self.sample.setFixedHeight(t.HUGE if look.group == "My themes" else t.TILE_H)
             self.sample.setPixmap(QPixmap.fromImage(themes.wallpaper(look.theme, (480, 100))))
         self.kind.setText(
             "DOWNLOADABLE SKIN"
             if pack
-            else "MY LIBRARY"
-            if look.group == "Mine"
+            else "MY THEMES"
+            if look.group == "My themes"
             else "INSTALLED IN THIS GAME"
             if look.group == "Installed"
             else "BUILT-IN THEME"
         )
         if pack:
             self.description.setText(
-                f"{pack.description}\n\nBy {pack.author}\nLicence · {pack.license}\n\n{pack.attribution}"
+                f"{pack.description}\n\nBy {pack.author}\nLicense · {pack.license}\n\n{pack.attribution}"
             )
             self.source.set_value(pack.source_url)
             self.hint.setText(f"{look.availability} · Version {pack.version}")
@@ -124,10 +122,9 @@ class Inspector(Panel):
             ):
                 value.setText(text)
             self.hint.setText(
-                "Active in this game."
+                "Applied to EDOPro."
                 if look.active
-                else f"Generated themes are new in {config.APP_NAME}. After applying, "
-                "“Go back to my previous look” is one click away."
+                else "Save an editable theme or apply it to EDOPro."
             )
         self.source.setVisible(bool(pack))
         self.highlight.setVisible(bool(pack and look.name in extras.SKINS))
@@ -135,19 +132,23 @@ class Inspector(Panel):
         self.apply.setText(
             ("Download update" if look.availability == "Update available" else "Download skin")
             if download
-            else "Apply to game"
+            else "Apply skin"
+            if pack
+            else "Apply theme"
         )
-        self.apply.setEnabled(download or (ready and (not pack or look.availability == "Ready")))
-        self.manage.setVisible(look.group == "Mine")
+        self.apply.setEnabled(
+            download or (ready and (not pack or look.availability == "Downloaded"))
+        )
+        self.manage.setVisible(look.group == "My themes")
         self.back.setVisible(look.state.active)
         self.undo.setVisible(look.state.can_undo)
         self.undo.setText(
-            "Undo the first installation"
+            "Undo last theme change"
             if look.state.undo_removes_install
-            else "Undo the last game edit"
+            else "Undo last theme change"
         )
         self.undo.setToolTip(
-            "Put back the look used before this theme was installed."
+            "Put back the skin used before this theme was installed."
             if look.state.undo_removes_install
             else "Put back the last installed version of this theme."
         )
@@ -166,8 +167,8 @@ class Workspace(QWidget):
         margins(body, 0)
         body.setSpacing(t.MD)
         top = QHBoxLayout()
-        self.back = Button("Gallery", "quiet", "back")
-        self.kicker = label("LOOK PREVIEW", "goldKicker")
+        self.back = Button("Back", "quiet", "back")
+        self.kicker = label("SKIN PREVIEW", "goldKicker")
         top.addWidget(self.back)
         top.addStretch()
         top.addWidget(self.kicker)
@@ -209,9 +210,14 @@ class Workspace(QWidget):
             stack.addWidget(item)
         stack.addStretch()
         self.scroll.setWidget(side)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(self.inspector.apply)
+        body.addLayout(actions)
         self.show_panel(self.inspector)
 
     def show_panel(self, panel: QWidget) -> None:
         for item in self.panels:
             item.setVisible(item is panel)
+        self.inspector.apply.setVisible(panel is self.inspector)
         self.scroll.verticalScrollBar().setValue(0)

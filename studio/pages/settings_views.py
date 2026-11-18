@@ -43,8 +43,8 @@ def add_about(ctx: AppContext, panel_for: Callable[[str], Panel]) -> None:
     panel.body.addLayout(brand)
     panel.body.addWidget(
         label(
-            "EDOPal is an independent fan-made companion for EDOPro. EDOPro is a Project Ignis project. "
-            "EDOPal is unaffiliated with Project Ignis, Konami, and Shueisha and has no endorsement from them. "
+            f"{config.APP_NAME} is an independent fan-made companion for EDOPro. EDOPro is a Project Ignis project. "
+            f"{config.APP_NAME} is unaffiliated with Project Ignis, Konami, and Shueisha and has no endorsement from them. "
             "Yu-Gi-Oh! and related marks belong to their respective rights holders.",
             "body",
             True,

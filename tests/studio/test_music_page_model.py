@@ -81,3 +81,14 @@ def test_undo_keeps_changed_files_and_other_recordings(tmp_path: Path) -> None:
     audio.undo()
     receipt.undo()
     assert added.id not in engine.catalog(root=root)
+
+
+def test_pack_sizes_use_the_same_units_for_cards_and_progress() -> None:
+    from studio.pages.music_sounds_controls import pack_size
+
+    assert [pack_size(size) for size in (0, 750, 1_250_000, 1_300_000_000)] == [
+        "0.0 KB",
+        "0.8 KB",
+        "1.2 MB",
+        "1.3 GB",
+    ]

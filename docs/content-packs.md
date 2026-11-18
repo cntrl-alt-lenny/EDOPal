@@ -210,10 +210,10 @@ and title `Grid` in `packs.json`. The existing skin format also accepts the
 bounded `duplicates.json` alias map. The reserved `shared` dependency carries
 the Inter fonts and legacy sound and sleeve assets.
 
-**Sound effects** are reserved for the separate sound engine. A regular
-`sound-effects` entry has no installable layout yet. Keep proposed sound packs
-withheld and outside the staged release until that handler lands. The existing
-`shared` archive is the only supported exception.
+The Sounds page can download and read a regular `sound-effects` pack using
+the [sound-set format](sounds.md#sound-effects-pack-format). The staging tool
+currently rejects this kind except for the reserved `shared` appearance
+dependency. Regular sound packs therefore need a separate publishing route.
 
 ```powershell
 & $py tools/build_content_release.py my-release --out reviewed-draft --draft
@@ -247,8 +247,9 @@ from content.libraries import installed_origins, make_available, remove_pack
 cache = PackCache.for_config(cfg)
 # status comes from Catalogue.list_packs(...), version is the running app version.
 cancel = Event()
-changes = await make_available(cache, status, app_version=version,
-                               progress=on_bytes, phase=on_phase, cancel=cancel)
+changes = await make_available(
+    cache, status, app_version=version, progress=on_bytes, phase=on_phase, cancel=cancel
+)
 # A separate Remove action on a worker:
 changes = remove_pack(cache, status)
 ```
@@ -265,7 +266,7 @@ library detail view read those same fields plus `id`, `version` and archive
 | Wallpaper | Run `make_available`. Enumerate `ThemeLibrary(theme_root).wallpapers()`. Select with `replace(theme, wallpaper="image", image=row.digest)` and use the existing theme preview and save APIs. A saved theme retains its photo after pack removal. |
 | Sleeves | Run `make_available`. Read `sleeves.Library(sleeve_root).entries()` for named, tagged and credited entries. Pass a selected entry ID to `sleeves.apply` when the player chooses a slot. |
 | Skin | Run `make_available` for the selected skin and its legacy `shared` dependency. This makes the verified archives available in the cache. Then use the existing explicit Apply/Restore calls described above for the selected installation. |
-| Sound effects | Show **Installation unavailable**. The reserved `shared` dependency uses the skin flow. |
+| Sound effects | The Sounds page uses its own [download flow](../studio/pages/sounds_collections.py) to verify an archive and read a sound set. Applying cues is a separate action. The reserved `shared` dependency uses the skin flow. |
 
 The three library roots above are `cache.root.parent / "soundtracks"`,
 `"themes"` and `"sleeves"` respectively, all siblings of `packs/`.

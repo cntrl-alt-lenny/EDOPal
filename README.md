@@ -6,9 +6,7 @@ Sync HD card art, customize your game, and manage decks and replays in one resiz
 
 **[Download EDOPal](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest)** · [Screenshot gallery](docs/gallery.md) · [Documentation](docs/index.md)
 
-<!-- Hero screenshot placeholder: docs/screenshots/edopal-overview.png
-Show the EDOPal sidebar, selected demo installation and HD Cards with My decks selected.
-Render the remaining shots in the order listed in docs/gallery.md. -->
+![EDOPal showing HD Cards with My decks selected and all sidebar sections visible](docs/screenshots/edopal-overview.png)
 
 ## Download and first run
 
@@ -21,30 +19,31 @@ You’ll need an existing [EDOPro installation](https://projectignis.github.io/)
 | Linux x86-64 | `EDOPal-Linux-v<VERSION>.zip` | Open `EDOPal` from your file manager, or run `./EDOPal` in the extracted folder. The build targets glibc 2.35 or newer. |
 | Steam Deck | The Linux ZIP | Choose **Steam → Power → Switch to Desktop**, then extract and open the Linux app. Game Mode is untested. [Valve’s Desktop Mode guide](https://help.steampowered.com/en/faqs/view/671A-4453-E8D2-323C) |
 
-EDOPal runs directly from the extracted app. Windows and Linux include a short ReadMe. The macOS ZIP contains one Finder app.
+EDOPal runs directly from the extracted app. Windows and Linux include a ReadMe beside the executable. On macOS the ReadMe is inside the app bundle.
 
 - **Windows SmartScreen** may warn about an unfamiliar download. If you trust the copy you downloaded from this project’s Releases page and Windows offers the option, choose **More info → Run anyway**. [Microsoft’s SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
 - **macOS Gatekeeper** may block the first launch. If the warning is about an unidentified developer and you trust the download, try opening the app once, then choose **System Settings → Privacy & Security → Open Anyway** if offered. [Apple’s Gatekeeper guidance](https://support.apple.com/en-us/102445)
 - **Linux or Steam Deck** may need the execute permission restored after extraction. Run `chmod +x EDOPal` in the extracted folder, then run `./EDOPal`.
 
-Check the game folder at the top of the window. Use **Change folder** if you have a different copy. In **HD Cards**, choose **My decks** to start with the cards you play, or **Full library** to cover the installed databases. Close EDOPro before applying appearance or audio changes, then reopen it to load the changes.
+Check the game folder at the top of the window. Use **Change folder** if you have a different copy. In **HD Cards**, choose **My decks** to start with the cards you play, or **Full library** to cover the installed databases. Close EDOPro before syncing or applying changes, then reopen it to load them.
 
 ## What you can do
 
-Some of the features below have working engines and sidebar pages still in development. The [gallery](docs/gallery.md) marks the pending captures.
+The sidebar scrolls so you can reach every section at 960×600. Banners take up less room in short windows. [See the feature screenshots](docs/gallery.md)
 
 | Section | What it does |
 | --- | --- |
-| **HD Cards** | Download missing card images and Field Spell playmat art. Check coverage, repair broken files, or choose the original artwork for GOAT and Pre-Errata wording where available. Resolution and availability vary by card. |
+| **HD Cards** | Download missing card images and Field Spell playmat art, including cards in installed pre-release and release databases. If the published Field Spell art is missing, EDOPal looks for a matching illustration from a related card, then can crop the synced card face. Check coverage, repair broken files and choose original artwork for GOAT and Pre-Errata wording where available. |
 | **Skins** | Start from 16 editable presets. Choose colours, generate a wallpaper or bring a photo, preview the menu, deck editor and duel field as you edit, and share your theme as an `.edotheme` file. [Theme reference](themes/README.md) |
 | **Sleeves** | Design a card back from 24 patterns and 16 palettes, use cropped artwork for an installed card when available, or bring your own image. Choose your sleeve and your opponent’s independently. |
 | **Sounds** | Audition cues, apply a set, or mix, match and silence individual slots. The engine covers 24 duel and interface sound slots, plus card-specific chants. [Sound reference](docs/sounds.md) |
-| **Music** | Browse a catalogue of 69 games, import tracks or a folder of your own recordings, and build playlists for seven moments from the main menu to victory or defeat. The playable tracks depend on your installed and imported audio. |
-| **Tournament decks** | Browse public events and standings by format, preview lists, save copies to EDOPro and sync their artwork. For Goat events you can also save a separate copy using installed historical cards. Review any unresolved cards before playing. [Format Library](https://formatlibrary.com/events) |
-| **My decks** | Search your saved decks by card, check them against an installed banlist, compare versions and preview or copy `ydke://` sharing codes. Legality checks use your installed card data and the chosen list. |
+| **Music** | Browse 69 games and build playlists for seven moments, from the main menu to victory or defeat. Import recordings or open **Get more music** for downloadable recordings and cover packs. See the credits, follow download progress, and cancel or retry a transfer. |
+| **Tournament decks** | Browse public events by format. As you move through the standings with the arrow keys, the preview beside them follows the highlighted deck. It shows the event, placement, deck name and pilot above one scrollable list of Main, Extra and Side cards. Save copies to EDOPro and sync their artwork. Goat events can also produce a separate copy with installed historical cards. [Format Library](https://formatlibrary.com/events) |
+| **My decks** | Open a saved deck to see its Main, Extra and Side cards in one scrollable list. Search by card, compare versions, check against an installed banlist and preview or copy `ydke://` sharing codes. |
 | **Replays** | Find recordings by player, label, notes or tags. Save a copy of a rolling last replay and export a replay with its notes. |
-| **Backup & transfer** | Make a local ZIP of decks and replays, with optional categories, for a backup or a move between installations such as a PC and a Steam Deck. Preview conflicts before restoring. A physical PC ↔ Steam Deck transfer is untested. [Backup reference](docs/backup.md) |
-| **Health check** | Check local databases, banlists, storage, skin files and audio. Copy a support summary with the findings and no personal details. [Health check reference](docs/doctor-replays.md) |
+| **Backup & transfer** | Save a local ZIP of decks and replays. Optional categories include editable themes and sleeves, their source images, personal album names and a track list covering all seven music moments. To move the recordings themselves from the app, use **Music → Add music → Export library**. Preview conflicts before restoring and undo a restore from its receipt or history. If undo is blocked, EDOPal explains why. A physical PC ↔ Steam Deck transfer is untested. [Backup reference](docs/backup.md) |
+| **Health check** | See problems and warnings first, with notes and passed checks below. Expand a finding for details. When EDOPal has a page that can help, the finding links to it. The support summary leaves out personal details. [Health check reference](docs/doctor-replays.md) |
+| **Settings** | Manage game folders, artwork defaults and pack storage. Check for an app update and see project links and credits under **About**. |
 
 ### On-demand content packs
 
@@ -60,7 +59,9 @@ The pack engine keeps optional downloads separate so the app can stay small. The
 
 **How do I update?** Download the new platform ZIP and open the extracted app in place of your old companion. Update any shortcut to the old executable. The packaged app still uses the `EDOPro HD Sync` per-user data folder for your settings and library.
 
-**Can I undo changes?** Skins, sleeves, sounds, playlists and backup restores have their own recovery options. Imported decks and preserved replays are separate files you can remove. Keep a copy of existing artwork or textures you plan to refresh, repair or prune. Those operations have no built-in undo. [What EDOPal writes and how to undo it](docs/safety.md)
+**Can I undo changes?** HD Cards can undo the last artwork change made in the app. Skins, sleeves, sounds, playlists and backup restores have their own recovery options. Imported decks and preserved replays are separate files you can remove. Keep a separate copy of artwork or textures before using command-line maintenance options. [What EDOPal writes and how to undo it](docs/safety.md)
+
+**EDOPal could not check if the game is open.** Close the selected EDOPro copy and retry. If the process check cannot confirm that it is closed, operations that require a closed game pause before writing.
 
 ## Privacy and network use
 
@@ -68,7 +69,7 @@ The pack engine keeps optional downloads separate so the app can stay small. The
 | --- | --- |
 | `images.ygoprodeck.com` and `pics.projectignis.org:2096` | Card and Field Spell artwork. Sleeve art requests use the YGOProDeck image host. |
 | `api.github.com`, `github.com` and GitHub’s release asset hosts | Update notices, pack catalogue and downloads, and the older curated texture downloads. |
-| `formatlibrary.com` and `cdn.formatlibrary.com` | Public tournament formats, event searches, standings, deck previews, thumbnails and downloads. |
+| `formatlibrary.com` and `cdn.formatlibrary.com` | Public tournament formats, event searches, standings, deck previews and downloads. The legacy tournament window can also fetch thumbnails. |
 
 EDOPal has no account or telemetry. It keeps your files, settings and support summary on your device. The services receive ordinary connection details such as your IP address, plus the requested public IDs or tournament search text. A deck-only art sync requests the individual card IDs it needs. Configured sources and download redirects can add hosts. Opening a cover credit or source link uses your browser. [Full network inventory and data locations](docs/privacy.md)
 
@@ -87,7 +88,7 @@ Run `python main.py --help` for help from source. A normal source launch runs th
 | --- | --- |
 | `-h` / `--help` | Show argument help. |
 | `--gui` / `--no-gui` | Open the Qt window or run in the console. |
-| `--legacy-gui` | Open the original Tk window during the migration. Mutually exclusive with `--gui` and `--no-gui`. |
+| `--legacy-gui` | Open the original Tk window from source. Mutually exclusive with `--gui` and `--no-gui`. |
 | `--edopro-path PATH` | Select a game folder and skip auto-detection. |
 | `--config PATH` | Use a specific config file. |
 | `--generate-config` | Write a default config file and exit. |
@@ -110,6 +111,7 @@ Run `python main.py --help` for help from source. A normal source launch runs th
 | `--max-retries N` | Set retries per download. Default 3. |
 | `--timeout N` | Set the artwork HTTP timeout in seconds. Default 30. |
 | `--health-check` | Run quick offline checks of the companion and exit. For the detailed game report from source, run `python -m doctor PATH` with your game folder. |
+| `--gui-smoke-test` | Open and check the Qt window offline, then exit. |
 | `--no-pause` | Skip the exit prompt in an interactive Windows packaged console session. |
 
 </details>

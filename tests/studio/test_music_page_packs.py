@@ -13,6 +13,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 from pytestqt.qtbot import QtBot
 
+import config
 from content.catalogue import Catalogue, CatalogueSource
 from content.download import DownloadError, DownloadFailure, Progress
 from content.manifest import Manifest
@@ -54,7 +55,7 @@ def test_cache_to_album_and_offline_removal(
 
     main_thread = get_ident()
     monkeypatch.setattr(music_packs, "fetch_catalogue", fetch)
-    monkeypatch.setattr(p.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr(p, "confirm", lambda *_: True)
     p.manage.click()
     click(p, "Get more music")
     idle(qtbot, p)
@@ -67,9 +68,9 @@ def test_cache_to_album_and_offline_removal(
         shutil.copyfile(archive, group / f"{pack.version}--{pack.sha256}.zip")
         rows.append(pack)
     listing = Catalogue(Manifest(1, tuple(rows)), CatalogueSource.CACHED, "Offline")
-    click(p, "Refresh catalogue")
+    click(p, "Refresh catalog")
     idle(qtbot, p)
-    assert "Catalogue offline" in messages(p)
+    assert "Catalog offline" in messages(p)
     for pack in rows:
         card = p.packs.cards[pack.id]
         text = messages(card)
@@ -80,8 +81,10 @@ def test_cache_to_album_and_offline_removal(
         click(card, "Add to library")
         idle(qtbot, p)
         assert "Available in library" in messages(p.packs.cards[pack.id])
-    listing = Catalogue(Manifest(1, (replace(rows[0], version="2.0.0"), rows[1])), CatalogueSource.LIVE)
-    click(p, "Refresh catalogue")
+    listing = Catalogue(
+        Manifest(1, (replace(rows[0], version="2.0.0"), rows[1])), CatalogueSource.LIVE
+    )
+    click(p, "Refresh catalog")
     idle(qtbot, p)
     update = messages(p.packs.cards[rows[0].id])
     assert "Update available" in update and "Added to your library." not in update
@@ -147,20 +150,23 @@ def test_cancel_return_and_retry_failure_keep_pack_credits(
     p.manage.click()
     click(p, "Get more music")
     idle(qtbot, p)
-    assert "Requires Studio 99.0.0" in messages(p.packs.cards["later"])
+    assert f"Requires {config.APP_NAME} 99.0.0" in messages(p.packs.cards["later"])
     assert pack.attribution in messages(p.packs.cards["later"])
+    assert music_packs.pack_size(pack.size_bytes) in messages(p.packs.cards[pack.id])
     click(p.packs.cards[pack.id], "Download")
     qtbot.waitUntil(lambda: p.packs.progress.percent.text() == "50%")
+    assert p.packs.progress.counts.text() == "0.5 KB / 1.0 KB  ·  1.0 KB/s"
     assert pack.source_url in messages(p.packs.cards[pack.id])
     assert window.navigate("cards")
     second = tmp_path / "Other game"
     second.mkdir()
     p.ctx.set_installation(Installation(str(second), True))
     assert window.navigate("music") and p.state == "packs"
-    p.escape()
+    assert p.escape() and not events[0].is_set()
+    p.packs.progress.cancel.click()
     idle(qtbot, p)
     text = messages(p.packs.cards[pack.id])
-    assert "Download cancelled" in text and pack.attribution in text
+    assert "Download canceled" in text and pack.attribution in text
     click(p.packs.cards[pack.id], "Resume")
     idle(qtbot, p)
     text = messages(p.packs.cards[pack.id])

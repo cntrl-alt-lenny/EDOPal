@@ -1,4 +1,6 @@
+from dataclasses import replace
 from pathlib import Path
+from threading import Event
 
 from decks import Banlist, Card, Catalog, Finding, Library, SavedDeck, Sections, compare, preview
 from studio.pages.mydecks_logic import (
@@ -7,6 +9,7 @@ from studio.pages.mydecks_logic import (
     finding_text,
     library_rows,
     list_names,
+    saved_sections,
 )
 
 
@@ -56,3 +59,19 @@ def test_moves_and_net_differences_keep_direction() -> None:
     assert "outside this list’s allowed cards" in finding_text(
         Finding("outside-whitelist", "First card (1) is absent from the whitelist.", (1,))
     )
+
+
+def test_saved_sections_group_printings_and_use_local_png(tmp_path: Path) -> None:
+    cards = catalog()
+    cards.cards[2] = replace(cards.cards[1], id=2)
+    pics = tmp_path / "pics"
+    pics.mkdir()
+    artwork = pics / "2.png"
+    artwork.touch()
+    deck = preview(Sections((1, 2, 1), (), (2,)), cards)
+    main, extra, side = saved_sections(tmp_path, deck, Event())
+    assert [(card.name, card.copies, card.artwork) for card in main.cards] == [
+        ("First card", 3, artwork)
+    ]
+    assert main.type_counts == (("Spell", 3),)
+    assert (main.count, extra.count, side.count) == (3, 0, 1)

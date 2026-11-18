@@ -6,6 +6,7 @@ from PySide6.QtCore import QStringListModel, Qt
 from PySide6.QtWidgets import QHBoxLayout, QListView, QProgressBar, QWidget
 
 from artwork_flow import Summary
+from main import DownloadStats
 from studio import theme as t
 from studio.pages.card_views import line, page_layout
 from studio.widgets import Button, ElidedLabel, Hero, Panel, glyph, label, margins
@@ -27,6 +28,31 @@ def player_summary(summary: Summary) -> Summary:
             "Known-missing artwork", "Previously unavailable artwork"
         ).replace("Sync again to retry interrupted downloads.", "Sync again to retry."),
     )
+
+
+def retry_summary(summary: Summary, stats: DownloadStats) -> tuple[Summary, str]:
+    failures = tuple(
+        f"{name} (ID {card_id})   ·   {kind}"
+        + ("   ·   Will retry" if card_id in retry_ids else "")
+        for kind, entries, retry_ids in (
+            ("Card artwork", stats.failed_cards, stats.transient_ids),
+            ("Field art", stats.field_failed_cards, stats.field_transient_ids),
+        )
+        for card_id, name in entries
+    )
+    summary = replace(summary, failures=failures)
+    if stats.storage_error:
+        return summary, "Retry"
+    count = stats.transient_failures + len(stats.field_transient_ids)
+    if count and summary.title == "Sync complete":
+        downloads = f"{count:,} download" + ("s" if count != 1 else "")
+        verb = "needs" if count == 1 else "need"
+        return replace(
+            summary,
+            title=f"{downloads} {verb} another try",
+            note=summary.note.replace("Sync again to retry interrupted downloads.", "").strip(),
+        ), f"Retry {downloads}"
+    return summary, ""
 
 
 class Metric(Panel):
@@ -70,6 +96,7 @@ class ResultView(QWidget):
         body.addWidget(self.kicker)
         body.addWidget(self.title)
         self.outcome = Hero("HD Cards", "", "", "check")
+        self.outcome.setMinimumHeight(t.TILE_LARGE)
         body.addWidget(self.outcome)
         metrics = QHBoxLayout()
         metrics.setSpacing(t.MD)
@@ -113,26 +140,51 @@ class ResultView(QWidget):
         self.decks = Button("Open Tournament decks", "primary", "decks")
         self.full_library = Button("Sync everything instead", "secondary", "download")
         self.undo = Button("Undo last artwork sync", "secondary", "back")
-        self.undo.setToolTip("Put back replaced artwork and remove files added by this sync.")
+        self.undo.setToolTip(
+            "Restore replaced files and remove additions from the last sync that changed artwork in this folder."
+        )
+        self.allows_undo = False
         self.undo.hide()
         actions.addStretch()
         actions.addWidget(self.full_library)
         actions.addWidget(self.decks)
         actions.addWidget(self.undo)
+        self.retry = Button("Retry", "primary", "download")
+        actions.addWidget(self.retry)
         actions.addWidget(self.done)
         body.addStretch(1)
+
+    def focus_action(self) -> Button:
+        for button in (self.retry, self.decks, self.done):
+            if button.isVisible():
+                return button
+        return self.back
 
     def _expand(self, expand: bool) -> None:
         self.list.setVisible(expand)
         self.failures.setText("Hide unavailable artwork" if expand else "Show unavailable artwork")
 
-    def show_result(self, summary: Summary, *, no_decks: bool = False, scope: str = "") -> None:
+    def show_result(
+        self,
+        summary: Summary,
+        *,
+        no_decks: bool = False,
+        scope: str = "",
+        retry: str = "",
+        back_to: str = "HD Cards",
+        coverage: bool = False,
+    ) -> None:
         category = f"HD CARDS  ·  {scope.upper()}" if scope else "HD CARDS"
         self.kicker.setText(category)
         self.outcome.category.setText(category)
+        self.allows_undo = not (coverage or no_decks)
         self.decks.setVisible(no_decks)
         self.full_library.setVisible(no_decks)
-        self.done.setVisible(not no_decks)
+        self.back.setText(f"Back to {back_to}")
+        self.back.setVisible(coverage or no_decks or bool(retry))
+        self.retry.setText(retry)
+        self.retry.setVisible(bool(retry))
+        self.done.setVisible(not (no_decks or coverage or retry))
         message_only = not (summary.first[0] or summary.second[0] or summary.rows)
         self.title.setText(summary.title)
         self.title.setVisible(not message_only)
@@ -145,7 +197,7 @@ class ResultView(QWidget):
             self.outcome.description.setVisible(bool(summary.note))
             self.outcome.update()
         self.first.set_value(summary.first, False)
-        self.second.set_value(summary.second, summary.warning)
+        self.second.set_value(summary.second, summary.warning and summary.second[0] != "0")
         while self.details.body.count():
             item = self.details.body.takeAt(0)
             if widget := item.widget():

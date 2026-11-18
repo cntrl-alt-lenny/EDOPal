@@ -15,7 +15,8 @@ import backup
 from backup.core import Cancel, Progress
 from studio.context import Installation
 from studio.pages.backup import BackupPage
-from studio.pages.backup_screens import ArchiveScreen, CompareScreen, HomeScreen, SaveScreen
+from studio.pages.backup_review import CompareScreen
+from studio.pages.backup_screens import ArchiveScreen, HomeScreen, SaveScreen
 from studio.shell import StudioWindow
 from studio.widgets import Button
 
@@ -156,7 +157,7 @@ def capture_backup(
         shot("backup-03-saved")
         click("Back")
         home()
-        click("Restore")
+        click("Restore from backup")
         settle(lambda: isinstance(page.screen, ArchiveScreen))
         shot("backup-04-archive-contents")
         click("Preview changes")
@@ -165,7 +166,7 @@ def capture_backup(
         click("Item details")
         shot("backup-18-conflict-details")
         page.escape()
-        click("Use backup")
+        click("Replace with backup")
         settle(lambda: page.plan is not None and page.plan.policy == "take_theirs")
         shot("backup-19-use-backup")
         click("Keep both")
@@ -205,17 +206,17 @@ def capture_backup(
                 shot("backup-08-restore-progress")
             finally:
                 release.set()
-            settle(lambda: showing("Restore complete"))
+            settle(lambda: showing("Restore complete") and page.job is None)
         shot("backup-09-restored")
         click("Back")
         home()
         shot("backup-10-history")
-        click("Undo selected restore")
+        click("Undo this restore")
         settle(lambda: showing("Previous files restored"))
         shot("backup-11-undone")
         click("Back")
         home()
-        click("Compare with a backup")
+        click("Compare with backup")
         settle(lambda: isinstance(page.screen, ArchiveScreen))
         click("Compare files")
         settle(lambda: isinstance(page.screen, CompareScreen))
@@ -241,7 +242,7 @@ def capture_backup(
         window.navigate("backup")
         home()
         shot("backup-14-interrupted")
-        click("Roll back")
+        click("Undo interrupted restore")
         settle(lambda: showing("Previous files restored"))
         ctx.set_installation(Installation(str(game)))
         home()
@@ -257,7 +258,7 @@ def capture_backup(
             try:
                 click("Choose where to save")
                 settle(lambda: page.writing and page.progress.bar.value() >= 16)
-                click("Cancel")
+                click("Cancel backup operation")
             finally:
                 release_save.set()
             settle(lambda: showing("Stopped"))
@@ -273,10 +274,26 @@ def capture_backup(
         click("Back")
         home()
         path = incoming
-        click("Restore")
+        click("Restore from backup")
         settle(lambda: isinstance(page.screen, ArchiveScreen))
         click("Preview changes")
         settle(lambda: page.plan is not None)
         shot("backup-22-no-conflicts")
+        preview = backup.preview_undo
+
+        def edit_before_undo_check(
+            install: backup.Installation, token: str, **options: object
+        ) -> backup.UndoPreview:
+            (new_game / "deck/Dark World.ydk").write_bytes(b"Deck edited after restore")
+            return preview(install, token, **options)
+
+        with patch.object(backup, "preview_undo", edit_before_undo_check):
+            click("Restore to this installation")
+            settle(lambda: showing("Undo unavailable"))
+        shot("backup-23-undo-blocked")
+        click("Done")
+        home()
+        page.scroll.ensureWidgetVisible(page.screen.history)
+        shot("backup-24-history-undo-blocked")
         ctx.set_installation(Installation())
         shot("backup-16-no-installation")

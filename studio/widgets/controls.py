@@ -51,6 +51,14 @@ class Button(QPushButton):
             self.setIcon(icon(symbol, t.ON_GOLD if role == "primary" else t.TEXT))
             self.setIconSize(QSize(t.ICON, t.ICON))
 
+    def set_role(self, role: str, symbol: str) -> None:
+        if self.property("role") == role:
+            return
+        self.setProperty("role", role)
+        self.setIcon(icon(symbol, t.ON_GOLD if role == "primary" else t.TEXT))
+        self.style().unpolish(self)
+        self.style().polish(self)
+
     def sizeHint(self) -> QSize:
         hint = super().sizeHint()
         if layout := self.layout():
@@ -242,17 +250,19 @@ class ElidedLabel(QLabel):
         self._fit()
 
 
-def confirm_action(parent: QWidget, title: str, message: str) -> bool:
+def confirm_action(
+    parent: QWidget, title: str, message: str, affirmative: str | None = None
+) -> bool:
     discard = title.startswith("Discard ")
     box = QMessageBox(QMessageBox.Icon.Question, title, message, parent=parent)
-    safe = box.addButton("Keep editing" if discard else "Cancel", QMessageBox.ButtonRole.RejectRole)
+    safe = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
     action = {
         "Undo this import?": "Undo deck save",
         "Restore to this installation?": "Restore backup",
         "Undo the last artwork change?": "Undo last artwork sync",
     }.get(title, title.removesuffix("?"))
     commit = box.addButton(
-        "Discard changes" if discard else action, QMessageBox.ButtonRole.AcceptRole
+        affirmative or ("Discard changes" if discard else action), QMessageBox.ButtonRole.AcceptRole
     )
     box.setDefaultButton(safe)
     box.setEscapeButton(safe)

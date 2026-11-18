@@ -15,6 +15,13 @@ if TYPE_CHECKING:
     from main import DownloadStats
 
 
+class ArtworkStorageError(OSError):
+    """The installation or its restore store refused a local publication."""
+
+
+STORAGE_MESSAGE = "Couldn't save artwork — the file is in use or the folder is read-only."
+
+
 # Context-local so concurrent CLI or deck jobs never share a Studio undo record.
 ArtworkChange = Callable[[str | Path, bytes | bytearray | None], None]
 artwork_change_sink: ContextVar[ArtworkChange | None] = ContextVar(
@@ -181,7 +188,7 @@ def valid_decks(selected_path: str, game: Path, paths: tuple[Path, ...]) -> bool
             path.is_file()
             and path.suffix.lower() == ".ydk"
             and not path.is_symlink()
-            and path.resolve().parent == deck
+            and path.resolve().is_relative_to(deck)
             for path in paths
         )
     )
@@ -302,8 +309,12 @@ def sync_summary(
         for card_id, name in entries:
             suffix = " • Will retry" if card_id in retry_ids else ""
             failures.append(f"{name}   ·   {kind}{suffix}")
+    title = "Sync cancelled" if cancelled else "Sync complete"
+    if stats.storage_error:
+        title = "Couldn't save artwork"
+        notes.insert(0, STORAGE_MESSAGE)
     return Summary(
-        "Sync cancelled" if cancelled else "Sync complete",
+        title,
         (
             f"{downloaded:,}",
             "Artwork installed" if stats.field_local or stats.field_derived else "Downloaded",
@@ -311,7 +322,7 @@ def sync_summary(
         (f"{unavailable:,}", "Unavailable"),
         tuple((label, f"{value:,}") for label, value in rows if value),
         " ".join(notes),
-        bool(unavailable),
+        bool(unavailable or stats.storage_error),
         ("Report saved", report) if report else ("", ""),
         tuple(failures),
     )

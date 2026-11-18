@@ -35,7 +35,7 @@ class Installation:
 
 class WindowServices(Protocol):
     def navigate(self, key: str) -> bool: ...
-    def confirm(self, title: str, message: str) -> bool: ...
+    def confirm(self, title: str, message: str, affirmative: str | None = None) -> bool: ...
     def choose_folder(self, initial: str) -> str | None: ...
     def sync_deck_files(self, game: Path, paths: tuple[Path, ...]) -> bool: ...
 
@@ -43,6 +43,7 @@ class WindowServices(Protocol):
 class AppContext(QObject):
     installation_changed = Signal(object)
     notice = Signal(str)
+    folder_unavailable = Signal(str)
     busy_changed = Signal(bool)
     installations_requested = Signal()
     select_installation_requested = Signal(str)
@@ -65,6 +66,9 @@ class AppContext(QObject):
         )
         self.latest = ""
         self.update_status = ""
+        self.release_label = ""
+        self.cached_release = False
+        self.update_offline = False
         self.checking_update = False
         self._host: WindowServices | None = None
 
@@ -79,8 +83,12 @@ class AppContext(QObject):
     def navigate(self, page_id: str) -> bool:
         return self._host is not None and self._host.navigate(page_id)
 
-    def confirm(self, title: str, message: str) -> bool:
-        return self._host is not None and self._host.confirm(title, message)
+    def confirm(self, title: str, message: str, affirmative: str | None = None) -> bool:
+        if self._host is None:
+            return False
+        if affirmative is None:
+            return self._host.confirm(title, message)
+        return self._host.confirm(title, message, affirmative)
 
     def choose_folder(self, initial: str) -> str | None:
         return self._host.choose_folder(initial) if self._host else None
@@ -110,14 +118,16 @@ class AppContext(QObject):
             return
         self.set_busy(True)
         path = self.cfg.config_path
-        job = self.tasks.start(lambda _: config.save_settings(path, values))
+        changes = {key: value for key, value in values.items() if value != getattr(self.cfg, key)}
+        job = self.tasks.start(lambda _: not changes or config.save_settings(path, changes))
 
         def saved(success: bool) -> None:
             self.set_busy(False)
             if success:
-                for key, value in values.items():
+                for key, value in changes.items():
                     setattr(self.cfg, key, value)
-                self.cfg.saved_original_text = self.cfg.original_text
+                if "original_text" in changes:
+                    self.cfg.saved_original_text = self.cfg.original_text
                 self.preferences_changed.emit()
                 done()
             else:
@@ -142,7 +152,7 @@ class AppContext(QObject):
             running = _game_running(game)
         except OSError as exc:
             raise GameOpenError(
-                "EDOPal couldn’t check whether EDOPro is open. Close it, then choose Retry."
+                f"{config.APP_NAME} couldn’t check whether EDOPro is open. Close it, then choose Retry."
             ) from exc
         if running:
             raise GameOpenError("EDOPro is open. Close this copy of EDOPro, then choose Retry.")

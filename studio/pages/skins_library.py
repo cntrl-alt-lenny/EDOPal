@@ -48,8 +48,8 @@ class LibraryActions:
         self.view.form_name.setFocus()
 
     def cancel_name(self) -> None:
-        if self.name_edited and not self.page.ctx.confirm(
-            "Discard this name?", "Leave without saving the new name?"
+        if self.name_edited and not self.page.confirm(
+            "Discard unsaved changes?", "Leave without saving the new name?"
         ):
             return
         self.page.naming = ""
@@ -66,7 +66,7 @@ class LibraryActions:
         self._save(self.view.form_name.text(), self.page.naming == "Rename")
 
     def save(self) -> None:
-        self._save(self.maker.name.text(), self.page.look.group == "Mine")
+        self._save(self.maker.name.text(), self.page.look.group == "My themes")
 
     def _save(self, name: str, existing: bool) -> None:
         try:
@@ -80,20 +80,22 @@ class LibraryActions:
         key = self.page.look.key if existing else None
         old = self.page.look.theme if existing else None
         self.page._run(
-            lambda _: self.library.save(theme, key),
-            partial(self._saved, old=old),
+            lambda _: self.library.save(theme, key, expected=old),
+            partial(self._saved, old=old, saved=theme),
             "Saving your theme…",
         )
 
-    def _saved(self, key: str, *, old: Theme | None = None) -> None:
+    def _saved(self, key: str, *, old: Theme | None = None, saved: Theme | None = None) -> None:
         self.page.to_gallery()
 
         def undo() -> None:
             self.page._run(
-                lambda _: self.library.save(old, key), self._saved, "Restoring the saved theme…"
+                lambda _: self.library.save(old, key, expected=saved),
+                self._saved,
+                "Restoring the saved theme…",
             )
 
-        self.page.note("Theme saved in My library.", undo if old else None, "Undo save")
+        self.page.note("Theme saved in My themes.", undo if old else None, "Undo save")
         self.page.reload(select=key)
 
     def photo(self) -> None:
@@ -133,15 +135,15 @@ class LibraryActions:
 
     def delete(self) -> None:
         look = self.page.look
-        if not self.page.ctx.confirm(
-            "Delete saved theme?",
+        if not self.page.confirm(
+            "Remove saved theme?",
             f"Remove {look.name} from your library? Installed copies stay in their games.",
         ):
             return
 
         def undo() -> None:
             self.page._run(
-                lambda _: self.library.save(look.theme, look.key),
+                lambda _: self.library.save(look.theme, look.key, require_absent=True),
                 self._saved,
                 "Restoring your theme…",
             )
@@ -151,4 +153,8 @@ class LibraryActions:
             self.page.note(f"Removed {look.name} from your library.", undo, "Undo delete")
             self.page.reload()
 
-        self.page._run(lambda _: self.library.delete(look.key), done, "Removing saved theme…")
+        self.page._run(
+            lambda _: self.library.delete(look.key, expected=look.theme),
+            done,
+            "Removing saved theme…",
+        )

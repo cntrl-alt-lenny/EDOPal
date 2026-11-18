@@ -161,12 +161,12 @@ def test_wallpaper_setting_and_two_stage_viewport_crop() -> None:
 def test_each_preset_and_live_colour_changes_within_budget() -> None:
     ensure_gui()
     render_preview(PRESETS[0], "menu", (320, 200))  # one-time font registration
-    assert len(set(PRESETS)) >= 16
+    assert len(set(PRESETS)) >= 48
     durations = []
     for i, preset in enumerate(PRESETS):
         for scene in SCENES:
             # Use different slider values so the benchmark includes palette & wallpaper misses.
-            t = replace(preset, accent=preset.accent[:5] + f"{i * 7 + len(scene):02x}")
+            t = replace(preset, accent=preset.accent[:5] + f"{(i * 7 + len(scene)) % 256:02x}")
             start = time.perf_counter()
             img = render_preview(t, scene)
             durations.append((time.perf_counter() - start) * 1000)

@@ -1,7 +1,6 @@
 """Scroll artwork content independently of its primary actions."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 from studio import theme as t
@@ -9,7 +8,7 @@ from studio.context import AppContext
 from studio.pages.base import Page
 from studio.pages.card_results import ResultView
 from studio.pages.card_views import OptionsView, SettingsView, page_layout, scroll
-from studio.widgets import Button, GameClosedBlock, Hero, ProgressBlock, margins
+from studio.widgets import ActionPage, Button, GameClosedBlock, Hero, ProgressBlock, margins
 
 
 class CardStage(Page):
@@ -24,6 +23,7 @@ class CardStage(Page):
         self.banner = Hero(
             "HD Cards", "Artwork sync", "Updating the selected installation.", "download"
         )
+        self.banner.setMinimumHeight(t.TILE_LARGE)
         stage.addWidget(self.banner)
         self.progress = ProgressBlock()
         stage.addWidget(self.progress)
@@ -33,14 +33,6 @@ class CardStage(Page):
         self.back = Button("Back", "quiet", "back")
         self.back.setAccessibleName("Back to HD Cards")
         layout.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(
-            Hero(
-                "HD Cards",
-                "Artwork changes",
-                "Close the game so its files can be changed safely.",
-                "download",
-            )
-        )
         self.guard = GameClosedBlock()
         blocked.setMaximumWidth(t.WIDE_CONTENT)
         layout.addWidget(self.guard)
@@ -60,7 +52,6 @@ class CardStage(Page):
             self.stack.addWidget(view)
         layout = QVBoxLayout(self)
         margins(layout, 0)
-        layout.addWidget(self.stack, 1)
         self.footer = QStackedWidget()
         progress_actions = QWidget()
         row = QHBoxLayout(progress_actions)
@@ -75,12 +66,7 @@ class CardStage(Page):
         }
         for actions in self.action_rows.values():
             self.footer.addWidget(actions)
-        layout.addWidget(self.footer)
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        inset = max(t.LG, (self.width() - t.WIDE_CONTENT) // 2 + t.XXL)
-        self.footer.setContentsMargins(inset, t.SM, inset, t.MD)
+        layout.addWidget(ActionPage(self.stack, self.footer))
 
     @property
     def state(self) -> str:
@@ -89,7 +75,13 @@ class CardStage(Page):
     def open_view(self, key: str) -> None:
         self.stack.setCurrentWidget(self.views[key])
         actions = self.action_rows.get(key)
-        self.footer.setVisible(actions is not None)
+        self.footer.setVisible(
+            actions is not None
+            and (
+                key != "results"
+                or any(not button.isHidden() for button in actions.findChildren(Button))
+            )
+        )
         if actions is not None:
             self.footer.setCurrentWidget(actions)
         self.views[key].verticalScrollBar().setValue(0)
@@ -97,7 +89,7 @@ class CardStage(Page):
             "blocked": self.guard.retry,
             "settings": self.settings.back,
             "options": self.options.start,
-            "results": self.results.done,
+            "results": self.results.focus_action(),
             "progress": self.progress.cancel,
         }[key]
         if focus.isEnabled() and focus.isVisible():

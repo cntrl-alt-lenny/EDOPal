@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, QModelIndex, Qt
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -70,6 +70,7 @@ class Collection(Screen):
         self.rows = QListView()
         self.rows.setAccessibleName("Deck library. Open a deck to see its cards.")
         self.rows.setUniformItemSizes(True)
+        self.rows.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
         self.rows.setMouseTracking(True)
         self.rows.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
         self.rows.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -155,6 +156,23 @@ class Collection(Screen):
         if self.model.rows:
             self.rows.setCurrentIndex(self.model.index(0))
             self.rows.setFocus()
+
+    def select_saved(self, paths: tuple[Path, ...]) -> int:
+        targets = set(paths)
+        matches = [
+            self.model.index(i) for i, row in enumerate(self.model.rows) if row.deck.path in targets
+        ]
+        if matches:
+            flags = QItemSelectionModel.SelectionFlag
+            selection = QItemSelection()
+            for index in matches:
+                selection.select(index, index)
+            model = self.rows.selectionModel()
+            model.select(selection, flags.ClearAndSelect)
+            model.setCurrentIndex(matches[0], flags.NoUpdate)
+            self.rows.scrollTo(matches[0], QListView.ScrollHint.PositionAtTop)
+            self.rows.setFocus()
+        return len(matches)
 
     def open(self, index: QModelIndex) -> None:
         if self.isVisible() and index.isValid():

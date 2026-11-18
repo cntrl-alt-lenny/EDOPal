@@ -5,12 +5,14 @@ import os
 import re
 import sqlite3
 from collections.abc import Iterator
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import AbstractContextManager, ExitStack, closing, contextmanager
+from contextvars import ContextVar
 from pathlib import Path
+from uuid import uuid4
 
 import config
 import extras
-from artwork_flow import artwork_change_sink
+from artwork_flow import ArtworkStorageError, artwork_change_sink
 from state_lock import appearance_lock, locked
 
 _CARD = re.compile(r"pics/(?:field/)?-?[0-9]+\.(?:jpg|png)\Z")
@@ -23,21 +25,23 @@ def _history(cfg: config.Config) -> Path:
     return Path(cfg.config_path).resolve().parent / "artwork-restore" / (key + ".sqlite")
 
 
-def has_restore(cfg: config.Config) -> bool:
-    db = _history(cfg)
-    if not db.is_file() or db.resolve() != db:
-        return False
-    with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
-        return conn.execute("SELECT 1 FROM changes LIMIT 1").fetchone() is not None
-
-
 def _target(root: Path, name: str) -> Path:
     relative = Path(name)
-    if relative.is_absolute() or relative.drive or ".." in relative.parts:
-        raise ValueError("The saved artwork path is invalid.")
-    if not _CARD.fullmatch(name) and not (
-        name.startswith("textures/") and (extras.ASSETS / relative).is_file()
+    if (
+        relative.is_absolute()
+        or relative.drive
+        or ".." in relative.parts
+        or ":" in name
+        or relative.is_reserved()
     ):
+        raise ValueError("The saved artwork path is invalid.")
+    bundled = name.startswith(("textures/", "sound/BGM/")) and (extras.ASSETS / relative).is_file()
+    texture = relative.parent == Path("textures") and relative.suffix.lower() in (
+        ".jpg",
+        ".jpeg",
+        ".png",
+    )
+    if not (_CARD.fullmatch(name) or bundled or texture):
         raise ValueError("The saved file does not belong to artwork sync.")
     return extras._regular_path(root, relative)
 
@@ -46,69 +50,226 @@ def _digest(data: bytes | bytearray | None) -> str | None:
     return hashlib.sha256(data).hexdigest() if data is not None else None
 
 
-@contextmanager
-def remember_changes(cfg: config.Config) -> Iterator[None]:
-    """Flush original bytes before replacement, including on partial/cancelled runs."""
-    conn = None
-    failure = ""
-    cfg.artwork_changed = False
-    with ExitStack() as stack:
+def _lock(root: Path) -> AbstractContextManager[None]:
+    if not root.is_dir():
+        raise OSError("The selected installation folder could not be found.")
+    path = extras._regular_path(root, ".edopro-artwork.lock")
+    return locked(path.parent, path.name)
 
-        def remember(path: str | Path, incoming: bytes | bytearray | None) -> None:
-            nonlocal conn, failure
-            if failure:
-                raise OSError(failure)
-            try:
-                # Folder recovery can select a different game before the first write.
-                root = Path(cfg.edopro_path)
-                name = Path(path).relative_to(root).as_posix()
-                dest = _target(root.resolve(), name)
-                if conn is None:
-                    db = _history(cfg)
-                    if db.resolve() != db:
-                        raise OSError("The artwork restore folder links to another location.")
-                    lockfile = extras._regular_path(root.resolve(), ".edopro-artwork.lock")
-                    stack.enter_context(locked(lockfile.parent, lockfile.name))
-                    db.parent.mkdir(parents=True, exist_ok=True)
-                    conn = stack.enter_context(closing(sqlite3.connect(db)))
-                    conn.execute("PRAGMA auto_vacuum=FULL")
-                    conn.execute(
-                        "CREATE TABLE IF NOT EXISTS changes(name TEXT PRIMARY KEY, original BLOB, before TEXT, after TEXT)"
-                    )
-                old = dest.read_bytes() if dest.is_file() else None
-                if old == incoming:
-                    return
-                with conn:
-                    if not cfg.artwork_changed:
-                        conn.execute("DELETE FROM changes")
-                    conn.execute(
-                        "INSERT INTO changes VALUES (?,?,?,?) ON CONFLICT(name) DO UPDATE SET after=excluded.after",
-                        (name, old, _digest(old), _digest(incoming)),
-                    )
-                cfg.artwork_changed = True
-            except (OSError, sqlite3.Error, ValueError) as exc:
-                failure = f"Could not keep a restore copy. Check available space and close any other artwork sync. {exc}"
-                raise OSError(failure) from exc
 
-        token = artwork_change_sink.set(remember)
+def _pending(conn: sqlite3.Connection) -> bool:
+    return bool(
+        conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pending'").fetchone()
+        and conn.execute("SELECT 1 FROM pending LIMIT 1").fetchone()
+    )
+
+
+def _reconcile(conn: sqlite3.Connection, root: Path) -> bool:
+    """One synchronous publication can be in flight. SQLite promotes it atomically."""
+    row = conn.execute("SELECT name,before,after,first,stage FROM pending").fetchone()
+    if row is None:
+        return False
+    name, before, after, first, stage = row
+    dest = _target(root, name)
+    current = extras._signature(dest)
+    if current not in (before, after):
+        raise ArtworkStorageError(
+            f"{name} changed during sync. Your edit and restore data were kept."
+        )
+    if stage:
+        if not re.fullmatch(r"[0-9a-f]{32}", stage):
+            raise ArtworkStorageError("Unrecognized staging file in the artwork restore data.")
+        temp = extras._regular_path(root, dest.with_name(f".{dest.name}.{stage}.part"))
+        temp.unlink(missing_ok=True)
+    with conn:
+        if current == after:
+            if first:
+                conn.execute("DELETE FROM changes")
+            conn.execute(
+                "INSERT INTO changes SELECT name,original,before,after FROM pending WHERE 1 "
+                "ON CONFLICT(name) DO UPDATE SET after=excluded.after"
+            )
+        conn.execute("DELETE FROM pending")
+    return current == after
+
+
+def has_restore(cfg: config.Config) -> bool:
+    db = _history(cfg)
+    if not db.is_file() or db.resolve() != db:
+        return False
+    try:
+        if not (getattr(cfg, "dry_run", False) or getattr(cfg, "stats", False)):
+            recover_publication(cfg)
+    except ArtworkStorageError:
+        # An active sync holds the lock. Only previously committed rows are visible here.
+        pass
+    try:
+        with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
+            return conn.execute("SELECT 1 FROM changes LIMIT 1").fetchone() is not None
+    except sqlite3.DatabaseError:
+        return False
+
+
+def recover_publication(cfg: config.Config) -> None:
+    db = _history(cfg)
+    if not db.is_file():
+        return
+    try:
+        if db.resolve() != db:
+            raise OSError("The artwork restore folder links to another location.")
         try:
-            yield
-            if failure:
-                raise OSError(failure)
+            with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
+                if not _pending(conn):
+                    return
+        except sqlite3.OperationalError:
+            # SQLite needs write access to recover its own interrupted transaction.
+            pass
+        root = Path(cfg.edopro_path).resolve()
+        with _lock(root), closing(sqlite3.connect(db.as_uri() + "?mode=rw", uri=True)) as conn:
+            if _pending(conn):
+                _reconcile(conn, root)
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        raise ArtworkStorageError(str(exc)) from exc
+
+
+class _Journal:
+    def __init__(self, cfg: config.Config, stack: ExitStack) -> None:
+        self.cfg = cfg
+        self.stack = stack
+        self.conn: sqlite3.Connection | None = None
+        self.root: Path | None = None
+        self.failure: ArtworkStorageError | None = None
+        cfg.artwork_changed = False
+
+    def finish(self) -> None:
+        if self.conn is not None and self.root is not None:
+            try:
+                if _reconcile(self.conn, self.root):
+                    self.cfg.artwork_changed = True
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                raise ArtworkStorageError(str(exc)) from exc
+
+    def prepare(
+        self, path: str | Path, data: bytes | bytearray | None, stage: str | None = None
+    ) -> Path | None:
+        if self.failure:
+            raise self.failure
+        if getattr(self.cfg, "dry_run", False) or getattr(self.cfg, "stats", False):
+            raise ArtworkStorageError("Artwork cannot be changed during a preview.")
+        root = Path(self.cfg.edopro_path).resolve()
+        location = Path(path)
+        selected = Path(self.cfg.edopro_path)
+        name = location.relative_to(
+            selected if location.is_relative_to(selected) else root
+        ).as_posix()
+        dest = _target(root, name)
+        if self.conn is None:
+            db = _history(self.cfg)
+            if db.resolve() != db:
+                raise OSError("The artwork restore folder links to another location.")
+            self.stack.enter_context(_lock(root))
+            self.root = root
+            db.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = self.stack.enter_context(closing(sqlite3.connect(db)))
+            self.conn.execute("PRAGMA auto_vacuum=FULL")
+            columns = "(name TEXT PRIMARY KEY, original BLOB, before TEXT, after TEXT"
+            self.conn.execute("CREATE TABLE IF NOT EXISTS changes" + columns + ")")
+            self.conn.execute(
+                "CREATE TABLE IF NOT EXISTS pending" + columns + ", first INTEGER, stage TEXT)"
+            )
+            # A previous process may have died between the replace and its SQLite commit.
+            _reconcile(self.conn, root)
+        elif self.root != root:
+            raise OSError("The installation changed during artwork sync.")
+        self.finish()
+        dest = _target(root, name)
+        old = dest.read_bytes() if dest.is_file() else None
+        if old == data:
+            return None
+        if stage:
+            temp = extras._regular_path(root, dest.with_name(f".{dest.name}.{stage}.part"))
+            if temp.exists():
+                raise FileExistsError(f"Staging file already exists: {temp.name}")
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO pending VALUES (?,?,?,?,?,?)",
+                (name, old, _digest(old), _digest(data), not self.cfg.artwork_changed, stage),
+            )
+        return dest
+
+    def remember(self, path: str | Path, data: bytes | bytearray | None) -> None:
+        # Bundled extras still announce a publication before their own atomic write.
+        try:
+            self.prepare(path, data)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            self.failure = ArtworkStorageError(str(exc))
+            raise self.failure from exc
+
+    def publish(self, path: str | Path, data: bytes | bytearray | None) -> bool:
+        try:
+            stage = uuid4().hex if data is not None else None
+            dest = self.prepare(path, data, stage)
+            if dest is None:
+                return False
+            if data is None:
+                extras._regular_path(self.root, dest).unlink()
+            else:
+                temp = extras._regular_path(self.root, dest.with_name(f".{dest.name}.{stage}.part"))
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with temp.open("xb") as handle:
+                    handle.write(data)
+                if dest.is_file():
+                    temp.chmod(dest.stat().st_mode)
+                os.replace(temp, extras._regular_path(self.root, dest))
+            self.finish()
+            return True
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            self.failure = ArtworkStorageError(f"{Path(path).name}: {exc}")
+            raise self.failure from exc
+
+
+_active: ContextVar[_Journal | None] = ContextVar("artwork_journal", default=None)
+
+
+def active_writer() -> _Journal | None:
+    return _active.get()
+
+
+@contextmanager
+def remember_changes(cfg: config.Config) -> Iterator[_Journal]:
+    existing = active_writer()
+    if existing is not None and existing.cfg is cfg:
+        yield existing
+        return
+    with ExitStack() as stack:
+        journal = _Journal(cfg, stack)
+        token = _active.set(journal)
+        observer = artwork_change_sink.set(journal.remember)
+        try:
+            yield journal
         finally:
-            artwork_change_sink.reset(token)
+            try:
+                journal.finish()
+            finally:
+                artwork_change_sink.reset(observer)
+                _active.reset(token)
 
 
 def restore_artwork(cfg: config.Config) -> int:
+    if getattr(cfg, "dry_run", False):
+        return 0
     root = Path(cfg.edopro_path).resolve()
     db = _history(cfg)
     if db.resolve() != db or not db.is_file():
         raise ValueError("There is no saved artwork change for this game.")
-    lockfile = extras._regular_path(root, ".edopro-artwork.lock")
-    with locked(lockfile.parent, lockfile.name), ExitStack() as locks:
-        with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
+    with _lock(root), ExitStack() as locks:
+        with closing(sqlite3.connect(db.as_uri() + "?mode=rw", uri=True)) as conn:
+            if _pending(conn):
+                _reconcile(conn, root)
+            if not conn.execute("SELECT 1 FROM changes LIMIT 1").fetchone():
+                raise ValueError("There is no saved artwork change for this game.")
             if conn.execute(
-                "SELECT 1 FROM changes WHERE name LIKE 'textures/%' LIMIT 1"
+                "SELECT 1 FROM changes WHERE name LIKE 'textures/%' OR name LIKE 'sound/%' LIMIT 1"
             ).fetchone():
                 locks.enter_context(appearance_lock(root))
 

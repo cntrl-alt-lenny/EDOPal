@@ -14,8 +14,12 @@ import os
 import sys
 import time
 from collections.abc import Iterator
+from copy import deepcopy
+from pathlib import Path
+from uuid import uuid4
 
 from card_databases import iter_db_files
+from durable_write import durable_write, sync_directory, waiting_lock
 
 # Only these installed HD prints need refreshing when upgrading from hd-v2.
 CORRECTED_HD_PRINTS = {
@@ -143,42 +147,89 @@ def _ensure_bool(name: str, value, default: bool) -> bool:
     return value
 
 
-def _load_config_file(path: str) -> dict:
-    """Read config.json if it exists; return empty dict otherwise."""
-    if not os.path.exists(path):
-        return {}
+class _EraPolicies(dict):
+    """Keep the caller's starting point for the per-installation/card edit."""
+
+    def __init__(self, values: dict) -> None:
+        super().__init__(values)
+        self.baseline = deepcopy(values)
+
+
+def _apply_edits(current: dict, before: dict, after: dict) -> None:
+    for key in before.keys() - after.keys():
+        current.pop(key, None)
+    for key, value in after.items():
+        if key in before and before[key] == value:
+            continue
+        if isinstance(value, dict):
+            nested = current.get(key)
+            old = before.get(key)
+            if not isinstance(nested, dict):
+                nested = current[key] = {}
+            _apply_edits(nested, old if isinstance(old, dict) else {}, value)
+        else:
+            current[key] = value
+
+
+def _read_preferences(path: Path) -> dict:
+    with path.open(encoding="utf-8") as stream:
+        data = json.load(stream)
+    if not isinstance(data, dict):
+        raise ValueError("expected a JSON object")
+    return data
+
+
+def _read_for_update(path: Path) -> dict:
+    """Called under the preference lock. I/O errors must stop the save."""
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            print(f"Warning: {path} must contain a JSON object at the top level; using defaults.")
-            return {}
+        return _read_preferences(path)
+    except FileNotFoundError:
+        return {}
+    except (ValueError, RecursionError) as exc:
+        aside = path.with_name(f"{path.name}.corrupt-{uuid4().hex}")
+        path.rename(aside)
+        sync_directory(path.parent)
+        # An empty current-release file also prevents a later launch from
+        # migrating obsolete preferences beside the executable a second time.
+        _write_config_file(str(path), {})
+        print(f"Warning: Invalid preferences ({exc}). Preserved at {aside}; using defaults.")
+        return {}
+
+
+def _preference_lock(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+def _load_config_file(path: str) -> dict:
+    target = Path(path)
+    try:
+        try:
+            data = _read_preferences(target)
+        except (ValueError, RecursionError):
+            # A writer might have repaired the file since our unlocked read.
+            with waiting_lock(_preference_lock(target)):
+                data = _read_for_update(target)
+        if isinstance(data.get("era_art_applied"), dict):
+            data["era_art_applied"] = _EraPolicies(data["era_art_applied"])
         return data
-    except (json.JSONDecodeError, OSError) as exc:
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
         print(f"Warning: Could not read {path}: {exc}; using defaults.")
         return {}
 
 
 def _write_config_file(path: str, config_data: dict) -> None:
-    """Write config data atomically with a stable, user-editable layout."""
-    parent_dir = os.path.dirname(os.path.abspath(path))
-    if parent_dir:
-        os.makedirs(parent_dir, exist_ok=True)
-    tmp_path = f"{path}.part"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=2)
-            f.write("\n")
-        os.replace(tmp_path, path)
-    except OSError:
-        with contextlib.suppress(OSError):
-            os.remove(tmp_path)
-        raise
+    """Caller holds the lock. Keep the existing user-editable JSON layout."""
+    durable_write(Path(path), (json.dumps(config_data, indent=2) + "\n").encode("utf-8"))
 
 
 def generate_default_config(path: str) -> None:
     """Write a fresh config.json with all defaults so users can edit it."""
-    _write_config_file(path, DEFAULTS)
+    target = Path(path)
+    with waiting_lock(_preference_lock(target)):
+        _read_for_update(target)
+        _write_config_file(path, DEFAULTS)
     print(f"Generated default config at {path}")
 
 
@@ -189,10 +240,22 @@ def save_setting(path: str, key: str, value) -> bool:
 
 def save_settings(path: str, values: dict) -> bool:
     """Save one set of related choices together."""
-    config_data = _load_config_file(path)
-    config_data.update(values)
+    target = Path(path)
     try:
-        _write_config_file(path, config_data)
+        with waiting_lock(_preference_lock(target)):
+            config_data = _read_for_update(target)
+            updates = dict(values)
+            policies = updates.get("era_art_applied")
+            if isinstance(policies, dict):
+                current = config_data.get("era_art_applied")
+                merged = current if isinstance(current, dict) else {}
+                baseline = policies.baseline if isinstance(policies, _EraPolicies) else {}
+                _apply_edits(merged, baseline, policies)
+                updates["era_art_applied"] = merged
+            config_data.update(updates)
+            _write_config_file(path, config_data)
+            if isinstance(policies, _EraPolicies):
+                policies.baseline = deepcopy(dict(policies))
     except OSError as exc:
         print(f"Warning: Could not write {path}: {exc}")
         return False
@@ -204,7 +267,7 @@ def save_edopro_path(path: str, edopro_path: str) -> bool:
     return save_setting(path, "edopro_path", edopro_path)
 
 
-def folder_has_card_databases(path: str) -> bool:
+def folder_has_card_databases(path: str, *, deadline: float | None = None) -> bool:
     """Return True when a folder holds card databases the sync can actually read.
 
     This mirrors main.get_db_files() exactly. Keep the two in step: if
@@ -214,7 +277,7 @@ def folder_has_card_databases(path: str) -> bool:
     if not path or not os.path.isdir(path):
         return False
     with contextlib.suppress(OSError):
-        return next(iter_db_files(path), None) is not None
+        return next(iter_db_files(path, deadline=deadline), None) is not None
     return False
 
 
@@ -231,9 +294,27 @@ def looks_like_edopro_folder(path: str) -> bool:
 
 
 def _has_game_executable(path: str) -> bool:
+    if any(os.path.isfile(os.path.join(path, name)) for name in ("EDOPro.exe", "EDOPro")):
+        # Finder bundles can keep the executable and writable game data apart.
+        bundle_binaries = (
+            os.path.abspath(path).replace(os.sep, "/").lower().endswith(".app/contents/macos")
+        )
+        return not bundle_binaries or os.path.isfile(os.path.join(path, "config", "system.conf"))
+    if sys.platform != "darwin" or not os.path.isfile(os.path.join(path, "config", "system.conf")):
+        return False
+    from pathlib import Path
+
+    root = Path(path)
+    resources = root.parent if root.name == "ProjectIgnis" else root
+    if resources.name == "Resources" and resources.parent.name == "Contents":
+        return (
+            resources.parent.parent.suffix.lower() == ".app"
+            and (resources.parent / "MacOS/EDOPro").is_file()
+            and (resources.parent / "Info.plist").is_file()
+        )
     return any(
-        os.path.isfile(os.path.join(path, name))
-        for name in ("EDOPro.exe", "EDOPro", os.path.join("EDOPro.app", "Contents", "Info.plist"))
+        (root / name / "Contents/Info.plist").is_file()
+        for name in ("EDOPro.app", "ProjectIgnis.app")
     )
 
 
@@ -306,14 +387,112 @@ def _search_parents() -> list[str]:
                 parents.extend((value, os.path.join(value, "Programs")))
     elif sys.platform == "darwin":
         parents.extend(("/Applications", os.path.join(home, "Library", "Application Support")))
+        for applications in ("/Applications", os.path.join(home, "Applications")):
+            for name in ("EDOPro.app", "ProjectIgnis.app"):
+                contents = os.path.join(applications, name, "Contents")
+                if os.path.isfile(os.path.join(contents, "Info.plist")):
+                    parents.extend((contents, os.path.join(contents, "Resources")))
     else:
-        parents.extend(
-            (
-                os.path.join(home, ".local", "share"),
-                os.path.join(home, ".steam", "steam", "steamapps", "common"),
-                "/opt",
-            )
-        )
+        import re
+        from itertools import islice
+        from pathlib import Path
+
+        # Leave most of the existing search budget for scoring installations.
+        deadline = time.monotonic() + _SEARCH_TIME_BUDGET_SECONDS / 3
+        extra: dict[Path, None] = {}
+        checked_apps: dict[Path, None] = {}
+
+        def add(path: Path) -> None:
+            if time.monotonic() < deadline and len(extra) < 192:
+                with contextlib.suppress(OSError):
+                    if path.is_dir():
+                        extra[path] = None
+
+        def children(path: Path, limit: int) -> Iterator[Path]:
+            if time.monotonic() < deadline:
+                with contextlib.suppress(OSError), os.scandir(path) as entries:
+                    for entry in islice(entries, limit):
+                        if time.monotonic() >= deadline:
+                            return
+                        if entry.is_dir():
+                            yield Path(entry.path)
+
+        def prefix(path: Path) -> None:
+            drive = path / "drive_c"
+            for folder in ("", "Program Files", "Program Files (x86)", "Games"):
+                add(drive / folder)
+
+        def steam_apps(path: Path) -> None:
+            if time.monotonic() >= deadline or len(checked_apps) >= 64:
+                return
+            with contextlib.suppress(OSError, RuntimeError):
+                if path.is_dir():
+                    key = path.resolve()
+                    if key not in checked_apps:
+                        checked_apps[key] = None
+                        add(path / "common")
+
+        user = Path(home)
+        data = Path(os.environ.get("XDG_DATA_HOME") or user / ".local/share")
+        if not data.is_absolute():
+            data = user / ".local/share"
+        flatpak = user / ".var/app"
+        parents.extend((str(data), str(user / ".local/share"), "/opt"))
+        prefix(Path(os.environ.get("WINEPREFIX") or user / ".wine"))
+        for steam in (
+            data / "Steam",
+            user / ".steam/steam",
+            user / ".steam/root",
+            flatpak / "com.valvesoftware.Steam/.local/share/Steam",
+            flatpak / "com.valvesoftware.Steam/data/Steam",
+        ):
+            steam_apps(steam / "steamapps")
+            for name in ("steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"):
+                if time.monotonic() >= deadline:
+                    break
+                try:
+                    manifest_path = steam / name
+                    if not manifest_path.is_file():
+                        continue
+                    with manifest_path.open("rb") as manifest:
+                        raw = manifest.read(256 * 1024 + 1)
+                except OSError:
+                    continue
+                if len(raw) > 256 * 1024:
+                    continue
+                # Modern manifests use "path"; older ones pair a numeric library ID with its path.
+                values = re.finditer(
+                    r'"(?:path|\d+)"\s*"((?:\\.|[^"\\])*)"', os.fsdecode(raw), re.I
+                )
+                for match in values:
+                    if time.monotonic() >= deadline:
+                        break
+                    library = Path(re.sub(r'\\(["\\])', r"\1", match[1]))
+                    if library.is_absolute() and "\x00" not in str(library):
+                        steam_apps(library / "steamapps")
+
+        for app in children(flatpak, 256):
+            if any(name in app.name.lower() for name in ("edopro", "ygopro", "projectignis")):
+                for folder in ("", "data", "config", ".local/share"):
+                    add(app / folder)
+        for parent in (
+            Path("/run/media") / user.name,
+            Path("/run/media"),
+            Path("/media") / user.name,
+            Path("/mnt"),
+        ):
+            add(parent)
+            for volume in children(parent, 32):
+                add(volume)
+                add(volume / "Games")
+                steam_apps(volume / "steamapps")
+                steam_apps(volume / "SteamLibrary/steamapps")
+        # Locate native games on every library before spending the remaining
+        # scan budget on potentially hundreds of unrelated Proton prefixes.
+        for apps in checked_apps:
+            for app in children(apps / "compatdata", 256):
+                prefix(app / "pfx")
+        parents.extend(map(str, extra))
 
     seen: set[str] = set()
     unique: list[str] = []
@@ -377,14 +556,58 @@ def _found_installations(first_guesses: list[str] | None) -> Iterator[tuple[int,
                 yield score, path
 
 
+def installation_roots(path: str) -> tuple[str, ...]:
+    """Candidate game-data roots belonging to a single selection, in preference order."""
+    if sys.platform != "darwin" or not path.lower().endswith(".app"):
+        return (path,)
+    contents = os.path.join(path, "Contents")
+    if not os.path.isfile(os.path.join(contents, "Info.plist")):
+        return ()
+    resources = os.path.join(contents, "Resources")
+    return (
+        resources,
+        os.path.join(resources, "ProjectIgnis"),
+        os.path.join(contents, "MacOS"),
+        os.path.dirname(path),
+    )
+
+
 def find_edopro_folder(first_guesses: list[str] | None = None) -> str | None:
     """Stop at the first ready installation to keep normal startup fast."""
+    deadline = time.monotonic() + _SEARCH_TIME_BUDGET_SECONDS
+
+    def candidates() -> Iterator[str]:
+        yield from (path for path in first_guesses or () if path)
+        parents = _search_parents()
+        for parent in parents:
+            for name in EDOPRO_FOLDER_NAMES:
+                yield os.path.join(parent, name)
+        # Startup only needs one ready installation. Stream large directories
+        # so constructing a sorted picker list cannot consume the whole budget.
+        for parent in parents:
+            if time.monotonic() >= deadline:
+                return
+            with contextlib.suppress(OSError), os.scandir(parent) as entries:
+                for entry in entries:
+                    if time.monotonic() >= deadline:
+                        return
+                    if entry.is_dir():
+                        yield entry.path
+
     fallback = None
-    for score, path in _found_installations(first_guesses):
-        if score == 2:
-            return path
-        if fallback is None:
-            fallback = path
+    seen = set()
+    for candidate in candidates():
+        if time.monotonic() >= deadline:
+            break
+        for root in installation_roots(os.path.abspath(candidate)):
+            key = os.path.normcase(root)
+            if key in seen:
+                continue
+            seen.add(key)
+            if folder_has_card_databases(root, deadline=deadline):
+                return root
+            if fallback is None and _has_game_executable(root):
+                fallback = root
     return fallback
 
 
@@ -563,6 +786,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="Which curated texture pack to download (default: the standard set).",
     )
+    p.add_argument(
+        "--undo-last-sync",
+        action="store_true",
+        help="Restore the images changed or deleted by the last artwork sync in this installation.",
+    )
     return p
 
 
@@ -583,8 +811,13 @@ class Config:
             generate_default_config(self.config_path)
             raise SystemExit(0)
 
+        migrate = (
+            getattr(sys, "frozen", False)
+            and not self.cli.config
+            and not os.path.exists(self.config_path)
+        )
         file_cfg = _load_config_file(self.config_path)
-        if getattr(sys, "frozen", False) and not file_cfg and not self.cli.config:
+        if migrate and not file_cfg:
             # Versions before the per-user state change stored config beside the
             # executable. Read it once and migrate it when the new location is
             # writable; the app still works if the old bundle is read-only.
@@ -594,7 +827,12 @@ class Config:
                 if legacy_cfg:
                     file_cfg = legacy_cfg
                     with contextlib.suppress(OSError):
-                        _write_config_file(self.config_path, legacy_cfg)
+                        target = Path(self.config_path)
+                        with waiting_lock(_preference_lock(target)):
+                            if target.exists():
+                                file_cfg = _read_for_update(target)
+                            else:
+                                _write_config_file(self.config_path, legacy_cfg)
 
         self.edopro_path: str = ""
         self.pics_path: str = ""
@@ -704,7 +942,11 @@ class Config:
             DEFAULTS["original_text"],
         )
         applied = file_cfg.get("era_art_applied", {})
-        self.era_art_applied: dict = applied if isinstance(applied, dict) else {}
+        self.era_art_applied: dict = (
+            applied
+            if isinstance(applied, _EraPolicies)
+            else _EraPolicies(applied if isinstance(applied, dict) else {})
+        )
         self.refresh_era_ids: set[int] = set()
         self.stats: bool = self.cli.stats
         self.no_pause: bool = self.cli.no_pause
@@ -754,6 +996,6 @@ class Config:
         normalized_path = os.path.abspath(os.path.expanduser(edopro_path))
         self.edopro_path = normalized_path
         self.pics_path = os.path.join(self.edopro_path, "pics")
-        if save:
+        if save and not self.dry_run:
             return save_edopro_path(self.config_path, self.edopro_path)
         return True

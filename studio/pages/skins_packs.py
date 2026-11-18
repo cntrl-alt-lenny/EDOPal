@@ -1,6 +1,7 @@
 """Inline library-pack browser shared by the two appearance pages."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QSignalBlocker, Qt
@@ -73,9 +74,10 @@ def listings(cache: PackCache, source: Catalogue, kind: str, version: str) -> li
 
 
 class PackBrowser(QWidget):
-    def __init__(self, ctx: AppContext, kind: str) -> None:
+    def __init__(self, ctx: AppContext, kind: str, confirm: Callable[[str, str], bool]) -> None:
         super().__init__()
         self.ctx, self.kind = ctx, kind
+        self.confirm = confirm
         self.cache = PackCache.for_config(ctx.cfg)
         self.source: Catalogue | None = None
         self.job: Job | None = None
@@ -93,7 +95,7 @@ class PackBrowser(QWidget):
         margins(body, 0)
         nav = QHBoxLayout()
         self.back = Button("Back", "quiet", "back")
-        self.refresh = Button("Refresh catalogue", "secondary")
+        self.refresh = Button("Refresh catalog", "secondary")
         self.refresh.clicked.connect(lambda: self.load(online=True))
         nav.addWidget(self.back)
         nav.addStretch()
@@ -106,7 +108,7 @@ class PackBrowser(QWidget):
         body.addLayout(columns, 1)
         self.menu = QListWidget()
         self.menu.setObjectName("installList")
-        self.menu.setAccessibleName("Catalogue packs")
+        self.menu.setAccessibleName("Catalog packs")
         self.menu.setWordWrap(True)
         self.menu.currentRowChanged.connect(self.display)
         columns.addWidget(self.menu, 2)
@@ -119,7 +121,7 @@ class PackBrowser(QWidget):
         margins(layout, 0)
         scroll.setWidget(inner)
         self.empty = Hero(
-            "Catalogue",
+            "Catalog",
             "No packs yet",
             "Use a built-in wallpaper or your own picture in the theme maker."
             if kind == "wallpaper"
@@ -155,7 +157,7 @@ class PackBrowser(QWidget):
         actions.addStretch()
         self.remove = Button("Remove")
         self.remove.clicked.connect(self.confirm_remove)
-        self.cancel = Button("Cancel")
+        self.cancel = Button("Pause download")
         self.cancel.clicked.connect(self.stop)
         self.action = Button("Download", "primary", "download")
         self.action.clicked.connect(lambda: self.run(False))
@@ -171,7 +173,7 @@ class PackBrowser(QWidget):
         self.refresh.setEnabled(False)
         self.action.setEnabled(False)
         self.remove.setEnabled(False)
-        self.source_hint.setText("Checking the pack catalogue…")
+        self.source_hint.setText("Checking the pack catalog…")
         self.empty.hide()
         source, url = self.source, self.ctx.cfg.content_manifest_url
         key = self.rows[self.menu.currentRow()].origin.id if self.menu.currentRow() >= 0 else ""
@@ -195,14 +197,19 @@ class PackBrowser(QWidget):
             self.loading = False
             self.refresh.setEnabled(True)
             origin = {
-                catalogue.CatalogueSource.LIVE: "Latest catalogue",
-                catalogue.CatalogueSource.CACHED: "Saved catalogue",
-                catalogue.CatalogueSource.BUNDLED: "Built-in catalogue",
+                catalogue.CatalogueSource.LIVE: "Latest catalog",
+                catalogue.CatalogueSource.CACHED: "Saved catalog",
+                catalogue.CatalogueSource.BUNDLED: "Built-in catalog",
             }[self.source.source]
             if self.source.detail and self.source.source != catalogue.CatalogueSource.LIVE:
-                origin = "Offline catalogue"
+                origin = "Offline catalog"
             self.source_hint.setText(
-                f"{origin} · {self.source.detail}" if self.source.detail else origin
+                f"{origin} · You can use local items or refresh to try again."
+                if self.source.detail
+                else origin
+            )
+            self.source_hint.setToolTip(
+                f"Technical details\n{self.source.detail}" if self.source.detail else ""
             )
             with QSignalBlocker(self.menu):
                 self.menu.clear()
@@ -231,7 +238,10 @@ class PackBrowser(QWidget):
             self.loading = False
             self.refresh.setEnabled(True)
             self.display()
-            self.source_hint.setText(f"Could not read the catalogue. {exc}")
+            self.source_hint.setText(
+                "Could not read the pack catalog. Check the downloads folder, then refresh."
+            )
+            self.source_hint.setToolTip(f"Technical details\n{exc}")
 
         job = self.ctx.tasks.start(read)
         job.result.connect(done)
@@ -257,7 +267,7 @@ class PackBrowser(QWidget):
             o, pack = row.origin, row.status.pack if row.status else None
             self.title.setText(row.title)
             self.description.setText(pack.description if pack else "Saved in your library.")
-            self.credits.setText(f"By {o.author}  ·  Licence · {o.license}\n{o.attribution}")
+            self.credits.setText(f"By {o.author}  ·  License · {o.license}\n{o.attribution}")
             self.link.set_value(o.source_url)
             self.feedback.setText(f"{row.state}  ·  Version {o.version}")
             self.action.setText(
@@ -273,12 +283,13 @@ class PackBrowser(QWidget):
         if self.job:
             self.job.cancel()
             self.cancel.setEnabled(False)
-            self.feedback.setText("Cancelling download…")
+            self.feedback.setText("Canceling download…")
 
     def confirm_remove(self) -> None:
         row = self.rows[self.menu.currentRow()]
-        if self.ctx.confirm(
-            "Remove pack?", f"Remove {row.title} from your library and download cache?"
+        if self.confirm(
+            "Remove pack?",
+            f"Remove {row.title} from your library and downloads? Assigned items are kept. You can download it again if it is still in the catalog.",
         ):
             self.run(True)
 
@@ -286,6 +297,7 @@ class PackBrowser(QWidget):
         if self.job or self.loading:
             return
         row = self.rows[self.menu.currentRow()]
+        self.feedback.setToolTip("")
         self.menu.setEnabled(False)
         self.refresh.setEnabled(False)
         self.back.setEnabled(False)
@@ -323,18 +335,19 @@ class PackBrowser(QWidget):
 
         def failed(exc: Exception) -> None:
             self.job = None
+            self.feedback.setToolTip(f"Technical details\n{exc}")
             cancelled = isinstance(exc, DownloadError) and exc.reason == DownloadFailure.CANCELLED
             self.load(
                 message=(
-                    "Download cancelled."
+                    "Download canceled."
                     if cancelled
                     else "The pack cache is busy. Try again when the other operation finishes."
                     if isinstance(exc, CacheBusyError)
                     else download_message(exc)
                     if isinstance(exc, DownloadError)
-                    else f"Invalid pack. {exc}"
+                    else "Invalid pack. Refresh the catalog and download a new copy."
                     if isinstance(exc, ValueError)
-                    else str(exc)
+                    else "Could not update the pack. Check free space and folder permissions, then retry."
                 ),
                 retry="Resume" if cancelled else "Retry",
             )

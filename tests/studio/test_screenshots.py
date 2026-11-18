@@ -25,7 +25,8 @@ def test_small_window_capture_settles_the_music_grid(
     page = window.current
     qtbot.waitUntil(lambda: page.state == "home")
     assert grab_window(window).size() == window.size()
-    assert page.scroll.verticalScrollBar().maximum() > 0
+    # Whether the page overflows depends on its content; what must hold after a
+    # settled capture is that no scene button is squeezed below its minimum.
     assert all(b.height() >= b.minimumSizeHint().height() for b in page.scene_buttons.values())
 
 

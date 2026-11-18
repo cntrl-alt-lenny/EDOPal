@@ -10,14 +10,9 @@ from PySide6.QtCore import QTimer, Slot
 from artwork_flow import Summary, coverage_summary, make_run_config, sync_summary, valid_decks
 from config import Config
 from studio.context import AppContext, GameOpenError, Installation
-from studio.pages.card_results import player_summary
+from studio.pages.card_results import player_summary, retry_summary
 from studio.pages.card_stage import CardStage
-from studio.pages.cards_library import (
-    LibrarySnapshot,
-    NoDecksFound,
-    inspect_library,
-    keep_deck_scope,
-)
+from studio.pages.cards_library import LibrarySnapshot, inspect_library
 from studio.pages.cards_undo import remember_changes, restore_artwork
 from studio.tasks import FolderRequest, Job, WorkerContext
 
@@ -35,11 +30,14 @@ class CardsPage(CardStage):
         self.origin = "options"
         self.stale_coverage = False
         self.no_decks = False
+        self.retry_artwork: tuple[set[int], set[int]] | None = None
+        self.retry_label = ""
         self.block_reason = ""
         self.restoring = False
         self.retry_args: tuple[Path | None, tuple[Path, ...]] = (None, ())
         self.guard.retry.clicked.connect(self._retry)
         self.back.clicked.connect(self._back_to_origin)
+        self.results.retry.clicked.connect(self._retry)
         self.results.back.clicked.connect(self._back_to_origin)
         self.results.decks.clicked.connect(lambda: context.navigate("decks"))
         self.results.full_library.clicked.connect(self._sync_everything)
@@ -70,8 +68,10 @@ class CardsPage(CardStage):
             self.stale_coverage = True
             self.job.cancel()
             self.open_view("options")
+        self.options.start.setVisible(installation.ready)
         self.options.connect_game.setVisible(not installation.path)
         self.options.check_again.setVisible(bool(installation.path) and not installation.ready)
+        self.options.selection.setVisible(bool(installation.path))
         self.options.scope.setVisible(bool(installation.path))
         self.options.start.setEnabled(installation.ready)
         self.options.coverage.setEnabled(installation.ready)
@@ -93,7 +93,9 @@ class CardsPage(CardStage):
     def _load_defaults(self) -> None:
         self.settings.load(self.ctx.cfg)
         self._load_scope()
-        if self.state == "blocked" and not self.restoring:
+        if not self.restoring and (
+            self.state == "blocked" or (self.state == "results" and self.retry_label)
+        ):
             # Changed defaults invalidate the blocked operation's original inputs.
             self.open_view("options")
 
@@ -126,6 +128,7 @@ class CardsPage(CardStage):
         if self.scan:
             self.scan.cancel()
             self.scan = None
+        self.results.undo.hide()
         self.options.undo.hide()
         self.options.snapshot.setVisible(installation.ready)
         if not installation.ready:
@@ -154,13 +157,18 @@ class CardsPage(CardStage):
             label.setText(value)
         self.options.captions[0].setText(result.caption)
         self.options.undo.setVisible(result.can_restore)
+        self.results.undo.setVisible(
+            result.can_restore and self.state == "results" and self.results.allows_undo
+        )
 
     @Slot(object)
-    def _scan_failed(self, _: Exception) -> None:
+    def _scan_failed(self, error: Exception) -> None:
         if self.scan is self.sender():
             for value in self.options.values:
                 value.setText("—")
             self.options.captions[0].setText("Could not read library")
+            if isinstance(error, OSError):
+                self.ctx.folder_unavailable.emit(self.ctx.installation.path)
 
     def _scope_status(self) -> None:
         install = self.ctx.installation
@@ -194,7 +202,12 @@ class CardsPage(CardStage):
         return self._launch(False, game_path, tuple(paths))
 
     def _launch(
-        self, stats_only: bool, game_path: Path | None = None, paths: tuple[Path, ...] = ()
+        self,
+        stats_only: bool,
+        game_path: Path | None = None,
+        paths: tuple[Path, ...] = (),
+        *,
+        retry: bool = False,
     ) -> bool:
         if self.job or self.ctx.busy or not self.ctx.installation.ready:
             return False
@@ -205,6 +218,12 @@ class CardsPage(CardStage):
         self.retry_args = game_path, paths
         self.imported_run = bool(paths)
         self.run_config = cfg = make_run_config(self.ctx.cfg, picks, self.ctx.apply_choices, paths)
+        if not retry:
+            self.retry_artwork = None
+        self.retry_label = ""
+        if self.retry_artwork:
+            cfg.retry_artwork = self.retry_artwork
+            cfg.theme = cfg.audio = cfg.prune = cfg.textures = False
         cfg.update_checked_by_shell = True
         if not stats_only:
             self.ctx.set_busy(True)
@@ -242,13 +261,13 @@ class CardsPage(CardStage):
                     return replacement
 
                 cfg.folder_picker = checked_folder
-                keep_deck_scope(cfg)
             if game_path is not None and not valid_decks(cfg.edopro_path, game_path, paths):
                 raise ValueError("Choose saved decks in the selected installation’s deck folder.")
 
         run = self.ctx.run_coro
 
         async def reversible(job_cfg: Config) -> Any:
+            # Injected workers (including the offline demo) share the production journal.
             with remember_changes(job_cfg):
                 return await run(job_cfg)
 
@@ -274,7 +293,11 @@ class CardsPage(CardStage):
         elif kind == "desc" and not cancelling:
             self.progress.detail.setText(event[2])
         elif kind == "notice":
-            self.ctx.notify(event[1])
+            # The engine also announces its idle outcome to console-style progress sinks.
+            # The receipt already displays that heading in the window.
+            idle = getattr(self.run_config, "idle_summary", None)
+            if not idle or event[1] != idle[0]:
+                self.ctx.notify(event[1])
         elif kind == "coverage":
             self.summary = coverage_summary(event[1])
         elif kind == "folder":
@@ -282,7 +305,7 @@ class CardsPage(CardStage):
             path = None
             try:
                 can_pick = not self.run_config.stats or (self.isVisible() and not self.ctx.busy)
-                if can_pick and not cancelling and not self.imported_run:
+                if can_pick and not cancelling and not self.imported_run and not self.retry_artwork:
                     path = self.ctx.choose_folder(request.initial)
             finally:
                 self.folder_cancelled = path is None
@@ -292,16 +315,22 @@ class CardsPage(CardStage):
     def _result(self, stats: Any) -> None:
         if self.summary is None:
             self._make_summary({"stats": stats})
+            idle = getattr(self.run_config, "idle_summary", None)
+            self.no_decks = bool(
+                idle
+                and self.summary.title
+                in {
+                    "No decks found — nothing to sync",
+                    "No cards found in your decks — nothing to sync",
+                }
+            )
+            if stats is not None:
+                self.summary, self.retry_label = retry_summary(self.summary, stats)
+                if self.retry_label and not stats.storage_error:
+                    self.retry_artwork = stats.transient_ids, stats.field_transient_ids
 
     @Slot(object)
     def _error(self, exc: BaseException) -> None:
-        if isinstance(exc, NoDecksFound):
-            self.no_decks = True
-            self.summary = Summary(
-                "No decks found — nothing was synced",
-                note="Save a deck containing cards in EDOPro, or choose a different artwork selection.",
-            )
-            return
         if isinstance(exc, GameOpenError):
             self.block_reason = str(exc)
             return
@@ -349,11 +378,14 @@ class CardsPage(CardStage):
                 detail += f" · {self.summary.first[0]} downloaded"
             self.ctx.state.setValue(self._history_key(), f"Last sync   ·   {when}   ·   {detail}")
             self._snapshot(self.ctx.installation)
-        self.results.undo.setVisible(not cfg.stats and getattr(cfg, "artwork_changed", False))
+        self.results.undo.hide()
         scope = "My decks" if cfg.my_decks and not cfg.stats else "Full library"
         self.results.show_result(
             self.summary,
             no_decks=self.no_decks,
+            retry=self.retry_label,
+            back_to="Sync settings" if self.origin == "settings" else "HD Cards",
+            coverage=cfg.stats,
             scope="Selected decks" if self.imported_run else scope,
         )
         self.open_view("results")
@@ -364,7 +396,7 @@ class CardsPage(CardStage):
         if self.restoring:
             self._restore()
         else:
-            self._launch(False, *self.retry_args)
+            self._launch(False, *self.retry_args, retry=True)
 
     def _confirm_restore(self) -> None:
         if self.ctx.confirm(
@@ -418,7 +450,7 @@ class CardsPage(CardStage):
             self.restoring = False
             self.summary = Summary("Could not restore artwork", note=str(exc), warning=True)
             self.results.show_result(self.summary)
-            self.results.undo.show()
+            self._snapshot(self.ctx.installation)
             self.open_view("results")
 
         job = self.ctx.tasks.start(restore)
@@ -455,8 +487,14 @@ class CardsPage(CardStage):
 
     def shown(self) -> None:
         if self.state == "options":
-            control = (
-                self.options.start if self.options.start.isEnabled() else self.options.connect_game
+            control = next(
+                button
+                for button in (
+                    self.options.start,
+                    self.options.check_again,
+                    self.options.connect_game,
+                )
+                if not button.isHidden()
             )
             if not control.isVisible():
                 control = self.options.settings

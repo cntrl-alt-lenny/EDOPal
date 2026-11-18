@@ -5,11 +5,9 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import os
 import re
-import tempfile
 import unicodedata
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path, PureWindowsPath
@@ -17,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from durable_write import durable_write, sync_directory, waiting_lock
 from network_tls import create_ssl_context
 
 SITE = "https://formatlibrary.com"
@@ -382,6 +381,10 @@ def _publish(
     game_path: str | Path, title: str, content: bytes, *, reuse_identical: bool
 ) -> DeckPublication:
     """Create the file without ever replacing one, and report what was kept beside it."""
+    # The backup package also loads the collection engines. Keep ordinary YDK
+    # reads and Format Library browsing independent of that import.
+    from backup.core import folded, publish_new, safe
+
     if (
         not title.strip(". ")
         or title != title.rstrip(". ")
@@ -398,45 +401,31 @@ def _publish(
     folder = (base / "deck").resolve()
     if not folder.is_relative_to(base):
         raise DeckError("The deck folder points outside the selected EDOPro installation.")
-    folder.mkdir(exist_ok=True)
     digest = hashlib.sha256(content).hexdigest()
     kept: list[Path] = []
-    temp = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=folder, prefix=".fl-", suffix=".tmp", delete=False
-        ) as output:
-            temp = Path(output.name)
-            output.write(content)
+    # Exclusive rename protects the exact name. The game lock also serializes
+    # case-folded name selection by Studio writers on case-sensitive volumes.
+    with waiting_lock(safe(base, ".edopro-appearance.lock")):
+        if not folder.is_dir():
+            folder.mkdir(exist_ok=True)
+            sync_directory(folder.parent)
+        existing: dict[str, list[Path]] = defaultdict(list)
+        for path in sorted(folder.iterdir()):
+            existing[folded(path.name)].append(path)
         for i in range(1, 1001):
             suffix = f" ({i})" if i > 1 else ""
             target = folder / f"{title}{suffix}.ydk"
-            try:
-                if os.name == "nt":
-                    # Windows rename fails if the destination already exists.
-                    temp.rename(target)
-                else:
-                    try:
-                        os.link(temp, target)
-                    except FileExistsError:
-                        raise
-                    except OSError:
-                        # Removable FAT / exFAT volumes may not support hard links.
-                        out = target.open("xb")
-                        try:
-                            with out:
-                                out.write(content)
-                        except OSError:
-                            target.unlink(missing_ok=True)
-                            raise
-                return DeckPublication(target, True, tuple(kept), digest)
-            except FileExistsError:
-                if reuse_identical and target.is_file() and not target.is_symlink():
-                    with contextlib.suppress(OSError), target.open("rb") as original:
+            collisions = existing[folded(target.name)]
+            if not collisions:
+                try:
+                    durable_write(target, content, publish=publish_new)
+                    return DeckPublication(target, True, tuple(kept), digest)
+                except FileExistsError:
+                    collisions.append(target)
+            for collision in collisions:
+                if reuse_identical and collision.is_file() and not collision.is_symlink():
+                    with contextlib.suppress(OSError), collision.open("rb") as original:
                         if original.read(len(content) + 1) == content:
-                            return DeckPublication(target, False, tuple(kept), digest)
-                kept.append(target)
+                            return DeckPublication(collision, False, tuple(kept), digest)
+                kept.append(collision)
         raise DeckError("Too many different copies of this deck are already in the deck folder.")
-    finally:
-        if temp is not None:
-            temp.unlink(missing_ok=True)

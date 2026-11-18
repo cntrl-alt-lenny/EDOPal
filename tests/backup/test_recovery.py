@@ -11,7 +11,9 @@ from backup import restore
 from music.settings import _linux_game_running
 
 
-def test_proton_process_blocks_preference_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_proton_process_blocks_preference_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     proc = tmp_path / "proc" / "42"
     proc.mkdir(parents=True)
     monkeypatch.setattr(Path, "readlink", lambda _: Path("/usr/bin/wine64-preloader"))
@@ -91,6 +93,31 @@ def test_destination_reparse_point(pair: tuple, snapshot: Path, tmp_path: Path) 
             redirect.rmdir()
         else:
             redirect.unlink()
+
+
+def test_pending_journal_flush_failure_prevents_first_live_write(
+    pair: tuple, snapshot: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src, dest = pair
+    for install, data in ((src, b"replacement"), (dest, b"original")):
+        deck = install.target("game/deck/final.ydk")
+        deck.parent.mkdir()
+        deck.write_bytes(data)
+    backup.create(src, snapshot)
+    plan = backup.plan_restore(snapshot, dest, "take_theirs")
+
+    def fail_flush(fd: int) -> None:
+        raise OSError("journal flush failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", fail_flush)
+        with pytest.raises(OSError, match="journal flush failed"):
+            backup.execute(plan)
+    assert deck.read_bytes() == b"original" and not backup.transactions(dest)
+    tx = backup.execute(plan)
+    assert deck.read_bytes() == b"replacement"
+    backup.recover(dest, tx.id, "rollback")
+    assert deck.read_bytes() == b"original"
 
 
 def test_disk_budget_and_journal_integrity(

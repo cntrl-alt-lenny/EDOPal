@@ -8,7 +8,7 @@ from collections.abc import Callable
 from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
@@ -91,6 +91,27 @@ def _install(edopro_path: str, config_path: str, group: str) -> None:
         _publish(root, backups, source.relative_to(ASSETS), source.read_bytes())
 
 
+MAX_SKIN_ZIP = 128 * 1024**2
+MAX_SKIN_XML = 1024**2
+
+
+def _read_skin_xml(path: Path) -> bytes:
+    if path.stat().st_size <= MAX_SKIN_XML:
+        with path.open("rb") as file:
+            data = file.read(MAX_SKIN_XML + 1)
+        if len(data) <= MAX_SKIN_XML:
+            return data
+    raise ValueError("The skin definition is too large.")
+
+
+def _check_pack(path: Path) -> None:
+    from content.layouts import _directory
+
+    if path.stat().st_size > MAX_SKIN_ZIP:
+        raise ValueError("The appearance pack exceeds 128 MiB.")
+    _directory(path)
+
+
 def _pack_sources(archive: ZipFile, prefix: str) -> dict[str, str]:
     return {
         name: source
@@ -110,8 +131,11 @@ def _install_pack(
     *,
     turn_colors: tuple[tuple[int, ...], ...] | None = None,
     archive_path: Path | None = None,
+    stage: Callable[[str, bytes], None] | None = None,
 ) -> set[str]:
-    with ZipFile(archive_path or PACKS / f"{pack}.zip") as archive:
+    path = archive_path or PACKS / f"{pack}.zip"
+    _check_pack(path)
+    with ZipFile(path) as archive:
         if archive_path is None:
             files = _pack_sources(archive, prefix)
         else:
@@ -129,11 +153,19 @@ def _install_pack(
             and prefix + "skin.xml" not in files
         ):
             raise ValueError(f"No skin.xml in the {pack} pack.")
+        if sum(archive.getinfo(source).file_size for source in files.values()) > 512 * 1024**2:
+            raise ValueError("The expanded appearance pack is too large.")
         for name, source in files.items():
+            limit = 1 if name.endswith((".xml", ".txt")) else 8 if name.endswith(".ttf") else 32
+            if archive.getinfo(source).file_size > limit * 1024**2:
+                raise ValueError(f"The appearance file {name} is too large.")
             data = archive.read(source)
             if turn_colors is not None and name == prefix + "skin.xml":
                 data = _recolor_turn(data, turn_colors)
-            _publish(root, backups, name, data)
+            if stage:
+                stage(name, data)
+            else:
+                _publish(root, backups, name, data)
         return set(files)
 
 
@@ -145,6 +177,7 @@ def _skin_files(
     cache: PackCache,
     exact_skin: Pack | None,
     exact_shared: Pack | None,
+    stage: Callable[[str, bytes], None],
 ) -> str:
     pack_id = exact_skin.id if exact_skin else skin.lower()
     prefix = f"skin/Monokai {skin}/"
@@ -162,11 +195,15 @@ def _skin_files(
         ):
             installed = _regular_path(root, relative)
             if installed.exists() and turn_highlight_enabled(root, skin) != highlight_turn:
-                with ZipFile(skin_path or PACKS / f"{pack_id}.zip") as pack:
+                path = skin_path or PACKS / f"{pack_id}.zip"
+                _check_pack(path)
+                with ZipFile(path) as pack:
+                    if pack.getinfo(relative).file_size > MAX_SKIN_XML:
+                        raise ValueError("The skin definition is too large.")
                     colors = (
                         TURN_ACCENTS[skin] if highlight_turn else _turn_colors(pack.read(relative))
                     )
-                _publish(root, backups, relative, _recolor_turn(installed.read_bytes(), colors))
+                stage(relative, _recolor_turn(_read_skin_xml(installed), colors))
                 # Keep local preferences when only the active skin's highlight changes.
                 return ""
         shared_path = locks.enter_context(cache.use_pack("shared", exact=exact_shared))
@@ -179,10 +216,13 @@ def _skin_files(
             prefix,
             turn_colors=TURN_ACCENTS[skin] if highlight_turn else None,
             archive_path=skin_path,
+            stage=stage,
         )
-        fonts = _install_pack(root, backups, "shared", "fonts/", archive_path=shared_path)
+        fonts = _install_pack(
+            root, backups, "shared", "fonts/", archive_path=shared_path, stage=stage
+        )
         if "fonts/Inter-OFL.txt" not in fonts:
-            _publish(root, backups, "fonts/Inter-OFL.txt", (PACKS / "Inter-OFL.txt").read_bytes())
+            stage("fonts/Inter-OFL.txt", (PACKS / "Inter-OFL.txt").read_bytes())
     return skin
 
 
@@ -223,7 +263,7 @@ def turn_highlight_enabled(root: Path, skin: str) -> bool:
         return False
     path = root / "skin" / ("Monokai " + skin) / "skin.xml"
     try:
-        return _turn_colors(path.read_bytes()) == TURN_ACCENTS[skin]
+        return _turn_colors(_read_skin_xml(path)) == TURN_ACCENTS[skin]
     except (OSError, ValueError, KeyError, ElementTree.ParseError):
         return False
 
@@ -563,6 +603,202 @@ def _install_effects(root: Path, config_path: str, name: str) -> None:
     _change_group(root, config_path, "effects", bundled_files(name))
 
 
+def _pack_record(backups: Path, current: dict[str, str]) -> dict:
+    path = _regular_path(backups, "prior-skin.json")
+    if not path.exists():
+        return {"version": 2, "files": {}, "settings": {}, "dirs": []}
+    if path.stat().st_size > 4 * 1024**2:
+        raise ValueError("Oversized skin restore record.")
+    record = json.loads(path.read_bytes())
+    if not isinstance(record, dict):
+        raise ValueError("Invalid skin restore record.")
+    if "version" not in record:
+        # Older releases recorded settings only. Restore only recognisable pack values.
+        from themes.transaction import check_settings
+
+        check_settings(record)
+        owned = {
+            "skin": {"Monokai " + name for name in SKINS},
+            **{key: {value} for key, value in FONT_SETTINGS.items()},
+        }
+        return {
+            "version": 2,
+            "files": {},
+            "dirs": [],
+            "settings": {
+                key: [before, current[key]]
+                for key, before in record.items()
+                if current.get(key) in owned[key]
+            },
+        }
+    if record["version"] != 2:
+        raise ValueError("Unsupported skin restore record.")
+    return record
+
+
+def _pack_member(name: str) -> bool:
+    return name in {
+        "fonts/Inter-OFL.txt",
+        "fonts/Inter-Medium.ttf",
+        "fonts/InterEDO-Regular.ttf",
+    } or bool(
+        re.fullmatch(
+            r"skin/Monokai [\w][\w -]{0,63}/(?:skin\.xml|(?:[^/\\:]+/)*[^/\\:]+\.(?:png|jpe?g))",
+            name,
+            re.I,
+        )
+    )
+
+
+def _apply_recorded_skin(
+    root: Path,
+    backups: Path,
+    skin: str,
+    highlight: bool | None,
+    cache: PackCache,
+    exact: Pack | None,
+    shared: Pack | None,
+) -> None:
+    conf = _regular_path(root, "config/system.conf")
+    raw = conf.read_bytes() if conf.exists() else b""
+    current = _settings(raw.removeprefix(b"\xef\xbb\xbf"))
+    record = _pack_record(backups, current)
+    snapshot = _regular_path(backups, "prior-skin.json")
+    backups.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=backups) as temp:
+        staged: dict[str, tuple[Path, str | None]] = {}
+
+        def stage(name: str, data: bytes) -> None:
+            target = _regular_path(root, name)
+            if not _pack_member(name):
+                raise ValueError("Unexpected file in the skin pack.")
+            before, after = _signature(target), hashlib.sha256(data).hexdigest()
+            if before == after:
+                return
+            entry = record["files"].get(name, [])
+            # A player edit made between two applications becomes the new restore point.
+            original = entry[0] if before in entry[1:] else before
+            if original and original == before:
+                blob = _regular_path(backups, f"skin-originals/{original}")
+                if _signature(blob) != original:
+                    if target.stat().st_size > 64 * 1024**2:
+                        raise ValueError(f"{name} is too large to back up safely.")
+                    previous = target.read_bytes()
+                    if hashlib.sha256(previous).hexdigest() != original:
+                        raise OSError(f"{name} changed during backup.")
+                    _atomic_write(blob, previous)
+            record["files"][name] = [original, after, before]
+            for parent in target.parents:
+                if parent == root or parent.exists():
+                    break
+                relative = parent.relative_to(root).as_posix()
+                if relative not in record["dirs"]:
+                    record["dirs"].append(relative)
+            path = Path(temp) / after
+            if not path.exists():
+                path.write_bytes(data)
+            staged[name] = path, before
+
+        activate = _skin_files(root, backups, skin, highlight, cache, exact, shared, stage)
+        values = {"skin": "Monokai " + skin, **FONT_SETTINGS} if activate else {}
+        for key, after in values.items():
+            before = current.get(key)
+            entry = record["settings"].get(key, [])
+            record["settings"][key] = [entry[0] if before in entry[1:] else before, after, before]
+        record.setdefault("created_config", not conf.exists())
+        _atomic_write(snapshot, json.dumps(record).encode())
+        for name, (path, before) in staged.items():
+            destination = _regular_path(root, name)
+            if _signature(destination) != before:
+                raise OSError(f"{name} changed during installation. Restore the skin and retry.")
+            data = path.read_bytes()
+            record_artwork_change(destination, data)
+            _atomic_write(destination, data)
+        if values:
+            if (conf.read_bytes() if conf.exists() else b"") != raw:
+                raise OSError(
+                    "EDOPro settings changed during installation. Restore the skin and retry."
+                )
+            _atomic_write(conf, _update_settings(raw, values))
+        # The preceding values were valid recovery targets only until publication finished.
+        for changes in (record["files"], record["settings"]):
+            for pair in changes.values():
+                del pair[2:]
+        _atomic_write(snapshot, json.dumps(record).encode())
+
+
+def _restore_recorded_skin(root: Path, backups: Path) -> None:
+    from themes.transaction import check_settings, discard_empty
+
+    snapshot = _regular_path(backups, "prior-skin.json")
+    if not snapshot.exists():
+        raise FileNotFoundError("There is no saved skin to restore.")
+    conf = _regular_path(root, "config/system.conf")
+    raw = conf.read_bytes() if conf.exists() else b""
+    current = _settings(raw.removeprefix(b"\xef\xbb\xbf"))
+    record = _pack_record(backups, current)
+    changed_settings = {
+        key: value
+        for key, value in current.items()
+        if key in record["settings"] and value not in record["settings"][key]
+    }
+    selected = changed_settings.get("skin")
+    fonts = {
+        value.split(".ttf", 1)[0] + ".ttf"
+        for key, value in changed_settings.items()
+        if key in FONT_SETTINGS and ".ttf" in value
+    }
+    if fonts.intersection(("fonts/InterEDO-Regular.ttf", "fonts/Inter-Medium.ttf")):
+        fonts.add("fonts/Inter-OFL.txt")
+    parents = set()
+    for name, (before, *installed) in record["files"].items():
+        if not _pack_member(name) or any(
+            digest is not None and not _SHA256.fullmatch(digest) for digest in (before, *installed)
+        ):
+            raise ValueError("Invalid asset in the skin restore record.")
+        path = _regular_path(root, name)
+        parents.update(path.parents)
+        if (selected and name.startswith(f"skin/{selected}/")) or name in fonts:
+            continue  # The player's newer selection still needs this installed asset.
+        actual = _signature(path)
+        if actual is None or actual == before or actual not in installed:
+            continue
+        if before is None:
+            path.unlink()
+        else:
+            blob = _regular_path(backups, "skin-originals/" + before)
+            if blob.stat().st_size > 64 * 1024**2:
+                raise OSError(f"The original of {name} is damaged.")
+            data = blob.read_bytes()
+            if hashlib.sha256(data).hexdigest() != before:
+                raise OSError(f"The original of {name} is damaged.")
+            _atomic_write(path, data)
+    patch = {
+        key: before
+        for key, (before, *installed) in record["settings"].items()
+        if current.get(key) in installed and current.get(key) != before
+    }
+    check_settings(patch)
+    if patch:
+        if conf.read_bytes() != raw:
+            raise OSError("EDOPro settings changed during restore. Close the game and retry.")
+        restored = _update_settings(raw, patch)
+        if not restored and record.get("created_config"):
+            conf.unlink()
+        else:
+            _atomic_write(conf, restored)
+    for name in sorted(record["dirs"], key=len, reverse=True):
+        path = root / name
+        if (
+            path in parents
+            and path != root
+            and path.resolve() == path
+            and path.is_relative_to(root)
+        ):
+            discard_empty(path)
+    snapshot.unlink()
+
+
 class SleeveReapplyError(OSError):
     """The appearance change succeeded, but the saved sleeves still need attention."""
 
@@ -589,8 +825,6 @@ def apply_appearance(
     """Install only the selected groups, activating the skin after its files are ready."""
     root = Path(edopro_path).resolve()
     backups = _backup_dir(root, config_path)
-    snapshot = backups / "prior-skin.json"
-    rel = "config/system.conf"
     if skin_pack is not None and (
         skin_pack.kind != "skin"
         or skin_pack.withheld
@@ -630,7 +864,7 @@ def apply_appearance(
         _change_group(root, config_path, undo_group, None)
         return
     if skin:
-        skin = _skin_files(
+        _apply_recorded_skin(
             root,
             backups,
             skin,
@@ -639,6 +873,8 @@ def apply_appearance(
             skin_pack,
             shared_pack,
         )
+    elif restore:
+        _restore_recorded_skin(root, backups)
     if sleeves:
         _install_pack(root, backups, "shared", "textures/")
     if audio == "Thonk":
@@ -665,18 +901,6 @@ def apply_appearance(
         _change_group(root, config_path, "music", files)
     if not skin and not restore:
         return
-    conf = root / rel
-    content = conf.read_bytes() if conf.is_file() else b""
-    if restore:
-        values = json.loads(snapshot.read_bytes())
-    else:
-        values = {"skin": f"Monokai {skin}", **FONT_SETTINGS}
-        if not snapshot.exists():
-            before = _settings(content.removeprefix(b"\xef\xbb\xbf"))
-            _atomic_write(snapshot, json.dumps({key: before.get(key) for key in values}).encode())
-    _publish(root, backups, rel, _update_settings(content, values))
-    if restore:
-        snapshot.unlink(missing_ok=True)
     library_dir = (pack_cache or PackCache.for_config_path(config_path)).root.parent / "sleeves"
     if library_dir.is_dir():
         from sleeves import Library, reapply
@@ -690,5 +914,5 @@ def apply_appearance(
             reapply(Library(library_dir), root, Path(config_path), exclude=exclude)
         except (OSError, ValueError, KeyError) as exc:
             raise SleeveReapplyError(
-                f"The look was changed. Could not restore your sleeves. {exc}"
+                f"The skin was changed. Could not restore your sleeves. {exc}"
             ) from exc

@@ -88,10 +88,6 @@ class StandingsSelection:
     def can_select_all(self) -> bool:
         return len(self.decks) > 1 and self.selected != self.decks
 
-    @property
-    def preview(self) -> Deck | None:
-        return self.selected[0] if len(self.selected) == 1 else None
-
     def capture(self, game: Path, historical: bool) -> ImportBatch | None:
         if self.event and self.selected:
             return ImportBatch(game, self.event, self.selected, historical and is_goat(self.event))

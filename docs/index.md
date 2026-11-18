@@ -2,6 +2,7 @@
 
 - [Get started and troubleshoot](../README.md#download-and-first-run)
 - [Screenshot gallery](gallery.md)
+- [Regenerate the release screenshots](screenshots/README.md)
 - [Privacy and network use](privacy.md)
 - [Game files and recovery](safety.md)
 - [Source setup, tests and screenshots](../CONTRIBUTING.md)

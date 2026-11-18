@@ -82,13 +82,15 @@ def test_summary_transient_field_and_card_failures_and_last_run(
     assert "14 days" not in cards.summary.note
     assert ("Downloads interrupted by a connection error", "2") in cards.summary.rows
     assert ("Images already present", "2") in cards.summary.rows
-    cards.results.done.click()
-    assert "Sync complete" in cards.options.last.text()
+    assert cards.results.retry.text() == "Retry 2 downloads" and cards.results.retry.isVisible()
+    assert "ID 123" in cards.summary.failures[0]
+    cards.results.back.click()
+    assert "2 downloads need another try" in cards.options.last.text()
     game = window.ctx.installation
     window.ctx.set_installation(Installation())
     assert not cards.options.snapshot.isVisible()
     window.ctx.set_installation(game)
-    assert "Sync complete" in cards.options.last.text()
+    assert "2 downloads need another try" in cards.options.last.text()
 
 
 def test_large_library_summary_skips_per_image_reads(
@@ -150,10 +152,16 @@ def test_empty_my_decks_stops_real_engine_before_download_or_extras(
     cards.settings.toggles["theme"].setChecked(theme)
     cards.start_sync()
     qtbot.waitUntil(lambda: cards.state == "results")
-    assert cards.summary.title == "No decks found — nothing was synced"
+    assert cards.summary.title == (
+        "No cards found in your decks — nothing to sync"
+        if empty_file
+        else "No decks found — nothing to sync"
+    )
+    assert cards.options.scope.group.checkedId() == 1
     assert not cards.results.undo.isVisible() and not cards.results.done.isVisible()
     assert cards.results.decks.isVisible() and cards.results.full_library.isVisible()
     assert not cards.ctx.state.contains(cards._history_key())
+    assert not window.notice.isVisible()
     assert cards.run_config.my_decks and cards.ctx.exit_code == 0
     install.assert_not_called()
     session.assert_not_called()

@@ -3,9 +3,9 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog, QLabel
 from pytestqt.qtbot import QtBot
 
 from sleeves import PALETTES, PATTERNS, ArtMissing, ArtUnavailable, CardArt
@@ -25,6 +25,7 @@ def desk(
     window.resize(1280, 800)
     window.nav["sleeves"].click()
     page = window.current
+    monkeypatch.setattr(page, "confirm", lambda *_: True)
     ready(qtbot, page)
     yield window, page
     if page.editor:
@@ -56,7 +57,7 @@ def test_complete_collection_filter_and_crop() -> None:
     prints = collection()
     assert len({c.key for c in prints}) == len(PATTERNS) * len(PALETTES) == 384
     assert len(filtered(prints, "sol invictus", "Ready-made", "Green", {})) == 4
-    assert not filtered(prints, "", "Saved sleeves", "All colours", {})
+    assert not filtered(prints, "", "Saved sleeves", "All colors", {})
     for size in ((622, 622), (1920, 240), (240, 900), (1, 1)):
         for centre in ((0, 0), (0.5, 0.5), (1, 1)):
             x, y, w, h = crop_box(size, centre, 2)
@@ -88,7 +89,7 @@ def test_slots_apply_undo_recent_and_conflicts(
     page.gallery.search.clear()
     page.gallery.source.setCurrentText("Recently used")
     assert len(page.gallery.visible) == 2
-    monkeypatch.setattr(window, "confirm", lambda *_: True)
+    monkeypatch.setattr(page, "confirm", lambda *_: True)
     page.undo.click()
     ready(qtbot, page)
     assert mine.read_bytes() == old and not opponent.exists()
@@ -100,7 +101,7 @@ def test_slots_apply_undo_recent_and_conflicts(
     opponent.write_bytes(old)
     page.activation_changed(Qt.ApplicationState.ApplicationActive)
     ready(qtbot, page)
-    assert page.apply.text() == "Reapply"
+    assert page.apply.text() == "Apply saved sleeves again"
     assert "Changed" in page.banner.slots["opponent"].state.text()
     page.undo.click()
     qtbot.waitUntil(lambda: not page.writing)
@@ -126,7 +127,7 @@ def test_busy_close_game_and_retry(
     page.apply.click()
     assert not window.navigate("music") and not window.change.isEnabled()
     assert not page.hidden() and not page.request_close()
-    assert "paused" in page.status.text()
+    assert "change folders when this finishes" in page.status.text()
     gate.set()
     qtbot.waitUntil(lambda: not page.writing)
     assert "Close EDOPro" in page.status.text() and page.retry.isVisible()
@@ -170,10 +171,10 @@ def test_designer_collection_edit_bin_restore(
     manage.save.click()
     ready(qtbot, page)
     page.gallery.search.setText("gift")
-    page.gallery.source.setCurrentText("Favourites")
+    page.gallery.source.setCurrentText("Favorites")
     assert [c.name for c in page.gallery.visible] == ["Frost"]
     page.gallery.surprise.click()
-    monkeypatch.setattr(window, "confirm", lambda *_: True)
+    monkeypatch.setattr(page, "confirm", lambda *_: True)
     page.gallery.actions["manage"].click()
     page.editor.remove.click()
     ready(qtbot, page)
@@ -230,8 +231,6 @@ def test_card_fetch_is_explicit_missing_retry_and_crop(
     assert editor.layout_choice().crop != previous
     before_drag = editor.layout_choice().crop
     point = editor.preview.rect().center()
-    from PySide6.QtCore import QPoint
-
     qtbot.mousePress(editor.preview, Qt.MouseButton.LeftButton, pos=point)
     qtbot.mouseMove(editor.preview, pos=point + QPoint(15, 4))
     qtbot.mouseRelease(editor.preview, Qt.MouseButton.LeftButton, pos=point + QPoint(15, 4))
@@ -300,7 +299,7 @@ def test_absent_unready_and_read_failure(
         window.navigate("skins")
         window.navigate("sleeves")
         qtbot.waitUntil(lambda: page.retry.isVisible())
-        assert "read-only" in page.status.text()
+        assert "read-only" in page.details.toolTip() and page.details.isVisible()
         assert not page.apply.isEnabled()
     page.retry.click()
     ready(qtbot, page)
@@ -315,19 +314,19 @@ def test_slot_and_management_controls_fit(desk: tuple, qtbot: QtBot, size: tuple
 
     window, page = desk
     window.resize(*size)
+    for widget in (page.undo, page.apply):
+        assert widget.isVisible() and window.rect().contains(
+            QRect(widget.mapTo(window, QPoint()), widget.size())
+        )
     page.gallery.actions["manage"].click()
     editor = page.editor
     qtbot.waitUntil(lambda: editor.valid and page.slide.currentTime() == page.slide.duration())
     assert window.width() == size[0] and window.height() == size[1]
-    for widget in (
-        editor.group,
-        editor.name,
-        editor.save,
-        page.undo,
-        page.apply,
-        *page.banner.slots.values(),
-    ):
-        assert window.rect().contains(QRect(widget.mapTo(window, QPoint()), widget.size()))
+    assert not page.undo.isVisible() and not page.apply.isVisible()
+    for widget in (editor.group, editor.name, editor.save, *page.banner.slots.values()):
+        assert widget.isVisible() and window.rect().contains(
+            QRect(widget.mapTo(window, QPoint()), widget.size())
+        )
     for button in page.banner.slots.values():
         assert button.heading.width() >= button.heading.fontMetrics().horizontalAdvance(
             button.heading.text()
@@ -491,3 +490,129 @@ def test_updated_pack_keeps_slot_identity_and_remeasures_colour(
     assert not page.gallery.visible
     page.gallery.colour.setCurrentText("Red")
     assert [c.key for c in page.gallery.visible] == [key]
+
+
+def test_crop_uses_loaded_image(
+    desk: tuple, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import Mock
+
+    from sleeves import imaging
+
+    _, page = desk
+    picture = tmp_path / "flower.png"
+    image = QImage(300, 400, QImage.Format.Format_RGB32)
+    image.fill(Qt.GlobalColor.red)
+    assert image.save(str(picture))
+    page.gallery.actions["image"].click()
+    editor = page.editor
+    editor.load(lambda: picture, "Flower")
+    qtbot.waitUntil(lambda: editor.valid)
+    decoder = Mock(wraps=imaging.decode)
+    monkeypatch.setattr(imaging, "decode", decoder)
+    editor.mode.setCurrentText("Fill sleeve")
+    editor.zoom.setValue(150)
+    qtbot.waitUntil(lambda: editor.valid)
+    decoder.assert_not_called()
+
+
+def test_unsaved_slot_choices_guard_navigation(
+    desk: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window, page = desk
+    pick(page, qtbot, "Vortex")
+    monkeypatch.setattr(page, "confirm", lambda *_: False)
+    assert not window.navigate("cards")
+    page.escape()
+    assert page.pending
+    monkeypatch.setattr(page, "confirm", lambda *_: True)
+    assert window.navigate("cards") and not page.pending
+
+
+def test_download_art_cache_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sleeves import cards
+    from tools.sleeve_contact_sheet import stand_in
+
+    cache = cards.CardArt(tmp_path)
+    cache._dir.mkdir()
+    first, second = (cache._dir / (str(i) + ".jpg") for i in (1, 2))
+    for file in (first, second):
+        assert stand_in().save(str(file))
+    monkeypatch.setattr(cards, "ART_CACHE_BYTES", first.stat().st_size, raising=False)
+    assert cache._fetch(2) == second
+    assert not first.exists() and second.is_file()
+
+
+def test_metadata_save_preserves_other_library_edits(desk: tuple, qtbot: QtBot) -> None:
+    from sleeves import Library
+
+    _, page = desk
+    pick(page, qtbot, "Vortex")
+    page.gallery.actions["manage"].click()
+    editor = page.editor
+    key = editor.choices[editor.listing.currentIndex()].entry.id
+    Library(page.library.root).edit(key, tags=["kept"])
+    editor.name.setText("Renamed")
+    qtbot.waitUntil(lambda: editor.valid)
+    editor.save.click()
+    ready(qtbot, page)
+    entry = next(e for e in page.library.entries() if e.id == key)
+    assert entry.name == "Renamed" and entry.tags == ("kept",)
+
+
+def test_oversized_sleeve_photo_rejected_before_payload_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sleeves import imaging
+
+    picture = tmp_path / "large.png"
+    picture.write_bytes(b"12345")
+    monkeypatch.setattr(imaging, "MAX_BYTES", 4)
+
+    def unexpected(*args: object) -> None:
+        pytest.fail("Oversized source opened for a payload read")
+
+    monkeypatch.setattr(Path, "open", unexpected)
+    with pytest.raises(ValueError, match="smaller"):
+        imaging.read_source(picture)
+
+
+def test_editor_only_offers_to_save_its_draft(desk: tuple, qtbot: QtBot) -> None:
+    _, page = desk
+    pick(page, qtbot, "Vortex")
+    page.gallery.actions["design"].click()
+    qtbot.waitUntil(lambda: page.editor.valid)
+    assert page.editor.save.isVisible() and not page.apply.isVisible()
+    page.editor.back_button.click()
+    assert page.apply.isVisible() and page.pending
+
+
+def test_first_visit_fits_compact_slot_headings(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot
+) -> None:
+    window = make_window()
+    window.resize(960, 600)
+    window.navigate("sleeves")
+    page = window.current
+    ready(qtbot, page)
+    label = page.banner.slots["opponent"].heading
+    assert label.width() >= label.fontMetrics().horizontalAdvance(label.text())
+    prompt = next(
+        w for w in page.banner.findChildren(QLabel) if w.text().startswith("Choose a sleeve")
+    )
+    assert prompt.height() >= prompt.heightForWidth(prompt.width())
+
+
+def test_crop_uses_final_pointer_position(qtbot: QtBot) -> None:
+    from studio.pages.sleeves_widgets import Preview
+
+    widget = Preview()
+    qtbot.addWidget(widget)
+    widget.set_image(QImage(100, 140, QImage.Format.Format_RGB32))
+    widget.set_draggable(True)
+    widget.show()
+    widget.repaint()
+    start = widget.rect().center()
+    qtbot.mousePress(widget, Qt.MouseButton.LeftButton, pos=start)
+    with qtbot.waitSignal(widget.moved, timeout=400):
+        qtbot.mouseRelease(widget, Qt.MouseButton.LeftButton, pos=start + QPoint(20, 0))

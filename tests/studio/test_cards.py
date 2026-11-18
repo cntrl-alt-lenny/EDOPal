@@ -75,7 +75,7 @@ def test_progress_to_failure_summary_and_report(
     assert str(card.run_config.report_path) in card.summary.full_note
     qtbot.keyClick(window, Qt.Key.Key_Escape)
     assert card.state == "results" and not card.results.list.isVisible()
-    card.results.done.click()
+    card.results.back.click()
     assert card.state == "options"
     assert window.change.isEnabled()
 
@@ -100,7 +100,7 @@ def test_only_cancel_sync_stops_work_and_next_run_gets_a_new_event(
     card.options.start.click()
     assert not card.job.cancel_event.is_set()
     qtbot.waitUntil(lambda: card.state == "results")
-    assert card.summary.title == "Sync complete"
+    assert card.summary.title == "1 download needs another try"
 
 
 def test_deck_handoff_is_scoped_and_validated_off_thread(
@@ -203,3 +203,22 @@ def test_progress_banner_starts_at_the_page_inset(
     assert card.progress.y() == card.banner.geometry().bottom() + 1 + t.LG
     card.cancel()
     qtbot.waitUntil(lambda: card.state == "results")
+
+
+def test_tall_receipt_keeps_the_recovery_row_with_its_explanation(
+    make_window: Callable, qtbot: QtBot
+) -> None:
+    async def interrupted(_: Config) -> main.DownloadStats:
+        stats = main.DownloadStats()
+        stats.record_failure(1001, "Card one", transient=True)
+        return stats
+
+    window = make_window(interrupted)
+    window.resize(2560, 1440)
+    card = window.current
+    card.start_sync()
+    qtbot.waitUntil(lambda: card.state == "results" and card.results.retry.isVisible())
+    button = card.results.retry
+    qtbot.waitUntil(lambda: button.mapTo(window, QPoint()).y() < window.height() // 2)
+    viewport = card.views["results"].viewport()
+    assert viewport.rect().contains(card.results.failures.mapTo(viewport, QPoint()))

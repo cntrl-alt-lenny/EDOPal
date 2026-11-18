@@ -16,7 +16,11 @@ CATEGORIES = {
     "replays": ("Replays", "Saved duels you can watch again.", "cards"),
     "puzzles": ("Puzzles", "Your personal puzzles.", "spark"),
     "screenshots": ("Screenshots", "Pictures you took in EDOPro.", "library"),
-    "studio": ("Studio collection", "Your saved sleeves, themes, and soundtrack list.", "skins"),
+    "studio": (
+        f"{config.APP_NAME} collection",
+        "Saved sleeves and themes with their editable originals, plus album names and a list of soundtrack files.",
+        "skins",
+    ),
     "preferences": (
         "Game preferences",
         "Your name in duels, chat, replay, and chain choices.",
@@ -142,6 +146,14 @@ def is_interrupted(tx: backup.Transaction) -> bool:
     return tx.status in {"pending", "rolling_back"}
 
 
+def undo_blocked_text(preview: backup.UndoPreview) -> str:
+    reason = {
+        "Destination changed since preview": "A file was edited after the restore.",
+        "Restore journal checksum mismatch": "A recovery file is missing or damaged.",
+    }.get(preview.reason, preview.reason)
+    return f"Undo unavailable. {reason}"
+
+
 def version_text(size: int, stamp: int | None) -> str:
     return f"{size:,} B, {date_text(stamp)}"
 
@@ -176,7 +188,7 @@ def restore_review(plan: backup.Plan, cancel: Cancel = None) -> Review:
         detail = f"Backup · {version_text(entry.size, entry.modified_at)}"
         names = f"Backup file · {item.source.partition('/')[2]}"
         if item.existing_path and item.existing_path != item.source:
-            names += f"\nHere · {item.existing_path.partition('/')[2]}"
+            names += f"\nIn this EDOPro folder · {item.existing_path.partition('/')[2]}"
         if item.action != "skip" and item.target != item.source and entry.category != "preferences":
             names += f"\nSaves as · {item.target.partition('/')[2]}"
         if item.status == "conflict":
@@ -186,21 +198,23 @@ def restore_review(plan: backup.Plan, cancel: Cancel = None) -> Review:
                     stat = plan.install.target(CONF).stat()
                     local[CONF] = stat.st_size, int(stat.st_mtime)
                 here = version_text(len((item.mine or "").encode()), local[CONF][1])
-                detail = f"Here · {here}   |   {detail}"
+                detail = f"In this EDOPro folder · {here}   |   {detail}"
                 key = item.source.split("/")[1]
                 if key != "nickname":
                     values = {"0": "Off", "1": "On"}
                     values_here, values_backup = values[item.mine], values[item.theirs]
                 else:
                     values_here, values_backup = item.mine or "(blank)", item.theirs or "(blank)"
-                names = f"Here · {values_here}\nBackup · {values_backup}"
+                names = f"In this EDOPro folder · {values_here}\nBackup · {values_backup}"
                 if item.action != "skip" and item.target != CONF:
                     names += f"\nSeparate copy · {item.target.partition('/')[2]}"
-                action = f"{action}  ·  Here: {values_here} / Backup: {values_backup}"
+                action = (
+                    f"{action}  ·  In this EDOPro folder: {values_here} / Backup: {values_backup}"
+                )
             elif item.existing_path:
                 stat = plan.install.target(item.existing_path).stat()
                 here = version_text(stat.st_size, int(stat.st_mtime))
-                detail = f"Here · {here}   |   {detail}"
+                detail = f"In this EDOPro folder · {here}   |   {detail}"
             else:
                 detail = f"Backup name overlaps another name   |   {detail}"
         annotation = "  ·  ".join(filter(None, (case_note, action)))

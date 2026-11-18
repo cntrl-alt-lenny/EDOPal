@@ -56,7 +56,7 @@ Every root slot supports WAV, MP3, Ogg Vorbis and FLAC. The client checks the fo
 | `attack/<passcode>` | Attack chant | Chants | A card-specific clip can replace Attack. |
 | `summon/<passcode>` | Summon chant | Chants | A card-specific clip can replace the Normal, Special, and Flip Summon cues. |
 
-Chants use the same four formats, but the client scans filenames in case-insensitive sort order. Studio writes one file per passcode in each supported folder. It reports recognizable nonstandard names such as `0012345 custom.wav` and refuses to change that chant slot until the filename is canonical. Removing a chant lets the corresponding general cue play. Removing a general cue still permits a configured chant. The installed guide documents 21 root cues and the three chant families. The tagged source and Thonk both include Token, Direct attack, and Reveal in addition. [Duel event handlers](https://github.com/edo9300/edopro/blob/41.0.2/gframe/duelclient.cpp#L3230-L3355) · [Attack handler](https://github.com/edo9300/edopro/blob/41.0.2/gframe/duelclient.cpp#L3744-L3774) · [Chat handler](https://github.com/edo9300/edopro/blob/41.0.2/gframe/game.cpp#L2942-L3005)
+Chants use the same four formats, but the client scans filenames in case-insensitive sort order. EDOPal writes one file per passcode in each supported folder. It reports recognizable nonstandard names such as `0012345 custom.wav` and refuses to change that chant slot until the filename is canonical. Removing a chant lets the corresponding general cue play. Removing a general cue still permits a configured chant. The installed guide documents 21 root cues and the three chant families. The tagged source and Thonk both include Token, Direct attack, and Reveal in addition. [Duel event handlers](https://github.com/edo9300/edopro/blob/41.0.2/gframe/duelclient.cpp#L3230-L3355) · [Attack handler](https://github.com/edo9300/edopro/blob/41.0.2/gframe/duelclient.cpp#L3744-L3774) · [Chat handler](https://github.com/edo9300/edopro/blob/41.0.2/gframe/game.cpp#L2942-L3005)
 
 ## Sound-effects pack format
 
@@ -88,7 +88,7 @@ audio/chant/summon/24550676.ogg
 
 The UTF-8 manifest requires `kind`, `version`, `name`, and `events`. A file entry requires its lowercase `format` and can include its own `credits`. Clip credits are inherited from the set when absent. Use canonical event keys, forward slashes, lowercase member names, and decimal card passcodes from 1 to 4,294,967,295 without leading zeros. `null` means silence and has no ZIP member. Use ordinary stored or deflated ZIP members with no explicit directory entries or archive comment. The reader validates member names, rejects duplicates, links and unexpected data, and decodes from memory without extracting files.
 
-Each clip is limited to 4 MiB and 10 seconds, mono or stereo, at 8–192 kHz. Use WAV (RIFF or RF64), MP3, Ogg Vorbis, or FLAC. Studio checks both container and decodable samples. Archives allow 256 assignments, a 64 KiB manifest, and 32 MiB of audio before compression.
+Each clip is limited to 4 MiB and 10 seconds, mono or stereo, at 8–192 kHz. Use WAV (RIFF or RF64), MP3, Ogg Vorbis, or FLAC. EDOPal checks both container and decodable samples. Archives allow 256 assignments, a 64 KiB manifest, and 32 MiB of audio before compression.
 
 ## Read-only report
 

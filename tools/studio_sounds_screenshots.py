@@ -53,6 +53,20 @@ def render_sounds(
 
     idle()
     shot("01-installed-and-sets")
+    from concurrent.futures import Future
+
+    from music.settings import GameProcessUnknown
+
+    unavailable = Future()
+    unavailable.set_exception(OSError("No audio device"))
+    with patch.object(page.audio.player, "sampler", return_value=unavailable):
+        card = page.cards["builtin:Thonk"]
+        card.play.click()
+        settle(lambda: card.play.text() == "No audio device")
+        page.views["overview"].ensureWidgetVisible(card.play)
+        shot("24-no-audio-device")
+    page.stop_audio()
+    page.views["overview"].verticalScrollBar().setValue(0)
     page.overview.saved.click()
     shot("21-saved-sets-empty")
     page.escape()
@@ -78,6 +92,11 @@ def render_sounds(
     page.clear_feedback()
     page.escape()
 
+    with patch("music.settings._game_running", side_effect=GameProcessUnknown()):
+        page.bar.apply.click()
+        idle()
+        shot("23-process-unknown")
+        page.closed.back.click()
     with patch("music.settings._game_running", return_value=True):
         page.bar.apply.click()
         idle()
@@ -105,7 +124,10 @@ def render_sounds(
     shot("10-applied-and-history")
     draw = sound / "draw.wav"
     draw.write_bytes(b"Changed outside the app")
-    with patch("music.settings._game_running", return_value=False):
+    with (
+        patch("music.settings._game_running", return_value=False),
+        patch.object(page, "confirm", return_value=True),
+    ):
         page.bar.undo.click()
         idle()
     shot("11-external-change")
@@ -170,7 +192,7 @@ def download_states(
             first = False
             while not cancel.is_set():
                 await asyncio.sleep(0.01)
-            raise DownloadError(DownloadFailure.CANCELLED, "Download cancelled.")
+            raise DownloadError(DownloadFailure.CANCELLED, "Download canceled.")
         return sounds_model.Downloadable(
             PackStatus(packet, PackState.DOWNLOADED, None), replace(sample, name=packet.title)
         )

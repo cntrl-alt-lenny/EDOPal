@@ -7,12 +7,21 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QScrollArea, QSizePolicy, QVBoxLayout
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
+from artwork_flow import valid_decks
 from decks import DeckIndexer, Library, Preview, SavedDeck, encode_ydke
 from studio import theme as t
 from studio.context import AppContext, Installation
 from studio.pages.base import Page
+from studio.pages.decks_handoff import HD_ARTWORK, saved_deck_selection
 from studio.pages.mydecks_checks import Comparison, FormatCheck
 from studio.pages.mydecks_copies import CopyReview
 from studio.pages.mydecks_files import (
@@ -23,9 +32,10 @@ from studio.pages.mydecks_files import (
     reveal_file,
 )
 from studio.pages.mydecks_library import Collection
-from studio.pages.mydecks_logic import file_problem, quantity, section_counts
+from studio.pages.mydecks_logic import file_problem, quantity
 from studio.pages.mydecks_widgets import Contents, DeckHero, Screen, button
 from studio.widgets import ElidedLabel, Panel, label, margins
+from tournament_decks import DeckError
 
 
 class MyDecksPage(Page):
@@ -39,17 +49,23 @@ class MyDecksPage(Page):
         self.index: DeckIndexer | None = None
         self.lib: Library | None = None
         self.receipts: dict[Path, Receipt] = {}
+        self.pending_selection: tuple[Path, ...] = ()
         self.retry_action: Callable | None = None
         body = QVBoxLayout(self)
         margins(body, 0)
         body.setSpacing(0)
-        self.status = Panel(t.SM)
+        self.status = QWidget()
+        status_layout = QHBoxLayout(self.status)
+        status_layout.setContentsMargins(t.XXL, t.SM, t.XXL, 0)
+        status_panel = Panel(t.MD)
+        status_panel.setMaximumWidth(t.CONTENT_MAX - t.XXL * 2)
+        status_layout.addWidget(status_panel)
         status_row = QHBoxLayout()
         self.message = label("", "body", True)
         status_row.addWidget(self.message, 1)
-        self.retry = button("Retry", self._retry)
+        self.retry = button("Retry", self._retry, "primary")
         status_row.addWidget(self.retry)
-        self.status.body.addLayout(status_row)
+        status_panel.body.addLayout(status_row)
         self.status.hide()
         body.addWidget(self.status)
         self.scroll = QScrollArea()
@@ -68,7 +84,12 @@ class MyDecksPage(Page):
 
     def shown(self) -> None:
         self.active = True
-        self.refresh()
+        selection = saved_deck_selection(self.ctx)
+        if selection.paths:
+            self.pending_selection, selection.paths = selection.paths, ()
+            self.refresh()
+        elif len(self.history) < 2:
+            self.refresh()
 
     def hidden(self) -> bool:
         if self.writing:
@@ -79,13 +100,20 @@ class MyDecksPage(Page):
 
     def installation_changed(self, installation: Installation) -> None:
         self.epoch += 1
+        self.pending_selection = ()
         self.index = DeckIndexer(Path(installation.path)) if installation.path else None
         self.lib = None
         if self.active:
             self.refresh()
+        else:
+            self.slide.stop()
+            self.scroll.takeWidget()
+            for screen in self.history:
+                self._forget(screen)
+            self.history.clear()
 
     def _forget(self, screen: Screen) -> None:
-        if isinstance(screen, (FormatCheck, Comparison)):
+        if isinstance(screen, (FormatCheck, Comparison, CopyReview)):
             screen.leave()
         screen.hide()
         screen.deleteLater()
@@ -160,7 +188,7 @@ class MyDecksPage(Page):
                 self.ctx.installations_requested.emit,
             )
             return
-        if not install.ready:
+        if not install.ready and not self.pending_selection:
             self._state(
                 "Waiting for cards",
                 "Open EDOPro once to update its card data, then check again.",
@@ -188,6 +216,11 @@ class MyDecksPage(Page):
                 None,
             ):
                 self._receipt_bar(view, latest)
+            if self.pending_selection:
+                found = view.select_saved(self.pending_selection)
+                if found < len(self.pending_selection):
+                    self._notice("Some saved decks are missing from this deck folder.")
+                self.pending_selection = ()
 
         job.result.connect(ready)
         job.error.connect(
@@ -229,20 +262,9 @@ class MyDecksPage(Page):
     def detail(self, deck: SavedDeck) -> None:
         screen = Screen(deck.name, self.escape)
         path = ElidedLabel()
-        path.set_value(str(deck.path))
+        path.set_value(str(deck.path), deck.path.relative_to(self.lib.game).as_posix())
         screen.body.addWidget(path)
         panel = Panel(t.LG)
-        info = QHBoxLayout()
-        info.addWidget(
-            label(
-                section_counts(deck.preview.counts) if deck.preview else "Unreadable deck",
-                "subheading",
-                True,
-            ),
-            1,
-        )
-        info.addWidget(button("Check format", lambda: self.check(deck), "primary", "check"))
-        panel.body.addLayout(info)
         if deck.preview and deck.preview.unresolved:
             n = len(deck.preview.unresolved)
             panel.body.addWidget(
@@ -259,10 +281,17 @@ class MyDecksPage(Page):
             buttons.addWidget(
                 button("Copy code", lambda: self._copy_code(deck.preview), symbol="link")
             )
-            buttons.addWidget(button("Get HD artwork", lambda: self._art(deck), symbol="download"))
             if deck.preview.unresolved:
                 buttons.addWidget(button("Repair a copy", lambda: self.import_code(deck)))
         buttons.addStretch()
+        buttons.addWidget(button("Check format", lambda: self.check(deck), "secondary", "check"))
+        if deck.preview:
+            artwork = button(HD_ARTWORK, lambda: self._art(deck), "primary", "download")
+            artwork.setEnabled(self.ctx.installation.ready)
+            artwork.setToolTip(
+                "Open EDOPro to download its cards first." if not artwork.isEnabled() else ""
+            )
+            buttons.addWidget(artwork)
         panel.body.addLayout(buttons)
         screen.body.addWidget(panel)
         if deck.preview:
@@ -298,6 +327,8 @@ class MyDecksPage(Page):
         self.retry.setVisible(retry is not None)
         self.message.setText(message)
         self.status.show()
+        if retry is not None and self.active:
+            self.retry.setFocus()
 
     def _retry(self) -> None:
         if self.retry_action and not self.writing:
@@ -309,19 +340,26 @@ class MyDecksPage(Page):
         job.error.connect(lambda exc: self._notice(str(exc)) if epoch == self.epoch else None)
 
     def _art(self, deck: SavedDeck) -> None:
-        game = self.lib.game
+        game, selected = self.lib.game, self.ctx.installation.path
+        paths = (deck.path,)
+
+        def check() -> None:
+            if not valid_decks(selected, game, paths):
+                raise DeckError("This deck has moved. Refresh the library and try again.")
+            require_closed(game)
 
         def start(_: None) -> None:
-            if not self.ctx.sync_deck_files(game, (deck.path,)):
+            if not self.ctx.sync_deck_files(game, paths):
                 self._notice("Artwork could not start. Refresh the library and try again.")
 
-        self._write("Checking that EDOPro is closed…", lambda: require_closed(game), start)
+        self._write("Checking saved decks…", check, start)
 
     def _save(self, name: str, preview: Preview) -> None:
         game = self.lib.game
 
         def saved(receipt: Receipt) -> None:
             self.receipts[receipt.path] = receipt
+            self.pending_selection = (receipt.path,)
             self.refresh()
 
         self._write("Saving a new deck copy…", lambda: publish(game, name, preview), saved)

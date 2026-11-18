@@ -39,6 +39,10 @@ PATHS = {
 
 @lru_cache(maxsize=96)
 def icon(name: str, colour: str = t.TEXT) -> QIcon:
+    if name == "mark":
+        # The transparent mark reads better than the tiled app icon at sidebar size.
+        mark = t.ASSETS / "logo-mark.png"
+        return QIcon(str(mark)) if mark.is_file() else icon("brand", colour)
     if name == "brand":
         # Normal launches already resolved the source or one-file application icon.
         mark = QApplication.windowIcon()

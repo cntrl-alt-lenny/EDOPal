@@ -6,7 +6,9 @@ from dataclasses import asdict, dataclass
 from pathlib import PureWindowsPath
 from typing import Any
 
-STYLES = ("gradient", "vignette", "geometry", "aurora")
+from .style_names import PROCEDURAL_STYLES
+
+STYLES = PROCEDURAL_STYLES
 OVERRIDES = ("text", "muted", "highlight", "positive", "danger", "your_lp", "opponent_lp")
 MAX_DEFINITION = 4096
 _DIGEST = re.compile(r"[0-9a-f]{64}")

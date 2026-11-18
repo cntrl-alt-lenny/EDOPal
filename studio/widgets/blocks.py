@@ -2,7 +2,7 @@ from html import escape
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QVBoxLayout, QWidget
 
 from studio import theme as t
 from studio.widgets.art import ArchiveArt
@@ -130,8 +130,9 @@ class EmptyState(QWidget):
         body = QVBoxLayout(self)
         margins(body, t.XXL)
         self.hero = Hero(category, title, description, symbol)
-        self.hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.hero.setMinimumHeight(t.TILE_LARGE)
         body.addWidget(self.hero)
+        body.addStretch()
 
 
 class Notice(Panel):
@@ -155,7 +156,7 @@ class GameClosedBlock(Panel):
         self.detail = label("", "body", True)
         self.body.addWidget(self.detail)
         self.retry = Button("Retry", "primary")
-        self.body.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignRight)
+        self.body.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignLeft)
 
     def show_reason(self, reason: str) -> None:
         self.detail.setText(reason)

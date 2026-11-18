@@ -4,16 +4,15 @@ import argparse
 import os
 import plistlib
 import statistics
-import struct
 import subprocess
 import sys
 from collections.abc import Iterable
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from time import perf_counter
+from time import perf_counter_ns
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from config import APP_NAME, app_version
+from config import APP_DATA_NAME, APP_NAME, app_version
 from tools.qt_payload import QT_MODULES, plugin_paths
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +58,39 @@ def check_exclusions(paths: Iterable[str]) -> None:
         check(lower.rsplit("/", 1)[-1] not in SKINS, f"Bundled on-demand skin: {path}")
 
 
+def inspect_windows_resources(exe: Path) -> None:
+    import pefile
+
+    with pefile.PE(str(exe), fast_load=True) as pe:
+        check(pe.OPTIONAL_HEADER.Subsystem == 2, "Windows executable must use GUI subsystem 2")
+        pe.parse_data_directories(
+            directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"]]
+        )
+        types = {entry.id for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries}
+        for resource in ("RT_ICON", "RT_GROUP_ICON", "RT_VERSION"):
+            check(pefile.RESOURCE_TYPE[resource] in types, f"Missing Windows resource {resource}")
+        entries = {
+            key.decode(): value.decode()
+            for group in pe.FileInfo
+            for info in group
+            if info.Key == b"StringFileInfo"
+            for table in info.StringTable
+            for key, value in table.entries.items()
+        }
+        for key, value in {
+            "ProductName": APP_NAME,
+            "FileDescription": APP_NAME,
+            "OriginalFilename": EXE,
+            "InternalName": NAME,
+            "ProductVersion": app_version(),
+            "FileVersion": app_version(),
+        }.items():
+            check(entries.get(key) == value, f"Incorrect Windows {key}: {entries.get(key)!r}")
+        print(
+            f"Verified Windows GUI subsystem, icon group and {APP_NAME} {app_version()} version resource"
+        )
+
+
 def inspect_payload(exe: Path) -> None:
     from PyInstaller.archive.readers import CArchiveReader
 
@@ -90,13 +122,7 @@ def inspect_payload(exe: Path) -> None:
         check(path in names, f"Missing runtime data: {path}")
     check(any(n.startswith("_cffi_backend.") for n in names), "Missing miniaudio CFFI backend")
     if sys.platform == "win32":
-        with exe.open("rb") as stream:
-            stream.seek(0x3C)
-            (offset,) = struct.unpack("<I", stream.read(4))
-            stream.seek(offset)
-            check(stream.read(4) == b"PE\0\0", "Invalid PE header")
-            stream.seek(offset + 0x5C)
-            check(stream.read(2) == b"\x02\x00", "Windows executable must use GUI subsystem 2")
+        inspect_windows_resources(exe)
     print("Largest embedded entries (compressed bytes):")
     for name, entry in sorted(archive.toc.items(), key=lambda pair: pair[1][1], reverse=True)[:10]:
         print(f"  {entry[1]:>10,}  {name}")
@@ -105,7 +131,11 @@ def inspect_payload(exe: Path) -> None:
 def readme() -> str:
     platform = "MacOS" if PLATFORM == "macOS" else PLATFORM
     text = (ROOT / "release_assets" / f"ReadMe-{platform}.txt").read_text(encoding="utf-8")
-    return text.replace("@APP_NAME@", APP_NAME).replace("@APP_FILE@", NAME)
+    return (
+        text.replace("@APP_NAME@", APP_NAME)
+        .replace("@APP_FILE@", NAME)
+        .replace("@APP_DATA_NAME@", APP_DATA_NAME)
+    )
 
 
 def build() -> None:
@@ -187,12 +217,12 @@ def probe(exe: Path, state: Path, flag: str, arch: str | None, platform: str) ->
         str(state / "ProjectIgnis"),
     ]
     env = {**os.environ, "QT_QPA_PLATFORM": platform, "PYTHONIOENCODING": "utf-8"}
-    start = perf_counter()
+    start = perf_counter_ns()
     try:
         result = subprocess.run(cmd, cwd=state, env=env, capture_output=True, timeout=60)
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"{flag} timed out after 60 s ({platform}, {arch or PLATFORM})") from exc
-    elapsed = perf_counter() - start
+    elapsed = (perf_counter_ns() - start) / 1e9
     output = (result.stdout + result.stderr).decode("utf-8", errors="replace")
     print(
         f"{flag} ({platform}, {arch or PLATFORM}): {elapsed:.3f} s, exit {result.returncode}\n{output}",
@@ -206,8 +236,18 @@ def probe(exe: Path, state: Path, flag: str, arch: str | None, platform: str) ->
             f"Qt platform: {platform}" in output and "GUI smoke test passed." in output,
             f"Missing window verification for {platform}",
         )
-    else:
-        check("All checks passed." in output, "Missing health-check results")
+        prefix = "First visible window perf_counter_ns="
+        stamps = [
+            int(line.removeprefix(prefix))
+            for line in output.splitlines()
+            if line.startswith(prefix)
+        ]
+        check(len(stamps) == 1, "Missing first-window timestamp")
+        shown = (stamps[0] - start) / 1e9
+        check(0 < shown <= elapsed, "First-window timestamp outside process lifetime")
+        print(f"Launch to first visible window: {shown:.3f} s")
+        return shown
+    check("All checks passed." in output, "Missing health-check results")
     return elapsed
 
 
@@ -228,7 +268,9 @@ def verify(repeat: int) -> None:
         for arch in ("arm64", "x86_64") if sys.platform == "darwin" else (None,):
             times = [probe(exe, state, "--gui-smoke-test", arch, platform) for _ in range(repeat)]
             if len(times) > 1:
-                print(f"First: {times[0]:.3f} s; warm median: {statistics.median(times[1:]):.3f} s")
+                print(
+                    f"First window: {times[0]:.3f} s on first launch; warm median {statistics.median(times[1:]):.3f} s"
+                )
             probe(exe, state, "--health-check", arch, platform)
         inspect_payload(exe)
         print(f"Verified {ARCHIVE.name}: {ARCHIVE.stat().st_size:,} bytes")

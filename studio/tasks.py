@@ -134,15 +134,15 @@ class Job(QObject):
 
 
 class _Worker(QRunnable):
-    def __init__(self, job: Job, work: Work) -> None:
+    def __init__(self, job: Job) -> None:
         super().__init__()
-        self.job, self.work = job, work
+        self.job = job
 
     def run(self) -> None:
         send = self.job._packet.emit
         ctx = WorkerContext(self.job.cancel_event, lambda event: send("progress", event))
         try:
-            result = self.work(ctx)
+            result = self.job.work(ctx)
         except (Exception, SystemExit, asyncio.CancelledError) as exc:
             send("error", exc)
         else:
@@ -162,13 +162,17 @@ class TaskRunner(QObject):
         job.setParent(self)
         self.jobs.add(job)
         job._settled.connect(self._release)
-        self.pool.start(_Worker(job, work))
+        # The pool auto-deletes its runnable on a worker thread. Keep the callable
+        # (which may own the last reference to a widget) with the GUI-owned job.
+        job.work = work
+        self.pool.start(_Worker(job))
         return job
 
     @Slot()
     def _release(self) -> None:
         job = self.sender()
         self.jobs.discard(job)
+        del job.work
         # Subscribers can capture widgets. Release their Qt connections on the GUI thread.
         job.deleteLater()
         if not self.jobs:

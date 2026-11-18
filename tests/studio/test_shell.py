@@ -30,7 +30,10 @@ def test_sidebar_navigation_and_keyboard(
         "EDOPal",
         "Unofficial EDOPro companion",
     ]
-    assert list(window.pages) == [
+    from studio.shell import PAGES
+
+    assert list(window.pages) == [page.id for page in PAGES]
+    existing = [
         "cards",
         "skins",
         "sleeves",
@@ -43,6 +46,7 @@ def test_sidebar_navigation_and_keyboard(
         "health",
         "settings",
     ]
+    assert [key for key in window.pages if key in existing] == existing
     for key, button in window.nav.items():
         button.click()
         assert window.current is window.pages[key]
@@ -125,6 +129,40 @@ def test_picker_switch_validates_persists_and_broadcasts(
     assert window.ctx.cfg.edopro_path == str(second)
     assert config._load_config_file(window.ctx.cfg.config_path)["edopro_path"] == str(second)
     assert window.pages["cards"].options.scope.group.checkedId() == 0
+
+
+def test_browse_bundle_saves_only_its_validated_data_root(
+    make_window: Callable[..., StudioWindow],
+    qtbot: QtBot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = make_window()
+    settings = Path(window.ctx.cfg.config_path)
+    before = settings.read_bytes() if settings.exists() else None
+    original = window.ctx.installation.path
+    bundle = tmp_path / "Applications/EDOPro.app"
+    data = bundle / "Contents/Resources/ProjectIgnis"
+    data.mkdir(parents=True)
+    (bundle / "Contents/Info.plist").touch()
+    from types import SimpleNamespace
+
+    # Simulate Finder discovery without changing the host file-lock implementation.
+    monkeypatch.setattr(config, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(config, "find_edopro_folders", lambda _: [original])
+    monkeypatch.setattr(window.ctx, "choose_folder", lambda _: str(bundle))
+    window.change.click()
+    qtbot.waitUntil(lambda: window.picker.list.count() == 1)
+    window.picker.browse.click()
+    qtbot.waitUntil(lambda: "containing EDOPro" in window.picker.hint.text())
+    assert window.ctx.installation.path == original
+    assert (settings.read_bytes() if settings.exists() else None) == before
+
+    (data / "cards.cdb").touch()
+    window.picker.browse.click()
+    qtbot.waitUntil(lambda: window.ctx.installation.path == str(data))
+    assert window.ctx.installation.ready
+    assert config._load_config_file(str(settings))["edopro_path"] == str(data)
 
 
 def test_many_picker_results_leave_room_for_the_action_row(
@@ -350,9 +388,10 @@ def test_confirmation_has_named_commit_and_safe_escape(make_window: Callable) ->
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     window = make_window()
-    for title, safe, commit in (
-        ("Discard unsaved changes?", "Keep editing", "Discard changes"),
-        ("Remove downloaded files?", "Cancel", "Remove downloaded files"),
+    for title, safe, commit, affirmative in (
+        ("Discard unsaved changes?", "Cancel", "Discard changes", None),
+        ("Remove downloaded files?", "Cancel", "Remove downloaded files", None),
+        ("Review restore", "Cancel", "Restore to ProjectIgnis", "Restore to ProjectIgnis"),
     ):
         observed = []
 
@@ -363,5 +402,61 @@ def test_confirmation_has_named_commit_and_safe_escape(make_window: Callable) ->
             QTest.keyClick(box, Qt.Key.Key_Escape)
 
         QTimer.singleShot(0, dismiss)
-        assert not window.confirm(title, "Review this change.")
+        assert not window.ctx.confirm(title, "Review this change.", affirmative)
         assert observed == [(safe, {safe, commit})]
+
+
+def test_short_sidebar_fits_the_upcoming_sections_and_release(
+    make_window: Callable, qtbot: QtBot
+) -> None:
+    from tools.studio_shell_shots import preview_deck_sections
+
+    with preview_deck_sections():
+        window = make_window()
+    window.resize(1280, 800)
+    window._update("v5.6.0")
+    viewport = window.rail_scroll.viewport()
+    qtbot.waitUntil(lambda: window.rail_scroll.verticalScrollBar().maximum() == 0)
+    for key, button in window.nav.items():
+        target = window if key == "settings" else viewport
+        assert target.rect().contains(
+            button.rect().translated(button.mapTo(target, button.rect().topLeft()))
+        )
+    assert window.release.isVisible()
+    # There is room even for a thirteenth ordinary section in addition to Settings.
+    assert viewport.height() - window.rail.entries.minimumSize().height() >= (
+        window.nav["formats"].height() + window.rail.entries.spacing()
+    )
+    assert list(window.pages.built) == ["cards"]
+    assert window.navigate("practice") and window.navigate("formats")
+
+
+def test_worker_callable_is_disposed_on_gui_thread(make_window: Callable, qtbot: QtBot) -> None:
+    import threading
+    import weakref
+
+    runner = make_window().ctx.tasks
+    released = []
+    gate = Event()
+
+    class Work:
+        def __call__(self, _: WorkerContext) -> None:
+            assert gate.wait(3)
+
+    work = Work()
+    watcher = weakref.finalize(work, lambda: released.append(threading.get_ident()))
+    runner.start(work)
+    del work
+    gate.set()
+    qtbot.waitUntil(lambda: not runner.jobs)
+    assert not watcher.alive and released == [threading.get_ident()]
+
+
+def test_unavailable_volume_updates_folder_bar(
+    make_window: Callable, qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = make_window()
+    missing = tmp_path / "unplugged"
+    window.ctx.set_installation(Installation(str(missing), ready=True))
+    qtbot.waitUntil(lambda: window.folder_name.text() == "Folder unavailable")
+    assert window.folder_name.toolTip() == str(missing)

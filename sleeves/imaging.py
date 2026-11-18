@@ -37,6 +37,8 @@ def colour(value: str) -> QColor:
 
 def read_source(path: Path) -> bytes:
     """Read at most the compressed input limit, even if a file grows during the read."""
+    if path.stat().st_size > MAX_BYTES:
+        raise ValueError("Choose a picture smaller than 16 MiB.")
     with path.open("rb") as stream:
         data = stream.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
@@ -127,11 +129,11 @@ class Layout:
 DEFAULT_LAYOUT = Layout()
 
 
-def compose(original: bytes, layout: Layout = DEFAULT_LAYOUT) -> QImage:
+def compose(original: bytes | QImage, layout: Layout = DEFAULT_LAYOUT) -> QImage:
     """Make an opaque sleeve. The crop is relative to the picture after EXIF rotation."""
     from .ornaments import art_frame
 
-    source = decode(original)
+    source = original if isinstance(original, QImage) else decode(original)
     area = QRectF(source.rect())
     if layout.crop is not None:
         if layout.mode != "fill":

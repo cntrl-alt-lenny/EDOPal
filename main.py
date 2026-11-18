@@ -14,14 +14,15 @@ import json
 import ntpath
 import os
 import re
+import sqlite3
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine, Iterable
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from time import perf_counter
+from typing import Any
 from uuid import uuid4
 
 import aiohttp
@@ -43,13 +44,19 @@ from artwork_coverage import field_art_dir as _field_art_dir
 from artwork_coverage import image_sample as _image_sample
 from artwork_coverage import looks_like_image as _looks_like_image
 from artwork_coverage import looks_like_jpeg as _looks_like_jpeg
+from artwork_flow import STORAGE_MESSAGE, ArtworkStorageError
 from artwork_flow import format_size as _format_size
-from artwork_flow import record_artwork_change
 from card_databases import FIELD_SPELL_TYPE as FIELD_SPELL_TYPE
 from card_databases import SMALL_DECK_INDEX_LIMIT, ArtworkIndex, get_db_files, read_artwork_index
 from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, app_version, find_edopro_folder
 from network_tls import create_http_session as _create_http_session
 from state_lock import appearance_lock
+from studio.pages.cards_undo import (
+    active_writer,
+    recover_publication,
+    remember_changes,
+    restore_artwork,
+)
 
 # Rich console setup
 # We import rich here so the rest of the file can use `console` everywhere.
@@ -531,46 +538,52 @@ def parse_ydk(path: str) -> set[int]:
     return ids
 
 
-def prune_orphan_images(pics_path: str, known_ids: set[int]) -> int:
+def prune_orphan_images(pics_path: str, known_ids: set[int], *, cfg: Config | None = None) -> int:
     """Delete pics/<id>.jpg for IDs no longer present in any scanned DB. Returns the count."""
     if not os.path.isdir(pics_path):
         return 0
-    pruned = 0
-    for entry in os.listdir(pics_path):
-        if not entry.endswith(".jpg"):
-            continue
-        stem = entry[:-4]
+    if cfg is None:
+        cfg = Config(["--edopro-path", str(Path(pics_path).absolute().parent)])
+    with remember_changes(cfg) as writer:
+        pruned = 0
         try:
-            cid = int(stem)
-        except ValueError:
-            continue
-        if cid in known_ids:
-            continue
-        target = os.path.join(pics_path, entry)
-        try:
-            record_artwork_change(target, None)
-            os.remove(target)
-            pruned += 1
-        except OSError:
-            pass
-    return pruned
+            entries = os.listdir(pics_path)
+        except OSError as exc:
+            raise ArtworkStorageError(str(exc)) from exc
+        for entry in entries:
+            if not entry.endswith(".jpg"):
+                continue
+            stem = entry[:-4]
+            try:
+                cid = int(stem)
+            except ValueError:
+                continue
+            if cid in known_ids:
+                continue
+            target = os.path.join(pics_path, entry)
+            if writer.publish(target, None):
+                pruned += 1
+        return pruned
 
 
 def collect_deck_filter_ids(cfg: Config) -> set[int] | None:
     """Gather card IDs from every deck path/folder on `cfg`, or None if unused."""
-    if not cfg.deck_paths and not cfg.decks_folder:
+    folder = cfg.decks_folder
+    if not folder and not cfg.deck_paths and getattr(cfg, "my_decks", False):
+        folder = os.path.join(cfg.edopro_path, "deck")
+    if not cfg.deck_paths and not folder:
         return None
     wanted: set[int] = set()
     paths: list[str] = list(cfg.deck_paths)
-    if cfg.decks_folder:
-        if os.path.isdir(cfg.decks_folder):
+    if folder:
+        if os.path.isdir(folder):
             # EDOPro nests decks in subfolders, so walk the whole tree.
-            for current_root, dirnames, filenames in os.walk(cfg.decks_folder):
+            for current_root, dirnames, filenames in os.walk(folder):
                 dirnames.sort()
                 for entry in sorted(filenames):
-                    if entry.endswith(".ydk"):
+                    if entry.lower().endswith(".ydk"):
                         paths.append(os.path.join(current_root, entry))
-        else:
+        elif cfg.decks_folder:
             console.print(
                 f"[yellow]--decks-folder path is not a directory: {cfg.decks_folder}[/yellow]"
             )
@@ -654,6 +667,7 @@ class DownloadStats:
     """Counters for the current sync run."""
 
     def __init__(self, rush_ids: set[int] | None = None, token_ids: set[int] | None = None) -> None:
+        self.storage_error = ""
         self.success_ids: set[int] = set()
         self.ok_hd = 0
         self.ok_mapped = 0
@@ -860,7 +874,7 @@ class FetchResult(Enum):
 
     MISSING means the server definitively said the image does not exist (404),
     so it's safe to remember the card as unavailable. ERROR covers transient
-    trouble — timeouts, connection drops, rate limiting, 5xx, disk errors —
+    trouble — timeouts, connection drops, rate limiting, 5xx —
     which must NOT be cached, or one bad Wi-Fi day would mark hundreds of
     cards "unavailable" for two weeks.
     """
@@ -870,22 +884,14 @@ class FetchResult(Enum):
     ERROR = "error"
 
 
-async def _try_download(
+async def _fetch_image(
     session: aiohttp.ClientSession,
     url: str,
-    filepath: str,
     timeout: aiohttp.ClientTimeout,
     max_retries: int,
     is_valid: Callable[[bytes], bool] = _looks_like_jpeg,
-    *,
-    source: str = "",
-) -> FetchResult:
-    """
-    Attempt to GET `url` and save to `filepath`.
-    Retry up to `max_retries` times after the initial attempt, with
-    exponential backoff between attempts.
-    `is_valid` decides whether the downloaded bytes are an acceptable image.
-    """
+) -> bytes | FetchResult:
+    """Fetch and validate a bounded response before opening any game file."""
     total_attempts = max_retries + 1
     for attempt in range(1, total_attempts + 1):
         retry_after: float | None = None
@@ -904,10 +910,7 @@ async def _try_download(
                             return FetchResult.ERROR
                         content.extend(chunk)
                     if is_valid(content):
-                        if source:
-                            content = mark_field_source(content, source)
-                        _write_image(filepath, content)
-                        return FetchResult.OK
+                        return bytes(content)
                     if attempt >= total_attempts:
                         # A 200 with a non-image body is usually an error or
                         # anti-bot page, so treat it as transient.
@@ -918,11 +921,8 @@ async def _try_download(
                     # Rate limited — wait the server's requested cooldown (capped)
                     # before retrying instead of the usual short backoff.
                     retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
-        except (TimeoutError, aiohttp.ClientError):
+        except (OSError, aiohttp.ClientError):
             pass
-        except OSError as exc:
-            console.print(f"[red]Cannot write to {filepath}: {exc}[/red]")
-            return FetchResult.ERROR
 
         if attempt < total_attempts:
             delay = retry_after if retry_after is not None else 2 ** (attempt - 1)
@@ -931,15 +931,49 @@ async def _try_download(
     return FetchResult.ERROR
 
 
-def _write_image(filepath: str, content: bytes | bytearray) -> None:
+async def _try_download(
+    session: aiohttp.ClientSession,
+    url: str,
+    filepath: str,
+    timeout: aiohttp.ClientTimeout,
+    max_retries: int,
+    is_valid: Callable[[bytes], bool] = _looks_like_jpeg,
+    *,
+    source: str = "",
+) -> FetchResult:
+    result = await _fetch_image(session, url, timeout, max_retries, is_valid)
+    if isinstance(result, FetchResult):
+        return result
+    content = mark_field_source(result, source) if source else result
+    if active_writer() is not None:
+        _write_image(filepath, content)
+        return FetchResult.OK
+    # The one non-installation caller is the sleeve library's private card-art cache.
+    path = Path(filepath)
+    if (
+        path.parent.name != "card-art"
+        or not path.stem.isdecimal()
+        or path.suffix != ".jpg"
+        or path.resolve() != path.absolute()
+    ):
+        raise ArtworkStorageError("Saving game artwork requires an installation and restore store.")
     tmp_path = f"{filepath}.{uuid4().hex}.part"
     try:
         with open(tmp_path, "xb") as target:
             target.write(content)
-        record_artwork_change(filepath, content)
         os.replace(tmp_path, filepath)
+    except OSError as exc:
+        raise ArtworkStorageError(str(exc)) from exc
     finally:
         _remove_quietly(tmp_path)
+    return FetchResult.OK
+
+
+def _write_image(filepath: str, content: bytes | bytearray) -> None:
+    writer = active_writer()
+    if writer is None:
+        raise ArtworkStorageError("Saving game artwork requires an installation and restore store.")
+    writer.publish(filepath, content)
 
 
 def _remove_quietly(path: str) -> None:
@@ -1070,15 +1104,16 @@ async def download_card(
     # transient error means it may well exist and should be retried next run.
     saw_transient = False
 
-    for reason, url in candidates:
-        result = await _try_download(session, url, filepath, timeout, cfg.max_retries)
-        if result is FetchResult.OK:
-            stats.record_success(card_id, SUCCESS_KIND.get(reason, "ok_hd"))
-            if progress and task_id is not None:
-                progress.advance(task_id)
-            return
-        if result is FetchResult.ERROR:
-            saw_transient = True
+    with remember_changes(cfg):
+        for reason, url in candidates:
+            result = await _try_download(session, url, filepath, timeout, cfg.max_retries)
+            if result is FetchResult.OK:
+                stats.record_success(card_id, SUCCESS_KIND.get(reason, "ok_hd"))
+                if progress and task_id is not None:
+                    progress.advance(task_id)
+                return
+            if result is FetchResult.ERROR:
+                saw_transient = True
 
     stats.record_failure(card_id, name, transient=saw_transient)
     if progress and task_id is not None:
@@ -1109,83 +1144,86 @@ async def download_field_art(
     donor: int | None = None,
     layout: str = "card",
 ) -> None:
-    folder = Path(field_art_dir(cfg))
-    jpeg = folder / f"{card_id}.jpg"
-    timeout = aiohttp.ClientTimeout(total=cfg.timeout)
-    transient = False
-    installed = None
-    for candidate in (card_id, donor):
-        if candidate is None:
-            continue
-        if candidate != card_id and (local := _local_donor(folder, candidate)):
-            with local.open("rb") as handle:
-                content = handle.read(MAX_IMAGE_BYTES + 1)
-            if len(content) <= MAX_IMAGE_BYTES and _looks_like_image(content):
-                installed = jpeg.with_suffix(local.suffix)
-                _write_image(str(installed), mark_field_source(content, f"local:{candidate}"))
-                stats.field_local += 1
-                break
-        for host, ext, validate in (
-            ("field", "jpg", _looks_like_jpeg),
-            ("field_backup", "png", _looks_like_image),
-        ):
-            if host not in cfg.sources:
+    if getattr(cfg, "dry_run", False):
+        return
+    with remember_changes(cfg) as writer:
+        folder = Path(field_art_dir(cfg))
+        jpeg = folder / f"{card_id}.jpg"
+        timeout = aiohttp.ClientTimeout(total=cfg.timeout)
+        transient = False
+        installed = None
+        for candidate in (card_id, donor):
+            if candidate is None:
                 continue
-            path = jpeg.with_suffix("." + ext)
-            result = await _try_download(
-                session,
-                f"{cfg.sources[host]}/{candidate}.{ext}",
-                str(path),
-                timeout,
-                cfg.max_retries,
-                validate,
-                source=f"{host}:{candidate}",
-            )
-            if result is FetchResult.OK:
-                installed = path
+            if candidate != card_id and (local := _local_donor(folder, candidate)):
+                with local.open("rb") as handle:
+                    content = handle.read(MAX_IMAGE_BYTES + 1)
+                if len(content) <= MAX_IMAGE_BYTES and _looks_like_image(content):
+                    installed = jpeg.with_suffix(local.suffix)
+                    _write_image(str(installed), mark_field_source(content, f"local:{candidate}"))
+                    stats.field_local += 1
+                    break
+            for host, ext, validate in (
+                ("field", "jpg", _looks_like_jpeg),
+                ("field_backup", "png", _looks_like_image),
+            ):
+                if host not in cfg.sources:
+                    continue
+                path = jpeg.with_suffix("." + ext)
+                result = await _try_download(
+                    session,
+                    f"{cfg.sources[host]}/{candidate}.{ext}",
+                    str(path),
+                    timeout,
+                    cfg.max_retries,
+                    validate,
+                    source=f"{host}:{candidate}",
+                )
+                if result is FetchResult.OK:
+                    installed = path
+                    break
+                transient |= result is FetchResult.ERROR
+            if installed:
                 break
-            transient |= result is FetchResult.ERROR
-        if installed:
-            break
 
-    if not installed:
-        # Leave a published image intact on force/repair, and avoid rewriting
-        # a valid crop when the scheduled check finds no higher-quality copy.
-        if _local_donor(folder, card_id):
-            stats.skipped += 1
-        elif derived_field(jpeg) and _looks_like_image(_image_sample(str(jpeg))):
-            stats.skipped += 1
-            if not transient:
-                stats.published_misses.add(card_id)
-        else:
-            face = folder.parent / f"{card_id}.jpg"
-            if face.is_file():
-                from sleeves.imaging import ensure_gui
-
-                ensure_gui()
-                crop = await asyncio.to_thread(crop_field_face, face, layout)
-                _write_image(str(jpeg), mark_field_source(crop, "derived"))
-                stats.field_derived += 1
-                installed = jpeg
+        if not installed:
+            # Leave a published image intact on force/repair, and avoid rewriting
+            # a valid crop when the scheduled check finds no higher-quality copy.
+            if _local_donor(folder, card_id):
+                stats.skipped += 1
+            elif derived_field(jpeg) and _looks_like_image(_image_sample(str(jpeg))):
+                stats.skipped += 1
                 if not transient:
                     stats.published_misses.add(card_id)
             else:
-                stats.record_field_failure(card_id, name, transient)
+                face = folder.parent / f"{card_id}.jpg"
+                if face.is_file():
+                    from sleeves.imaging import ensure_gui
 
-    if installed:
-        stats.field_ok += 1
-        sibling = jpeg.with_suffix(".png") if installed == jpeg else jpeg
-        # A stale derived JPG can shadow the newly published PNG in the client.
-        if sibling.is_file() and (
-            derived_field(sibling)
-            or (
-                getattr(cfg, "repair", False) and not _looks_like_image(_image_sample(str(sibling)))
-            )
-        ):
-            record_artwork_change(sibling, None)
-            sibling.unlink()
-    if progress and task_id is not None:
-        progress.advance(task_id)
+                    ensure_gui()
+                    crop = await asyncio.to_thread(crop_field_face, face, layout)
+                    _write_image(str(jpeg), mark_field_source(crop, "derived"))
+                    stats.field_derived += 1
+                    installed = jpeg
+                    if not transient:
+                        stats.published_misses.add(card_id)
+                else:
+                    stats.record_field_failure(card_id, name, transient)
+
+        if installed:
+            stats.field_ok += 1
+            sibling = jpeg.with_suffix(".png") if installed == jpeg else jpeg
+            # A stale derived JPG can shadow the newly published PNG in the client.
+            if sibling.is_file() and (
+                derived_field(sibling)
+                or (
+                    getattr(cfg, "repair", False)
+                    and not _looks_like_image(_image_sample(str(sibling)))
+                )
+            ):
+                writer.publish(sibling, None)
+        if progress and task_id is not None:
+            progress.advance(task_id)
 
 
 # Curated textures
@@ -1218,6 +1256,8 @@ async def download_curated_textures(
     Files already on disk are kept (unless --force), so repeat runs are quick.
     Returns (downloaded, skipped, total_available).
     """
+    if getattr(cfg, "dry_run", False):
+        return (0, 0, 0)
     try:
         timeout = aiohttp.ClientTimeout(total=15)
         async with session.get(_textures_release_api(pack), timeout=timeout) as resp:
@@ -1261,37 +1301,35 @@ async def download_curated_textures(
     skipped = 0
     force = getattr(cfg, "force", False)
     cancel_event = getattr(cfg, "cancel_event", None)
-    for asset in assets:
-        if cancel_event is not None and cancel_event.is_set():
-            break
-        name = os.path.basename(asset["name"])  # guard against odd asset names
-        dest = extras._regular_path(game, textures_dir / name)
-        if not force and dest.exists():
-            skipped += 1
-            continue
-        # Keep the installation lock out of asynchronous network waits.
-        with TemporaryDirectory(dir=game) as temporary:
-            staged = Path(temporary) / "texture"
-            result = await _try_download(
-                session,
-                asset["browser_download_url"],
-                str(staged),
-                timeout,
-                cfg.max_retries,
-                is_valid=_looks_like_image,
+    with remember_changes(cfg) as writer:
+        for asset in assets:
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            name = os.path.basename(asset["name"])  # guard against odd asset names
+            try:
+                dest = extras._regular_path(game, textures_dir / name)
+            except OSError as exc:
+                raise ArtworkStorageError(str(exc)) from exc
+            if not force and dest.exists():
+                skipped += 1
+                continue
+            result = await _fetch_image(
+                session, asset["browser_download_url"], timeout, cfg.max_retries, _looks_like_image
             )
-            if result is FetchResult.OK:
+            if isinstance(result, FetchResult):
+                console.print(f"  [yellow]could not download {name}[/yellow]")
+                continue
+            try:
                 with appearance_lock(game):
                     dest = extras._regular_path(game, textures_dir / name)
                     if dest.exists() and not force:
                         skipped += 1
                         continue
-                    textures_dir.mkdir(exist_ok=True)
-                    staged.replace(dest)
-                downloaded += 1
-                console.print(f"  [dim]downloaded {name}[/dim]")
-            else:
-                console.print(f"  [yellow]could not download {name}[/yellow]")
+                    writer.publish(dest, result)
+            except OSError as exc:
+                raise ArtworkStorageError(str(exc)) from exc
+            downloaded += 1
+            console.print(f"  [dim]downloaded {name}[/dim]")
     return (downloaded, skipped, len(assets))
 
 
@@ -1445,6 +1483,8 @@ def _write_report(stats: DownloadStats, cfg: Config, runtime_seconds: float) -> 
             f.write(f"Unavailable:     {stats.failed:,}\n")
             f.write(f"Images folder:   {os.path.abspath(cfg.pics_path)}\n")
 
+            if stats.storage_error:
+                f.write(f"\n{STORAGE_MESSAGE}\n{stats.storage_error}\n")
             if stats.failed_cards:
                 f.write(f"\n{'=' * 40}\n")
                 f.write("Unavailable Breakdown\n")
@@ -1465,7 +1505,7 @@ def _write_report(stats: DownloadStats, cfg: Config, runtime_seconds: float) -> 
                     f.write("-" * 60 + "\n")
                     for card_id, card_name in official:
                         f.write(f"  {card_id}\t{card_name}\n")
-            elif not stats.optional_tokens:
+            elif not stats.optional_tokens and not stats.storage_error:
                 f.write("\nAll cards downloaded successfully.\n")
 
             if stats.unexpected_errors:
@@ -1491,7 +1531,12 @@ def print_summary(
     label_width = max(len(label) for label, _, _ in rows)
 
     console.print()
-    console.rule("[bold]Sync Complete[/bold]")
+    if stats.storage_error:
+        console.rule("[bold]Sync stopped[/bold]")
+        console.print(STORAGE_MESSAGE)
+        console.print(stats.storage_error)
+    else:
+        console.rule("[bold]Sync Complete[/bold]")
     for label, value, style in rows:
         formatted = f"{value:>12}"
         if style:
@@ -1743,7 +1788,7 @@ def _count_deck_files(folder: str) -> int:
         return 0
     count = 0
     for _root, _dirs, files in os.walk(folder):
-        count += sum(1 for f in files if f.endswith(".ydk"))
+        count += sum(1 for f in files if f.lower().endswith(".ydk"))
     return count
 
 
@@ -1836,7 +1881,29 @@ class SyncInputError(SystemExit):
         super().__init__(1)
 
 
-async def run(cfg: Config):
+async def _run_workers(workers: Iterable[Coroutine[Any, Any, None]]) -> None:
+    # Drain in-flight workers before releasing the journal on a failed publication.
+    async with asyncio.TaskGroup() as group:
+        for worker in workers:
+            group.create_task(worker)
+
+
+async def run(cfg: Config) -> DownloadStats | None:
+    stats = DownloadStats()
+    started_at = perf_counter()
+    try:
+        with remember_changes(cfg):
+            return await _run_sync(cfg, stats)
+    except* ArtworkStorageError as errors:
+        error = errors
+        while isinstance(error, BaseExceptionGroup):
+            error = error.exceptions[0]
+        stats.storage_error = str(error)
+        print_summary(stats, cfg, perf_counter() - started_at, cfg.save_report)
+    return stats
+
+
+async def _run_sync(cfg: Config, stats: DownloadStats) -> DownloadStats | None:
     started_at = perf_counter()
     cfg.report_path = None
     cfg.idle_summary = None
@@ -1858,20 +1925,63 @@ async def run(cfg: Config):
     ):
         return None
 
+    def requested_scope() -> set[int] | None:
+        if cfg.stats:
+            return None
+        ids = collect_deck_filter_ids(cfg)
+        if cfg.my_decks and not ids:
+            has_decks = cfg.deck_paths or _count_deck_files(
+                cfg.decks_folder or os.path.join(cfg.edopro_path, "deck")
+            )
+            cfg.idle_summary = (
+                "No cards found in your decks — nothing to sync"
+                if has_decks
+                else "No decks found — nothing to sync",
+                "No card IDs were found in your saved decks. Save a deck in EDOPro, then try again, or choose Full library.",
+            )
+            console.print(f"{cfg.idle_summary[0]}. {cfg.idle_summary[1]}")
+            if cfg.notice_sink is not None:
+                cfg.notice_sink(cfg.idle_summary[0])
+        return ids
+
+    deck_filter = requested_scope()
+    if cfg.idle_summary:
+        return None
     unreadable: list[str] = []
     dbs = get_db_files(cfg.edopro_path, unreadable=unreadable)
     if not dbs:
         dbs = prompt_for_edopro_path(cfg, unreadable=unreadable)
         if not dbs:
             return None
+        # The picker can select another installation with a different deck folder.
+        if cfg.my_decks:
+            deck_filter = requested_scope()
+            if cfg.idle_summary:
+                return None
 
-    if not cfg.stats and not cfg.dry_run:
-        os.makedirs(cfg.pics_path, exist_ok=True)
+    if cfg.dry_run:
+        # SQLite's read-only WAL connection may still create -wal and -shm files.
+        for database in dbs:
+            try:
+                with open(database, "rb") as handle:
+                    header = handle.read(20)
+            except OSError as exc:
+                raise SyncInputError(
+                    f"Cannot read {Path(database).name} for this preview."
+                ) from exc
+            if header.startswith(b"SQLite format 3\x00") and 2 in header[18:20]:
+                raise SyncInputError(
+                    f"Cannot preview {Path(database).name} without writing SQLite journal files."
+                )
+    elif not cfg.stats:
+        recover_publication(cfg)
 
-    deck_filter = None
-    if not cfg.stats and (cfg.deck_paths or cfg.decks_folder):
-        deck_filter = collect_deck_filter_ids(cfg)
     era_suffixes = tuple(cfg.suffixes)
+    # A receipt retry keeps its original deck scope and only revisits interrupted assets.
+    retry_artwork = getattr(cfg, "retry_artwork", None)
+    if retry_artwork:
+        retry_ids = retry_artwork[0] | retry_artwork[1]
+        deck_filter = retry_ids if deck_filter is None else deck_filter & retry_ids
     scoped_index = bool(deck_filter) and len(deck_filter) <= SMALL_DECK_INDEX_LIMIT
     if scoped_index:
         index = scan_databases(dbs, unreadable=unreadable, only_ids=deck_filter)
@@ -1909,22 +2019,13 @@ async def run(cfg: Config):
             if selected and not _run_was_cancelled(cfg):
                 if cfg.notice_sink is not None:
                     cfg.notice_sink(f"Installing {label}…")
-                extras.install(cfg.edopro_path, cfg.config_path, group)
+                try:
+                    with remember_changes(cfg) as writer:
+                        extras.install(cfg.edopro_path, cfg.config_path, group)
+                        writer.finish()
+                except OSError as exc:
+                    raise ArtworkStorageError(str(exc)) from exc
                 cfg.installed_extras.append(label)
-
-    # "Only my decks" (tick-box or --my-decks) points the deck filter at
-    # EDOPro's own deck folder.
-    if cfg.my_decks and not cfg.deck_paths and not cfg.decks_folder:
-        deck_dir = os.path.join(cfg.edopro_path, "deck")
-        if _count_deck_files(deck_dir):
-            cfg.decks_folder = deck_dir
-        else:
-            console.print(
-                "[yellow]No decks found in the EDOPro deck folder — "
-                "syncing everything instead.[/yellow]"
-            )
-            if cfg.notice_sink is not None:
-                cfg.notice_sink("No decks found — syncing everything instead")
 
     # Fresh install with decks? Offer the fast path before a ~13,000-card sync.
     if (
@@ -1945,26 +2046,16 @@ async def run(cfg: Config):
             "(run again later for the full set)"
         ):
             cfg.decks_folder = deck_dir
+            cfg.my_decks = True
+            deck_filter = requested_scope()
+            if cfg.idle_summary:
+                return None
 
-    if deck_filter is None:
-        deck_filter = collect_deck_filter_ids(cfg)
     if deck_filter is not None and not deck_filter:
-        if cfg.my_decks:
-            # The window/quick-start path: empty decks just mean "sync it all".
-            console.print(
-                "[yellow]No card IDs found in your decks — syncing everything instead.[/yellow]"
-            )
-            if cfg.notice_sink is not None:
-                cfg.notice_sink("Your decks are empty — syncing everything instead")
-            deck_filter = None
-        else:
-            # An explicit --deck/--decks-folder that matched nothing is almost
-            # certainly a typo'd path; escalating it to a full ~13,000-card
-            # download would be a nasty surprise.
-            raise SyncInputError(
-                "The selected deck files contain no card IDs. Choose a saved .ydk deck "
-                "or check the deck folder."
-            )
+        raise SyncInputError(
+            "The selected deck files contain no card IDs. Choose a saved .ydk deck "
+            "or check the deck folder."
+        )
     missing_from_dbs = set()
     if deck_filter is not None:
         id_to_name = {cid: name for cid, name in full_id_to_name.items() if cid in deck_filter}
@@ -2066,6 +2157,9 @@ async def run(cfg: Config):
                 f"(re-check with --recheck-missing)[/dim]"
             )
 
+    if retry_artwork:
+        missing_ids = [cid for cid in missing_ids if cid in retry_artwork[0]]
+
     # Field Spell playmat art (pics/field/) — same incremental + cache logic.
     field_cache_path = _field_failure_cache_path(cfg)
     checked_donors: dict[int, str | int] = {}
@@ -2077,6 +2171,8 @@ async def run(cfg: Config):
     missing_fields: list[int] = []
     if cfg.field_art:
         candidate_fields = sorted(cid for cid in field_ids if cid in id_to_name)
+        if retry_artwork:
+            candidate_fields = [cid for cid in candidate_fields if cid in retry_artwork[1]]
         broken_fields: set[int] = set()
         if cfg.repair:
             broken_fields = set(find_broken_field_images(field_art_dir(cfg), set(candidate_fields)))
@@ -2211,7 +2307,8 @@ async def run(cfg: Config):
         manual = manual_map.get(str(card_id))
         card_match_info[card_id] = (official, manual, is_pre_errata_miss, is_suffix_match)
 
-    stats = DownloadStats(rush_ids=rush_ids, token_ids=metadata.tokens)
+    stats._rush_ids = rush_ids
+    stats.token_ids = metadata.tokens
     if cfg.dry_run:
         stats.planned_fields = len(missing_fields)
     queue: asyncio.Queue[int] = asyncio.Queue()
@@ -2256,7 +2353,7 @@ async def run(cfg: Config):
                             task_id,
                             replace_existing=card_id in broken,
                         )
-                    except asyncio.CancelledError:
+                    except (asyncio.CancelledError, ArtworkStorageError):
                         raise
                     except Exception as exc:
                         # A crash proves nothing about availability — don't cache it.
@@ -2272,7 +2369,7 @@ async def run(cfg: Config):
                 progress = cfg.gui_progress
                 task_id = progress.add_task("Syncing card artwork", total=len(missing_ids))
                 workers = [make_worker(progress, task_id)() for _ in range(cfg.concurrency)]
-                await asyncio.gather(*workers)
+                await _run_workers(workers)
             elif RICH_AVAILABLE and not cfg.quiet:
                 with Progress(
                     SpinnerColumn(),
@@ -2284,13 +2381,12 @@ async def run(cfg: Config):
                 ) as progress:
                     task_id = progress.add_task("Syncing...", total=len(missing_ids))
                     workers = [make_worker(progress, task_id)() for _ in range(cfg.concurrency)]
-                    await asyncio.gather(*workers)
+                    await _run_workers(workers)
             else:
                 workers = [make_worker()() for _ in range(cfg.concurrency)]
-                await asyncio.gather(*workers)
+                await _run_workers(workers)
 
         if missing_fields and not cfg.dry_run:
-            os.makedirs(field_art_dir(cfg), exist_ok=True)
             field_queue: asyncio.Queue[int] = asyncio.Queue()
             for cid in missing_fields:
                 field_queue.put_nowait(cid)
@@ -2321,7 +2417,7 @@ async def run(cfg: Config):
                                 donor=field_donors.get(cid),
                                 layout=metadata.field_layout(cid, rush_ids),
                             )
-                        except asyncio.CancelledError:
+                        except (asyncio.CancelledError, ArtworkStorageError):
                             raise
                         except Exception as exc:
                             stats.record_field_failure(cid, fname, transient=True)
@@ -2335,8 +2431,8 @@ async def run(cfg: Config):
             if cfg.gui_progress is not None:
                 progress = cfg.gui_progress
                 task_id = progress.add_task("Field Spell artwork", total=len(missing_fields))
-                await asyncio.gather(
-                    *[make_field_worker(progress, task_id)() for _ in range(field_workers)]
+                await _run_workers(
+                    [make_field_worker(progress, task_id)() for _ in range(field_workers)]
                 )
             elif RICH_AVAILABLE and not cfg.quiet:
                 with Progress(
@@ -2348,11 +2444,11 @@ async def run(cfg: Config):
                     console=console,
                 ) as progress:
                     task_id = progress.add_task("Field art...", total=len(missing_fields))
-                    await asyncio.gather(
-                        *[make_field_worker(progress, task_id)() for _ in range(field_workers)]
+                    await _run_workers(
+                        [make_field_worker(progress, task_id)() for _ in range(field_workers)]
                     )
             else:
-                await asyncio.gather(*[make_field_worker()() for _ in range(field_workers)])
+                await _run_workers([make_field_worker()() for _ in range(field_workers)])
 
         if want_textures and not cfg.dry_run:
             pack = await _resolve_texture_pack(session, cfg)
@@ -2430,7 +2526,9 @@ async def run(cfg: Config):
         elif unreadable or not full_id_to_name or _run_was_cancelled(cfg):
             console.print("[yellow]Skipping --prune: no complete card index is available.[/yellow]")
         else:
-            pruned = prune_orphan_images(cfg.pics_path, set(full_id_to_name) | metadata.excluded)
+            pruned = prune_orphan_images(
+                cfg.pics_path, set(full_id_to_name) | metadata.excluded, cfg=cfg
+            )
             if pruned:
                 console.print(f"[dim]Pruned {pruned:,} orphaned images[/dim]")
 
@@ -2476,26 +2574,64 @@ def _extract_exit_code(code) -> int:
     return 1
 
 
+def _launch_config() -> Config:
+    parser = config_module._build_parser()
+    cli = parser.parse_args()
+    if not cli.dry_run:
+        return Config(defer_discovery=True)
+    if cli.generate_config or cli.gui_smoke_test:
+        parser.error("--dry-run cannot be combined with a command that writes output")
+    if cli.config or not getattr(sys, "frozen", False):
+        return Config(defer_discovery=True)
+
+    # An explicit settings source prevents the packaged constructor migrating a legacy file.
+    state = Path(config_module.default_config_path())
+    legacy = Path(config_module._runtime_dir()) / config_module.CONFIG_FILENAME
+    source = (
+        state if config_module._load_config_file(str(state)) or not legacy.is_file() else legacy
+    )
+    cfg = Config([*sys.argv[1:], "--config", str(source)], defer_discovery=True)
+    cfg.config_path = str(state)
+    manual_map = state.with_name("manual_map.json")
+    legacy_map = legacy.with_name(manual_map.name)
+    cfg.manual_map_file = str(
+        legacy_map if not manual_map.is_file() and legacy_map.is_file() else manual_map
+    )
+    return cfg
+
+
 def main() -> int:
     cfg: Config | None = None
     exit_code = 0
     launched_gui = False
 
     try:
-        cfg = Config(defer_discovery=True)
+        cfg = _launch_config()
+        if cfg.cli.undo_last_sync:
+            detect_edopro_folder(cfg)
+            if cfg.dry_run:
+                console.print(f"Would undo the last artwork sync in {cfg.edopro_path}.")
+                return 0
+            try:
+                restored = restore_artwork(cfg)
+            except (ValueError, OSError, sqlite3.DatabaseError) as exc:
+                console.print(f"Could not undo the last artwork sync: {exc}")
+                return 1
+            console.print(f"Undid the last artwork sync. Restored {restored} file(s).")
+            return 0
         if cfg.cli.gui_smoke_test:
             launched_gui = True
             from tools.gui_smoke import smoke_test
 
             return smoke_test(cfg, VERSION, run, _apply_gui_choices)
-        if cfg.cli.legacy_gui and getattr(sys, "frozen", False):
+        if cfg.cli.legacy_gui and not cfg.dry_run and getattr(sys, "frozen", False):
             from desktop_dialogs import show_startup_error
 
             show_startup_error(
                 "The Tk window is available from source. Open the app without --legacy-gui for Qt."
             )
             return 1
-        studio_launch = _should_show_gui(cfg) and not cfg.cli.legacy_gui
+        studio_launch = not cfg.dry_run and _should_show_gui(cfg) and not cfg.cli.legacy_gui
         if not cfg.health_check and not studio_launch:
             detect_edopro_folder(cfg)
 
@@ -2514,7 +2650,7 @@ def main() -> int:
                 show_startup_error(f"{config_module.APP_NAME} needs PySide6-Essentials. {exc}")
                 return 1
             exit_code = run_app(cfg, VERSION, run, _apply_gui_choices)
-        elif cfg.cli.legacy_gui:
+        elif cfg.cli.legacy_gui and not cfg.dry_run:
             import gui
 
             # Tk runs sync in a worker. Qt's image codecs need their application on the main thread.
@@ -2532,7 +2668,9 @@ def main() -> int:
                 )
                 return 1
         if not launched_gui:
-            asyncio.run(run(cfg))
+            stats = asyncio.run(run(cfg))
+            if stats is not None and stats.storage_error:
+                exit_code = 1
     except KeyboardInterrupt:
         exit_code = 130
         console.print("\n[yellow]Interrupted - partial progress is saved.[/yellow]")

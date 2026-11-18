@@ -7,7 +7,14 @@ from PySide6.QtWidgets import QFileDialog
 
 import sounds
 from studio.pages.sounds_mixer import MixerView, PickerView
-from studio.pages.sounds_model import EVENT_KEYS, NEW_MIX, chants_for, choice_for, import_message
+from studio.pages.sounds_model import (
+    EVENT_KEYS,
+    NEW_MIX,
+    chants_for,
+    choice_for,
+    event_description,
+    import_message,
+)
 from studio.tasks import Job
 from studio.widgets import label
 
@@ -102,7 +109,7 @@ class SoundEvents:
         key = self.event
         event = sounds.event_for(key)
         self.picker.heading.setText(event.name)
-        self.picker.description.setText(event.description)
+        self.picker.description.setText(event_description(key))
         self.picker.description.show()
         name, duration, _ = self.show_choice(key)
         self.picker.current_name.set_value(
@@ -195,7 +202,7 @@ class SoundEvents:
 
         def error(exc: BaseException) -> None:
             if current():
-                self.page.feedback.show_message(import_message(exc, clip=True))
+                self.page.feedback.show_message(import_message(exc, clip=True), details=str(exc))
 
         def finish() -> None:
             if self.clip_job is job:

@@ -18,6 +18,10 @@ The source app uses real downloads when you press **Sync HD cards**. **Check art
 
 The shell constructs HD Cards at startup and builds each other page on its first visit or lookup in `window.pages`. Iterating the mapping lists all IDs in sidebar order. For a new section, register its class in `studio.shell.PAGES` and add an original 24-unit SVG path in `studio/icons.py`. Supply plain text for the page title. The scrolling rail starts groups at `cards` (Customize), `decks` (Decks) and `replays` (Tools). Settings stays pinned below the scroll area. Up and Down move focus through all groups, and Enter selects the focused section.
 
+A new Decks section needs only its page class in the `PAGES` tuple after `MyDecksPage`, in display order. For example, import `FormatsPage` and `PracticePage` and insert `FormatsPage, PracticePage,` before `ReplaysPage`. Give each class an `id, title, icon` tuple such as `("formats", "Formats", "formats")`, and register its icon under that key. For modules that expose `render(out, size, root)`, add `"formats": ("tools.studio_formats_shots", "render")` and `"practice": ("tools.studio_practice_shots", "render")` to `STANDALONE_RENDERERS` in `tools/studio_screenshots.py`. The sidebar, overview and CLI choices use the same page IDs.
+
+Wrap an existing scroll area (or stack of scroll areas) and its button row in `ActionPage(content, actions)` from `studio.widgets` to keep the next action visible. At taller sizes the row follows the task and spare height falls below it. Use `ctx.confirm(title, message, affirmative="Restore to ProjectIgnis")` for a named action with Cancel as the default.
+
 The shell switches shared `Hero` banners to compact type and spacing at window heights of 800 logical pixels or less. This also applies to banners created during navigation. A page can use `hero.setVisible(is_home)` when opening a subview, or put the banner in the home widget of a stack. Resizing preserves that choice and restores the page’s preferred tall-window dimensions.
 
 ```python

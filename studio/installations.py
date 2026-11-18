@@ -54,10 +54,10 @@ class InstallationPicker(QWidget):
         self.list.setAccessibleName("EDOPro folders found")
         self.list.itemDoubleClicked.connect(self._use)
         self.list.itemActivated.connect(self._use)
-        self.list.currentRowChanged.connect(lambda row: self.use.setEnabled(row >= 0))
+        self.list.currentRowChanged.connect(self._selection)
         body.addWidget(self.list)
         actions = QHBoxLayout()
-        self.browse = Button("Browse…", "secondary", "folder")
+        self.browse = Button("Browse for game folder", "secondary", "folder")
         self.browse.clicked.connect(self._browse)
         self.use = Button("Use this folder", "primary", "check")
         self.use.clicked.connect(self._use)
@@ -67,6 +67,12 @@ class InstallationPicker(QWidget):
         body.addLayout(actions)
         body.addStretch()
 
+    def _selection(self, row: int) -> None:
+        selected = row >= 0
+        self.use.setEnabled(selected)
+        self.use.setVisible(selected)
+        self.browse.set_role("secondary" if selected else "primary", "folder")
+
     def open_picker(self, selected: str = "") -> None:
         self.serial += 1
         serial = self.serial
@@ -74,7 +80,7 @@ class InstallationPicker(QWidget):
         self.list.clear()
         self.list.hide()
         self.loading.show()
-        self.use.setEnabled(False)
+        self._selection(-1)
         self.browse.setEnabled(True)
         self.back.setEnabled(True)
         self.hint.setText("Searching for EDOPro folders…")
@@ -140,7 +146,14 @@ class InstallationPicker(QWidget):
         settings = self.ctx.cfg.config_path
 
         def inspect(_: WorkerContext) -> tuple[Installation, bool]:
-            installation = Installation.inspect(path)
+            installation = Installation()
+            for root in config.installation_roots(path):
+                candidate = Installation.inspect(root)
+                if candidate.ready:
+                    installation = candidate
+                    break
+                if not installation.path:
+                    installation = candidate
             saved = bool(installation.path) and config.save_edopro_path(settings, installation.path)
             return installation, saved
 

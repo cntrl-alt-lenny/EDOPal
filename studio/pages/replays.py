@@ -6,6 +6,7 @@ from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QVBoxLayout
 
+import desktop_helpers
 from music.settings import _game_running
 from replays import (
     AnnotationStore,
@@ -27,7 +28,6 @@ from studio.pages.replays_library import (
     format_tags,
     last_to_save,
     played,
-    reveal_file,
 )
 from studio.pages.replays_list import ReplayList
 from studio.tasks import Work, WorkerContext
@@ -90,6 +90,7 @@ class ReplaysPage(ToolPage):
 
     def refresh(self) -> None:
         self.stop_read()
+        self.retry_back = None
         self.watch.stop()
         game = self.ctx.installation.path
         self.selected, self.entries = None, ()
@@ -116,7 +117,14 @@ class ReplaysPage(ToolPage):
 
         def failed(exc: Exception) -> None:
             self.watch.stop()
-            self.state_view("error", "The library could not open", str(exc), "Retry", self.refresh)
+            self.state_view(
+                "error",
+                "Replays could not open",
+                self.folder_read_error(),
+                "Retry",
+                self.refresh,
+                technical=str(exc),
+            )
 
         self.read(scan, lambda result: self._indexed(result, passive=passive), failed)
 
@@ -276,7 +284,7 @@ class ReplaysPage(ToolPage):
         line.addWidget(glyph("check", colour=t.GREEN))
         line.addWidget(
             label(
-                "Your saved copy appears in Replays next time you start EDOPro. To undo, show the copy and move it to the trash.",
+                "Your copy appears in Replays the next time you start EDOPro. To remove it, choose Show saved copy and delete it in your file manager.",
                 "body",
                 True,
             ),
@@ -310,10 +318,18 @@ class ReplaysPage(ToolPage):
             self.saved = path
             self.refresh()
 
-        self._write("Saving your last duel…", save, success, self._preserve, self.refresh)
+        self._write(
+            "Saving your last duel…",
+            save,
+            success,
+            self._preserve,
+            self.refresh,
+            "The last duel could not be saved",
+        )
 
     def detail(self, entry: ReplayEntry) -> None:
         self.stop_read()
+        self.retry_back = None
         self.selected = entry
         self.surface("detail")
         back = self.back_button(self._back)
@@ -369,11 +385,12 @@ class ReplaysPage(ToolPage):
                 self.scroll.ensureWidgetVisible(self.form.undo)
 
         self._write(
-            "Saving your notebook…",
+            "Saving replay details…",
             save,
             success,
             lambda: self._store(annotation, undo=undo),
             lambda: self._restore_draft(entry, annotation),
+            "Replay details could not be saved",
         )
 
     def _restore_draft(self, entry: ReplayEntry, draft: ReplayNotes) -> None:
@@ -389,9 +406,9 @@ class ReplaysPage(ToolPage):
         profile = Path(self.ctx.cfg.config_path).parent
         destination, _ = QFileDialog.getSaveFileName(
             self,
-            "Export replay with notes",
+            "Export replay and notes",
             str(profile / "Duel with notes.zip"),
-            "Replay bundle (*.zip)",
+            "Replay ZIP (*.zip)",
         )
         if not destination:
             return
@@ -403,28 +420,36 @@ class ReplaysPage(ToolPage):
         def export(_: WorkerContext) -> Path:
             if path.resolve().is_relative_to(game.resolve()):
                 require_closed(game)
-            try:
-                return export_replay(entry, path)
-            except FileExistsError as exc:
-                raise ValueError(
-                    "A file already has that name. Choose another name for your export."
-                ) from exc
+            return export_replay(entry, path)
 
         def success(_: Path) -> None:
             self.detail(entry)
             self.ctx.notify("Replay and notes exported.")
 
         self._write(
-            "Exporting your replay…", export, success, self._export, lambda: self.detail(entry)
+            "Exporting your replay…",
+            export,
+            success,
+            self._export,
+            lambda: self.detail(entry),
+            "Replay ZIP could not be exported",
         )
 
     def _reveal(self, path: Path) -> None:
-        job = self.ctx.tasks.start(lambda _: reveal_file(path))
-        job.result.connect(lambda shown: None if shown else self.open_folder(path.parent))
-        job.error.connect(lambda exc: self.ctx.notify(str(exc)))
+        self.open_in_desktop(
+            path,
+            desktop_helpers.reveal_file,
+            "The replay could not be shown. Refresh Replays if the file has moved.",
+        )
 
     def _write(
-        self, message: str, work: Work, done: Callable, retry: Callable, back: Callable
+        self,
+        message: str,
+        work: Work,
+        done: Callable,
+        retry: Callable,
+        back: Callable,
+        failure_title: str,
     ) -> None:
         if self.writing:
             return
@@ -435,7 +460,7 @@ class ReplaysPage(ToolPage):
         self.state_view(
             "busy",
             message,
-            "Stay on this page until saving finishes. Your installation is locked for this step.",
+            "You can change folders when this finishes.",
         )
         job = self.ctx.tasks.start(work)
 
@@ -450,18 +475,23 @@ class ReplaysPage(ToolPage):
         def failed(exc: Exception) -> None:
             if release():
                 stale = isinstance(exc, ChangedRecording)
-                headline = (
-                    "Close EDOPro to continue"
-                    if isinstance(exc, GameOpen)
-                    else "The file could not be saved"
-                )
+                blocked = isinstance(exc, GameOpen)
+                if stale or blocked:
+                    explanation = str(exc)
+                elif isinstance(exc, FileExistsError):
+                    explanation = (
+                        "A file already has that name. Choose another name for your export."
+                    )
+                else:
+                    explanation = "Check that the folder is available and writable, then try again."
                 self.state_view(
                     "write_error",
-                    headline,
-                    str(exc),
+                    "Close EDOPro to continue" if blocked else failure_title,
+                    explanation,
                     "Refresh" if stale else "Retry",
                     self.refresh if stale else retry,
                     back=back,
+                    technical="" if stale or blocked else str(exc),
                 )
                 self.retry_back = back
 
@@ -475,7 +505,8 @@ class ReplaysPage(ToolPage):
             and self.form.draft() != self.selected.annotation
         ):
             return self.ctx.confirm(
-                "Discard edits?", "Leave without saving your changes to the label, tags and notes?"
+                "Discard unsaved changes?",
+                "Your changes to the label, tags and notes will be lost.",
             )
         return True
 
@@ -499,4 +530,8 @@ class ReplaysPage(ToolPage):
         if self.writing or not self._may_leave():
             return False
         self.watch.stop()
+        self.entries = ()
+        self.selected = self.last = self.preserve = None
+        self.surface("inactive")
+        self.form = self.list = self.retry_back = None
         return super().hidden()

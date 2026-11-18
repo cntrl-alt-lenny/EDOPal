@@ -61,7 +61,9 @@ class OptionsView(QWidget):
         self.groups.setSpacing(t.XL)
         self.body.addLayout(self.groups)
 
-        sync = QVBoxLayout()
+        self.selection = QWidget()
+        sync = QVBoxLayout(self.selection)
+        margins(sync, 0)
         sync.setSpacing(t.LG)
         sync.addWidget(SectionHeader("Artwork to sync"))
         self.scope = SegmentedControl(
@@ -71,12 +73,8 @@ class OptionsView(QWidget):
             )
         )
         sync.addWidget(self.scope)
-        self.connect_game = ActionTile(
-            "Choose your EDOPro folder", "Browse to the folder where you open EDOPro.", "folder"
-        )
-        sync.addWidget(self.connect_game)
-        self.check_again = Button("Check again", "secondary", "search")
-        sync.addWidget(self.check_again, 0, Qt.AlignmentFlag.AlignLeft)
+        self.connect_game = Button("Choose your EDOPro folder", "primary", "folder")
+        self.check_again = Button("Check again", "primary", "search")
         self.actions = QWidget()
         actions = QHBoxLayout(self.actions)
         margins(actions, 0)
@@ -84,9 +82,11 @@ class OptionsView(QWidget):
         self.status = label("", "small", True)
         actions.addWidget(self.status, 1)
         self.start = Button("Sync HD cards", "primary", "download")
+        actions.addWidget(self.connect_game)
+        actions.addWidget(self.check_again)
         actions.addWidget(self.start)
         sync.addStretch()
-        self.groups.addLayout(sync, 3)
+        self.groups.addWidget(self.selection, 3)
 
         library = QVBoxLayout()
         library.setSpacing(t.LG)
@@ -194,7 +194,8 @@ class SettingsView(QWidget):
                     "Replace existing images in this selection.",
                 )
             elif key == "hd_era_art":
-                hint = "Prefer HD artwork with modern text when available."
+                title = "Use HD artwork with modern text"
+                hint = "Turn off to prefer original wording on GOAT and Pre-Errata cards."
             switch = ToggleSwitch(title, hint, default)
             if self.toggles:
                 panel.body.addWidget(line())
@@ -208,13 +209,20 @@ class SettingsView(QWidget):
         self.coverage.setVisible(not global_defaults)
         self.done = Button("Save defaults", "primary", "check")
         actions.addWidget(self.coverage)
+        self.unsaved = label("Unsaved changes", "small")
         actions.addStretch()
+        actions.addWidget(self.unsaved)
         actions.addWidget(self.done)
-        if global_defaults:
-            body.addWidget(self.actions)
         body.addStretch()
 
         self.load(cfg)
+        for toggle in self.toggles.values():
+            toggle.toggled.connect(self._edited)
+        if self.scope:
+            self.scope.changed.connect(self._edited)
+
+    def _edited(self) -> None:
+        self.unsaved.setVisible(self.preferences() != self.saved)
 
     def load(self, cfg: Config) -> None:
         values = {
@@ -226,6 +234,8 @@ class SettingsView(QWidget):
             toggle.setChecked(values[key] if key in values else getattr(cfg, key))
         if self.scope:
             self.scope.select(("auto", "library", "decks").index(cfg.studio_scope))
+        self.saved = self.preferences()
+        self._edited()
 
     def discard(self, ctx: AppContext) -> bool:
         draft = self.preferences()

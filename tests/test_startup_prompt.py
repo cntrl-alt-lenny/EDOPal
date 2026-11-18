@@ -120,8 +120,7 @@ class StartupPromptTests(unittest.TestCase):
         scan_mock.assert_called_once_with(expected_dbs, unreadable=[])
         self.assertFalse(os.path.exists(os.path.join(valid_path, "pics")))
         with open(config_path, encoding="utf-8") as file_obj:
-            saved = json.load(file_obj)
-        self.assertEqual(saved["edopro_path"], os.path.abspath(valid_path))
+            self.assertEqual(json.load(file_obj), {})
 
     def test_run_with_empty_database_exits_cleanly(self):
         """Zero-byte cards.cdb should be treated as 'nothing to sync', not a failure."""
@@ -139,10 +138,10 @@ class StartupPromptTests(unittest.TestCase):
         ):
             asyncio.run(main.run(cfg))
 
-        # Expect no sync report and an empty pics directory (nothing to download).
+        # An empty database never opens the writer.
         self.assertEqual(cfg.idle_summary[0], "Waiting for card data")
         self.assertFalse(any(f.startswith("sync-report") for f in os.listdir(valid_path)))
-        self.assertTrue(os.path.isdir(os.path.join(valid_path, "pics")))
+        self.assertFalse(os.path.exists(os.path.join(valid_path, "pics")))
 
     def test_run_exits_non_zero_when_non_empty_dbs_yield_no_cards(self):
         """A corrupt non-empty DB that yields zero cards should fail the run."""

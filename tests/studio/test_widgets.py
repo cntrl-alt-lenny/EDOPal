@@ -89,7 +89,15 @@ def test_compact_hero_restores_page_sizes_and_respects_hidden_subviews(
     window = make_window()
     window.resize(1600, 1000)
     window.navigate("music")
-    qtbot.waitUntil(lambda: window.current.state == "home")
+    # Music replaces the loading widget, then Qt posts the layout/show events
+    # for its new children. Measure the normal banner after those have arrived.
+    qtbot.waitUntil(
+        lambda: (
+            window.current.state == "home"
+            and window.current.hero.headline.isVisible()
+            and window.current.hero.height() == window.current.hero.minimumHeight()
+        )
+    )
     hero = window.current.hero
     normal = hero.minimumHeight(), hero.maximumHeight()
     window.resize(1280, 800)

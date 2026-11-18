@@ -1,4 +1,11 @@
-from studio.widgets.blocks import EmptyState, GameClosedBlock, Hero, Notice, ProgressBlock
+from studio.widgets.action_page import ActionPage
+from studio.widgets.blocks import (
+    EmptyState,
+    GameClosedBlock,
+    Hero,
+    Notice,
+    ProgressBlock,
+)
 from studio.widgets.controls import (
     ActionTile,
     Button,
@@ -16,6 +23,7 @@ from studio.widgets.controls import (
 from studio.widgets.tiles import ImageTileGrid, Tile
 
 __all__ = [
+    "ActionPage",
     "ActionTile",
     "Button",
     "ElidedLabel",

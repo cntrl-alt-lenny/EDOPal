@@ -4,11 +4,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 import backup
+import config
 from studio import theme as t
 from studio.pages.backup_data import Mode, error_text
 from studio.pages.backup_jobs import WriteError
-from studio.pages.backup_screens import UNDO_DESCRIPTION, Screen, recovery_panel
-from studio.pages.backup_views import action, actions, path_label
+from studio.pages.backup_screens import UNDO_HELP, Screen, recovery_panel
+from studio.pages.backup_views import UndoStatus, action, actions, path_label
+from studio.pages.health_layout import row, technical_details
 from studio.widgets import Panel, ProgressBlock
 
 
@@ -26,6 +28,7 @@ class BusyScreen(Screen):
         if writing:
             self.banner(title, description, "backup")
             self.progress.begin("Preparing files…")
+            self.progress.cancel.setText("Cancel backup operation")
         else:
             self.heading(title, cancel)
             self.progress.begin(description)
@@ -55,15 +58,17 @@ class SavedScreen(Screen):
         panel.body.addWidget(name)
         panel.body.addWidget(path_label(str(path.parent)))
         self.body.addWidget(panel)
-        reveal = action("Open backup folder", reveal_folder, "primary", "folder")
+        reveal = action("Open backup folder", reveal_folder, "secondary", "folder")
+        done = action("Done", back, "primary", "check")
         self.body.addWidget(
             actions(
                 reveal,
+                done,
                 description="Copy this file to your other device using a USB drive or cloud storage. "
-                "Open Studio there, select your EDOPro folder, then choose Restore in Backup & transfer.",
+                f"Open {config.APP_NAME} there, select your EDOPro folder, then choose Restore from backup.",
             )
         )
-        self.focus = reveal
+        self.focus = done
 
 
 class RestoredScreen(Screen):
@@ -79,19 +84,26 @@ class RestoredScreen(Screen):
         self.banner(
             title, "The changes will be available the next time you start EDOPro.", "check", back
         )
-        done = action("Done" if complete else "Back to backups", back, "primary", "check")
-        buttons = (
-            (action("Undo this restore", undo, "secondary", "back"), done) if complete else (done,)
+        done = action("Done", back, "primary", "check")
+        self.undo = action("Undo this restore", undo, "secondary", "back")
+        self.undo.hide()
+        self.status = UndoStatus(
+            "Checking undo availability…"
+            if complete
+            else "This restore is marked as undone in history.",
         )
-        self.body.addWidget(
-            actions(
-                *buttons,
-                description=UNDO_DESCRIPTION
-                if complete
-                else "This restore is marked as undone in history.",
-            )
-        )
+        footer = Panel(t.LG)
+        controls = row()
+        controls.addWidget(self.status, 1)
+        controls.addWidget(self.undo)
+        controls.addWidget(done)
+        footer.body.addLayout(controls)
+        self.body.addWidget(footer)
         self.focus = done
+
+    def show_undo(self, preview: backup.UndoPreview) -> None:
+        self.status.show_preview(preview, UNDO_HELP)
+        self.undo.setVisible(preview.available)
 
 
 class ErrorScreen(Screen):
@@ -115,6 +127,8 @@ class ErrorScreen(Screen):
             if not isinstance(problem.error, backup.GameRunning):
                 return
         else:
+            if isinstance(problem.error, backup.Cancelled) and not problem.history_unavailable:
+                description = "Canceled before any changes were published."
             self.banner(title, description, "warning", back)
             if path:
                 self.body.addWidget(path_label(path))
@@ -122,5 +136,8 @@ class ErrorScreen(Screen):
         if problem.history_unavailable:
             note = "Check restore history for interrupted work before trying again."
         retry_button = action(retry_label, retry, "primary")
-        self.body.addWidget(actions(retry_button, description=note))
+        footer = actions(retry_button, description=note)
+        if not isinstance(problem.error, (backup.Cancelled, backup.GameRunning)):
+            technical_details(footer.body, str(problem.error))
+        self.body.addWidget(footer)
         self.focus = retry_button

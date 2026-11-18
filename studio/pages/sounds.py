@@ -8,10 +8,12 @@ from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
 import sounds
+from music.settings import GameProcessUnknown
 from studio import theme as t
 from studio.context import AppContext, GameOpenError, Installation
 from studio.pages.base import Page
 from studio.pages.card_views import scroll
+from studio.pages.music_sounds_controls import TITLE_ROW_HEIGHT, AudioGameCheck, confirm_change
 from studio.pages.sounds_auditions import SoundAuditions
 from studio.pages.sounds_collections import SoundCollections
 from studio.pages.sounds_event_controls import SoundEvents
@@ -19,7 +21,6 @@ from studio.pages.sounds_model import (
     EVENT_COUNT,
     NEW_MIX,
     Downloadable,
-    FilesChanged,
     Snapshot,
     Source,
     coverage,
@@ -37,7 +38,7 @@ from studio.pages.sounds_views import (
     empty_layout,
 )
 from studio.tasks import Job
-from studio.widgets import GameClosedBlock, margins
+from studio.widgets import margins
 
 
 class SoundsPage(Page):
@@ -54,7 +55,9 @@ class SoundsPage(Page):
         )
         self.bar = ActionBar()
         self.feedback = Feedback()
-        self.closed = GameClosedBlock()
+        self.closed = AudioGameCheck()
+        self.closed.back.clicked.connect(self.clear_feedback)
+        self.closed.proceed.clicked.connect(lambda: self.retry(confirmed_closed=True))
         self.closed.hide()
         for bordered in (self.bar, self.feedback, self.closed):
             bordered.setMaximumWidth(t.CONTENT_MAX - 2 * t.XXL)
@@ -116,7 +119,7 @@ class SoundsPage(Page):
         self.cards: dict[str, SetCard] = {}
 
         self.overview.choose.clicked.connect(context.installations_requested.emit)
-        self.overview.rescan.clicked.connect(self.refresh)
+        self.overview.rescan.clicked.connect(self.check_again)
         self.overview.toggle.clicked.connect(self.toggle_effects)
         self.overview.mix.clicked.connect(self.open_mixer)
         self.overview.saved.clicked.connect(self.collections.open_library)
@@ -130,7 +133,7 @@ class SoundsPage(Page):
             (self.bar.restore, "restore"),
         ):
             button.clicked.connect(partial(self.change_game, action))
-        self.closed.retry.clicked.connect(self.retry)
+        self.closed.retry.clicked.connect(lambda: self.retry())
         self.feedback.dismiss.clicked.connect(self.clear_feedback)
         self.update_controls()
 
@@ -162,17 +165,19 @@ class SoundsPage(Page):
             add_section(self.overview.cards, self.cards.values(), columns)
             for col in range(3):
                 self.overview.cards.setColumnStretch(col, int(col < columns))
-        self.overview.compact_banner = self.height() < t.TALL_HEIGHT - t.HUGE and (
-            self.write_job or self.feedback.isVisible() or (self.snapshot and self.snapshot.undo)
-        )
-        self.overview.size_banner()
+        short = self.window().height() <= TITLE_ROW_HEIGHT
+        self.overview.hero.setVisible(not short)
+        self.overview.compact_title.setVisible(short)
 
     def shown(self) -> None:
         if self.bundled is None and self.bundle_job is None:
             self.bundle_job = job = self.ctx.tasks.start(lambda _worker: sounds.bundled_sets())
             job.result.connect(self.show_bundles)
             job.error.connect(
-                lambda exc: self.feedback.show_message(f"Could not open built-in sounds. {exc}")
+                lambda exc: self.feedback.show_message(
+                    "Could not read the built-in sound sets. Reopen Sounds to retry.",
+                    details=str(exc),
+                )
             )
             job.finished.connect(self.finish_bundles)
         if self.collections.saved is None and self.collections.local_job is None:
@@ -213,6 +218,16 @@ class SoundsPage(Page):
         if self.isVisible() and installation.ready:
             self.refresh()
 
+    def check_again(self) -> None:
+        install = self.ctx.installation
+        if install.path and not install.ready:
+            self.ctx.select_installation_requested.emit(install.path)
+        else:
+            self.refresh()
+
+    def confirm(self, action: str, message: str) -> bool:
+        return confirm_change(self, action, message)
+
     def refresh(self) -> None:
         install = self.ctx.installation
         if not install.ready or self.scan_job or self.write_job:
@@ -222,6 +237,8 @@ class SoundsPage(Page):
             self.ctx.cfg.config_path,
             self.generation,
         )
+        if self.retry_action:
+            self.clear_feedback()
         self.scan_error = False
 
         def show(snapshot: Snapshot) -> None:
@@ -236,9 +253,9 @@ class SoundsPage(Page):
                 self.snapshot = None
                 self.show_cards()
                 self.feedback.show_message(
-                    "Could not read the game’s sounds. Check its folder and retry."
+                    "Could not read the game’s sounds. Check the EDOPro folder and retry.",
+                    details=str(exc),
                 )
-                self.feedback.copy.setToolTip(str(exc))
 
         def finish() -> None:
             if generation == self.generation:
@@ -253,6 +270,8 @@ class SoundsPage(Page):
 
     def open_view(self, key: str, focus: QWidget | None = None) -> None:
         if key != self.state:
+            if self.retry_action:
+                self.clear_feedback()
             self.stop_audio()
             self.animation.stop()
             view = self.views[key]
@@ -290,10 +309,6 @@ class SoundsPage(Page):
                 "downloads": self.overview.downloads,
             }
             self.open_view("overview", focus.get(self.state))
-        elif self.audio.preview is not None:
-            self.stop_audio()
-        else:
-            return False
         return True
 
     def clear_feedback(self) -> None:
@@ -301,9 +316,9 @@ class SoundsPage(Page):
         self.closed.hide()
         self.feedback.show_message("")
 
-    def retry(self) -> None:
+    def retry(self, *, confirmed_closed: bool = False) -> None:
         if self.retry_action:
-            self.change_game(self.retry_action, retry=True)
+            self.change_game(self.retry_action, retry=True, confirmed_closed=confirmed_closed)
 
     def show_bundles(self, sets: tuple[sounds.SoundSet, ...]) -> None:
         self.bundled = sets
@@ -370,14 +385,16 @@ class SoundsPage(Page):
         self.events.update()
 
     def save_mix(self) -> None:
-        self.collections.open_name("Save mix", self.draft)
+        self.collections.open_name("Save sound set", self.draft)
 
     def stop_audio(self) -> None:
         self.audio.stop()
 
     def update_status(self) -> None:
         snapshot = self.snapshot
-        title = installed_name(snapshot, self.sources()) if snapshot else "Choose an installation"
+        title = (
+            installed_name(snapshot, self.sources()) if snapshot else "Choose your EDOPro folder"
+        )
         self.overview.show_status(self.ctx.installation, snapshot, title, self.scan_error)
         count = (
             sum(row.key.startswith("chant/") and bool(row.paths) for row in snapshot.rows)
@@ -419,7 +436,7 @@ class SoundsPage(Page):
         self.bar.name.set_value(self.draft.name if self.draft.assignments else "No set selected")
         playable, silent = coverage(self.draft)
         detail = (
-            f"{playable} of {EVENT_COUNT} events with sound"
+            f"{playable} of {EVENT_COUNT} sound slots have a clip"
             + (f"  ·  {silent} silent" if silent else "")
             if self.draft.assignments
             else "Pick a set or open the mixer to choose individual sounds."
@@ -438,49 +455,53 @@ class SoundsPage(Page):
         if self.snapshot:
             self.change_game("enable" if self.snapshot.settings.enabled is False else "disable")
 
-    def change_game(self, action: str, *, retry: bool = False) -> None:
+    def change_game(
+        self, action: str, *, retry: bool = False, confirmed_closed: bool = False
+    ) -> None:
         snapshot = self.snapshot
         if not snapshot or self.write_job or self.scan_job or self.ctx.busy:
             return
         if (
+            action == "undo"
+            and not retry
+            and not self.confirm(
+                "Undo last sound change",
+                f"Put the previous sound files back in {self.ctx.installation.path}?",
+            )
+        ):
+            return
+        if (
             action == "restore"
             and not retry
-            and not self.ctx.confirm(
-                "Restore original sounds?",
-                "Put back the files from before the first recorded change to each sound? You can undo the restore.",
+            and not self.confirm(
+                "Restore original sounds",
+                "Put back the files from before the first recorded change to each sound in this EDOPro folder? You can undo the restore.",
             )
         ):
             return
         if action == "apply" and not self.draft.assignments:
             return
         game = Path(self.ctx.installation.path)
+        generation = self.generation
         config_path, draft = self.ctx.cfg.config_path, self.draft
         self.stop_audio()
         self.clear_feedback()
         self.feedback.show_message(
-            "Updating the selected game. You can switch folders when this finishes.", pending=True
+            "Updating sound effects… You can change folders when this finishes.", pending=True
         )
         self.ctx.set_busy(True)
 
         def error(exc: BaseException) -> None:
-            if isinstance(exc, GameOpenError) or "Close this EDOPro installation" in str(exc):
+            if generation != self.generation:
+                return
+            if isinstance(
+                exc, (GameProcessUnknown, GameOpenError)
+            ) or "Close this EDOPro installation" in str(exc):
                 self.retry_action = action
                 self.feedback.hide()
-                self.closed.show_reason(str(exc))
-            elif isinstance(exc, FilesChanged):
-                self.feedback.show_message(
-                    "The game’s sounds changed outside the app. Your files were kept. Check the installed sounds before applying again."
-                )
-            elif "changed after installation" in str(exc):
-                self.feedback.show_message(
-                    f"A sound changed outside the app. {exc} Put back that sound’s previous file to use your saved sound history."
-                )
-            elif action in ("enable", "disable"):
-                self.feedback.show_message(
-                    "Could not change the effects switch. Use EDOPro’s audio settings to change it."
-                )
+                self.closed.explain(exc)
             else:
-                self.feedback.show_message(f"Could not update the game’s sounds. {exc}")
+                self.feedback.write_failed(action, exc)
 
         def finish() -> None:
             self.write_job = None
@@ -490,20 +511,23 @@ class SoundsPage(Page):
             self.update_controls()
 
         self.write_job = job = self.ctx.tasks.start(
-            lambda _worker: write_game(game, config_path, action, draft, snapshot)
+            lambda _worker: write_game(
+                game, config_path, action, draft, snapshot, confirmed_closed=confirmed_closed
+            )
         )
-        job.result.connect(
-            lambda _: self.feedback.show_message(
-                {
+
+        def done(_: object) -> None:
+            if generation == self.generation:
+                result = {
                     "apply": "Sounds applied.",
                     "undo": "Your previous sounds are back.",
                     "restore": "Original sounds restored.",
                     "enable": "Sound effects enabled.",
                     "disable": "Sound effects turned off.",
                 }[action]
-                + " You’ll hear the change next time you start EDOPro."
-            )
-        )
+                self.feedback.show_message(result + " Restart EDOPro to load the changes.")
+
+        job.result.connect(done)
         job.error.connect(error)
         job.finished.connect(finish)
         self.update_controls()

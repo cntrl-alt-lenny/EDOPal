@@ -105,6 +105,21 @@ def test_save_failure_keeps_choices_for_retry(
     assert "Could not save" in window.notice.message.text()
 
 
+def test_stale_defaults_form_preserves_console_edit(make_window: Callable, qtbot: QtBot) -> None:
+    window = make_window()
+    window.navigate("settings")
+    page = window.current
+    page.tiles["defaults"].click()
+    cfg = window.ctx.cfg
+    assert config.save_setting(cfg.config_path, "field_art", not cfg.field_art)
+    page.defaults.toggles["force"].click()
+    page.defaults.done.click()
+    qtbot.waitUntil(lambda: page.section == "home")
+    saved = config._load_config_file(cfg.config_path)
+    assert saved["force"] == cfg.force
+    assert saved["field_art"] != cfg.field_art
+
+
 def test_game_folders_switch_forget_and_readd(
     make_window: Callable, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -230,8 +245,14 @@ def test_update_survives_offline_check_and_restart(
     page.check.click()
     qtbot.waitUntil(lambda: "connection" in page.news.text())
     assert page.get_release.isVisible() and page.check.isEnabled()
+    assert page.offline_heading.isVisible()
+    assert "Last successful check" in page.news.text()
+    assert "Last known update v9.0.0" == page.offer.text() == window.release.accessibleName()
+    assert page.check.property("role") == "primary"
     second = make_window()
     assert second.release.isVisible() and second.ctx.latest == "v9.0.0"
+    assert second.release.accessibleName() == "Last known update v9.0.0"
+    assert second.settings.value("updates/lastCheck") == window.settings.value("updates/lastCheck")
     monkeypatch.setattr(main, "check_for_update", AsyncMock(return_value=None))
     page.check.click()
     qtbot.waitUntil(lambda: not window.release.isVisible())
@@ -270,7 +291,10 @@ def test_create_remove_shortcut_controls(
     link.path.write_bytes(b"unrelated file")
     page.open_section("shortcuts")
     qtbot.waitUntil(lambda: not page.message.text())
-    assert any("Another file" in w.text() for w in page.findChildren(QLabel))
+    assert any(
+        "Another file" in w.text() and str(link.path) in w.text() and "Move or rename" in w.text()
+        for w in page.findChildren(QLabel)
+    )
     assert link.path.read_bytes() == b"unrelated file"
 
 
@@ -323,3 +347,41 @@ def test_editors_guard_every_exit_and_restore_opener(
     decisions.return_value = True
     editor.back.click()
     assert opener.hasFocus() and not editor.toggles["force"].isChecked()
+
+
+def test_both_default_editors_pin_save_and_identify_unsaved_changes(
+    make_window: Callable, qtbot: QtBot
+) -> None:
+    window = make_window()
+    window.resize(960, 600)
+    cards = window.current
+    cards.options.settings.click()
+    for on_cards in (True, False):
+        if not on_cards:
+            window.navigate("settings")
+            window.current.open_section("defaults")
+        editor = cards.settings if on_cards else window.current.defaults
+        assert not editor.unsaved.isVisible()
+        editor.toggles["force"].click()
+        assert editor.unsaved.isVisible()
+        assert window.rect().contains(editor.done.mapTo(window, editor.done.rect().bottomRight()))
+        assert editor.toggles["hd_era_art"].accessibleName() == "Use HD artwork with modern text"
+        editor.toggles["force"].click()
+        qtbot.keyClick(editor.done, Qt.Key.Key_Escape)
+
+
+def test_compact_storage_keeps_pack_controls_above_usage_breakdown(
+    make_window: Callable, qtbot: QtBot
+) -> None:
+    window = make_window()
+    window.resize(960, 600)
+    window.navigate("settings")
+    page = window.current
+    page.open_section("storage")
+    qtbot.waitUntil(lambda: page.message.text() == "")
+    viewport = page.detail.viewport()
+    qtbot.waitUntil(
+        lambda: viewport.rect().contains(
+            page.clear_packs.mapTo(viewport, page.clear_packs.rect().bottomRight())
+        )
+    )

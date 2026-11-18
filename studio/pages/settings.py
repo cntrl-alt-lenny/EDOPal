@@ -34,10 +34,10 @@ from studio.pages.settings_shortcuts import (
 from studio.pages.settings_storage import Storage, byte_size, inspect_storage
 from studio.pages.settings_views import PROJECT, actions, add_about, button, open_url
 from studio.tasks import Job
-from studio.widgets import ActionTile, ElidedLabel, Hero, Panel, label, margins
+from studio.widgets import ActionPage, ActionTile, ElidedLabel, Hero, Panel, label, margins
 
 SECTIONS = {
-    "games": ("EDOPro folders", "Choose which copy of EDOPro EDOPal uses.", "folder"),
+    "games": ("EDOPro folders", f"Choose which copy of EDOPro {config.APP_NAME} uses.", "folder"),
     "defaults": ("HD Cards defaults", "Choose what each artwork sync includes.", "cards"),
     "storage": ("Downloads and storage", "See what uses space and manage your packs.", "download"),
     "updates": ("Updates", "Check for a new release.", "spark"),
@@ -69,6 +69,7 @@ class SettingsPage(Page):
             "Manage your game folders, downloads and app preferences.",
             "settings",
         )
+        self.hero.setMinimumHeight(t.TILE_LARGE)
         body.addWidget(self.hero)
         body.addWidget(label("Preferences & tools", "heading"))
         self.grid = QGridLayout()
@@ -80,7 +81,7 @@ class SettingsPage(Page):
             tile.clicked.connect(lambda _checked=False, key=key: self.open_section(key))
             self.tiles[key] = tile
             self.grid.addWidget(tile, i // 2, i % 2)
-        self.classic = button("Open the classic window", self._classic, "link", "quiet")
+        self.classic = button("Open the classic artwork downloader", self._classic, "link", "quiet")
         body.addWidget(self.classic, 0, Qt.AlignmentFlag.AlignLeft)
         body.addStretch()
         self.home = scroll(home)
@@ -91,7 +92,8 @@ class SettingsPage(Page):
             lambda: context.save_card_preferences(self.defaults.preferences(), self.home_view)
         )
         self.defaults_view = scroll(self.defaults)
-        self.stack.addWidget(self.defaults_view)
+        self.defaults_page = ActionPage(self.defaults_view, self.defaults.actions)
+        self.stack.addWidget(self.defaults_page)
 
         detail = QWidget()
         content = page_layout(detail)
@@ -120,9 +122,8 @@ class SettingsPage(Page):
             self.usage_layout.setDirection(
                 QBoxLayout.Direction.LeftToRight
                 if self.width() >= t.CARDS_COLUMNS
-                else QBoxLayout.Direction.TopToBottom
+                else QBoxLayout.Direction.BottomToTop
             )
-        self.hero.setFixedHeight(t.landing_hero_height(self.width(), self.height()))
 
     def installation_changed(self, installation: Installation) -> None:
         name = Path(installation.path).name if installation.path else "No EDOPro folder selected"
@@ -174,7 +175,7 @@ class SettingsPage(Page):
         self.revision += 1
         if key == "defaults":
             self.defaults.load(self.ctx.cfg)
-            self.stack.setCurrentWidget(self.defaults_view)
+            self.stack.setCurrentWidget(self.defaults_page)
             self.defaults_view.verticalScrollBar().setValue(0)
             self.defaults.back.setFocus()
             return
@@ -348,7 +349,7 @@ class SettingsPage(Page):
         direction = (
             QBoxLayout.Direction.LeftToRight
             if self.width() >= t.CARDS_COLUMNS
-            else QBoxLayout.Direction.TopToBottom
+            else QBoxLayout.Direction.BottomToTop
         )
         self.usage_layout = QBoxLayout(direction, group)
         margins(self.usage_layout, 0)
@@ -399,23 +400,25 @@ class SettingsPage(Page):
     def _update_news(self) -> None:
         latest = self.ctx.latest
         self.tiles["updates"].hint.setText(
-            f"Version {latest} is available" if latest else SECTIONS["updates"][1]
+            self.ctx.release_label if latest else SECTIONS["updates"][1]
         )
         if self.section == "updates":
             # Keep the keyboard on the check action as the request completes.
+            self.offline_heading.setVisible(self.ctx.update_offline)
             self.news.setText(self.ctx.update_status)
             self.news.setVisible(bool(self.ctx.update_status))
+            current = latest and not self.ctx.cached_release
+            self.check.set_role("secondary" if current else "primary", "search")
+            self.get_release.set_role("primary" if current else "secondary", "link")
             self.check.setEnabled(not self.ctx.checking_update)
             self.get_release.setVisible(bool(latest))
-            self.offer.setText(
-                f"Download version {latest} from GitHub Releases and replace your portable app."
-                if latest
-                else ""
-            )
+            self.offer.setText(self.ctx.release_label if latest else "")
             self.offer.setVisible(bool(latest))
 
     def _updates(self) -> None:
         panel = self._panel(f"Installed version   ·   {self.ctx.version}")
+        self.offline_heading = label("Update check offline", "subheading")
+        panel.body.addWidget(self.offline_heading)
         self.news = label(self.ctx.update_status, "body", True)
         self.offer = label("", "body", True)
         panel.body.addWidget(self.news)
@@ -461,7 +464,7 @@ class SettingsPage(Page):
                             "absent": "Create a shortcut to this copy of the app.",
                             "installed": "Your shortcut opens this copy of the app.",
                             "moved": "Your shortcut points to an earlier location.",
-                            "occupied": "Another file already uses this shortcut name.",
+                            "occupied": f"Another file already uses this shortcut name at {link.path}. Move or rename that file, then reopen Shortcuts.",
                         }[status],
                         "body",
                         True,
