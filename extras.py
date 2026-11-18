@@ -151,8 +151,10 @@ def _skin_files(
     relative = prefix + "skin.xml"
     with ExitStack() as locks:
         skin_path = locks.enter_context(cache.use_pack(pack_id, exact=exact_skin))
-        if exact_skin and skin_path is None:
-            raise FileNotFoundError(f"Download {exact_skin.title} before applying it.")
+        if skin_path is None and (exact_skin or not (PACKS / f"{pack_id}.zip").is_file()):
+            raise FileNotFoundError(
+                f"Download {skin} from the content catalogue before applying it."
+            )
         if (
             exact_skin is None
             and highlight_turn is not None

@@ -15,7 +15,7 @@ def test_sidebar_navigation_and_keyboard(
     make_window: Callable[..., StudioWindow], qtbot: QtBot
 ) -> None:
     window = make_window()
-    assert window.windowTitle() == "EDOPro Studio"
+    assert window.windowTitle() == "EDOPal"
     assert list(window.pages) == [
         "cards",
         "skins",

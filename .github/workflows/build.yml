@@ -1,10 +1,14 @@
 name: Build and Release
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  APP_FILE: EDOPal
 
 on:
   push:
+    branches: ['release-test/**']
     tags:
       - 'v*'
   workflow_dispatch:
@@ -13,15 +17,20 @@ jobs:
   build:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     outputs:
+      display_name: ${{ steps.release_version.outputs.display_name }}
       version: ${{ steps.release_version.outputs.value }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
+            platform: Windows
           - os: macos-15
+            platform: macOS
           - os: ubuntu-22.04
+            platform: Linux
 
     steps:
     - uses: actions/checkout@v7
@@ -30,7 +39,7 @@ jobs:
       if: runner.os != 'macOS'
       uses: actions/setup-python@v7
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Set up universal2 Python on macOS
       if: runner.os == 'macOS'
@@ -57,6 +66,20 @@ jobs:
           exit 1
         fi
         echo "value=$version" >> "$GITHUB_OUTPUT"
+        python -c "from config import APP_NAME; print('display_name=' + APP_NAME)" >> "$GITHUB_OUTPUT"
+
+    - name: Install Qt runtime and headless displays before dependency analysis
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+          libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 \
+          libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 libxcb-glx0 \
+          libx11-6 libx11-xcb1 libxkbcommon0 libxkbcommon-x11-0 \
+          libegl1 libgl1 libgl1-mesa-dri libwayland-client0 libwayland-cursor0 libwayland-egl1 \
+          libdbus-1-3 libfontconfig1 libfreetype6 libglib2.0-0 libzstd1 libstdc++6 \
+          xvfb xauth weston
 
     - name: Install Dependencies
       shell: bash
@@ -64,232 +87,99 @@ jobs:
         if [ "$RUNNER_OS" = "macOS" ]; then
           # PyPI's default wheels for these packages carry only the current CPU.
           # Use the macOS SDK's universal libffi for cffi and the audio backend.
-          PKG_CONFIG=/usr/bin/false ARCHFLAGS="-arch arm64 -arch x86_64" MACOSX_DEPLOYMENT_TARGET=11.0 \
+          PKG_CONFIG=/usr/bin/false ARCHFLAGS="-arch arm64 -arch x86_64" MACOSX_DEPLOYMENT_TARGET=14.4 \
             python -m pip install --no-cache-dir --no-binary aiohttp,frozenlist,multidict,propcache,yarl,cffi,miniaudio \
             -r requirements.txt
         else
           python -m pip install -r requirements.txt
         fi
-        python -m pip install pyinstaller==6.20.0 pillow==12.2.0
+        python -m pip install pyinstaller==6.20.0 pillow==13.0.0
 
-    # The options window needs Tk bundled on every platform — fail loudly here
-    # rather than shipping a binary that silently falls back to console mode.
-    - name: Verify Tk is available for the options window
-      shell: bash
-      run: python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+    - name: Build and inspect the one-file release
+      run: python -m tools.release build
 
-    - name: Generate release icon
-      shell: bash
-      run: python tools/build_icon.py
+    - name: Test extracted Windows GUI executable
+      if: runner.os == 'Windows'
+      env:
+        QT_QPA_PLATFORM: windows
+      run: python -m tools.release verify
 
-    # Keep one executable. A .app bundle is required for Finder to open it
-    # without Terminal. On Windows --windowed selects the GUI PE subsystem.
-    - name: Build with PyInstaller
+    - name: Test extracted Cocoa app on Apple Silicon and Intel
+      if: runner.os == 'macOS'
+      env:
+        QT_QPA_PLATFORM: cocoa
+      run: |
+        if ! arch -x86_64 /usr/bin/true; then
+          sudo softwareupdate --install-rosetta --agree-to-license
+        fi
+        python -m tools.release verify
+
+    - name: Test extracted Linux executable on X11
+      if: runner.os == 'Linux'
+      run: xvfb-run -a -s "-screen 0 1280x800x24" env QT_QPA_PLATFORM=xcb python -m tools.release verify
+
+    - name: Test extracted Linux executable on Wayland
+      if: runner.os == 'Linux'
       shell: bash
       run: |
-        args=(--onefile --name EDOPro-HD-Sync --collect-data certifi --hidden-import _cffi_backend
-              --add-data "assets/window:assets/window" --add-data "assets/appearance:assets/appearance"
-              --add-data "assets/music:assets/music")
-        case "${{ matrix.os }}" in
-          windows-latest)
-            args+=(--windowed --icon build/app-icon.ico)
-            args+=(--add-data "VERSION;." --add-data "assets/app-icon.png;." --add-data "assets/extras;assets/extras")
-            ;;
-          macos-15)
-            # PyInstaller converts the PNG to the .icns a bundle needs.
-            args+=(--windowed --target-architecture universal2 --exclude-module PIL --icon assets/app-icon.png
-                   --osx-bundle-identifier com.cntrl-alt-lenny.edopro-hd-sync)
-            args+=(--add-data "VERSION:." --add-data "assets/app-icon.png:." --add-data "assets/extras:assets/extras")
-            ;;
-          *)
-            args+=(--icon build/app-icon.ico)
-            args+=(--add-data "VERSION:." --add-data "assets/app-icon.png:." --add-data "assets/extras:assets/extras")
-            ;;
-        esac
-        python -m PyInstaller "${args[@]}" main.py
-
-    # The PE subsystem byte is the difference between "double-click shows one
-    # clean window" and "double-click shows a stray black console too".
-    - name: Verify the Windows build creates no console
-      if: matrix.os == 'windows-latest'
-      shell: pwsh
-      run: |
-        $bytes = [System.IO.File]::ReadAllBytes("dist/EDOPro-HD-Sync.exe")
-        $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-        $subsystem = [BitConverter]::ToUInt16($bytes, $peOffset + 0x5C)
-        # 2 = IMAGE_SUBSYSTEM_WINDOWS_GUI, 3 = IMAGE_SUBSYSTEM_WINDOWS_CUI
-        if ($subsystem -ne 2) {
-          Write-Host "::error::Windows build is a console app (subsystem $subsystem) - double-clicking it would open a stray console window."
+        export XDG_RUNTIME_DIR="$(mktemp -d)"
+        export WAYLAND_DISPLAY=edopal-test
+        weston --backend=headless-backend.so --width=1280 --height=800 --socket="$WAYLAND_DISPLAY" --idle-time=0 \
+          --no-config --log="$RUNNER_TEMP/weston.log" &
+        compositor=$!
+        trap 'kill "$compositor" 2>/dev/null || true' EXIT
+        for _ in {1..100}; do
+          [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] && break
+          kill -0 "$compositor" 2>/dev/null || break
+          sleep 0.1
+        done
+        if [[ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
+          cat "$RUNNER_TEMP/weston.log"
           exit 1
-        }
-        Write-Host "Windows build is a GUI app: no console window on double-click."
-
-    - name: Smoke test packaged binary
-      shell: bash
-      run: |
-        case "${{ matrix.os }}" in
-          windows-latest) binary="dist/EDOPro-HD-Sync.exe" ;;
-          macos-15)   binary="dist/EDOPro-HD-Sync.app/Contents/MacOS/EDOPro-HD-Sync" ;;
-          *)              binary="dist/EDOPro-HD-Sync" ;;
-        esac
-        "$binary" --health-check --quiet
-
-    # NOTE: Windows code signing intentionally lives OUTSIDE this job.
-    # GitHub downloads every action referenced by a job during "Set up job",
-    # even steps gated behind an `if:` that is false — so keeping an unused
-    # azure/trusted-signing-action here meant a codeload hiccup (429/503) could
-    # fail every Windows release for a feature that was never enabled. When
-    # signing is actually configured, add it as its OWN job guarded at the job
-    # level (`if: vars.TRUSTED_SIGNING_ACCOUNT_NAME != ''`) so a skipped job
-    # never fetches the action, passing the exe between jobs via artifacts.
-    - name: Note that the Windows build is unsigned
-      if: matrix.os == 'windows-latest'
-      shell: bash
-      run: echo "::warning::This Windows build is unsigned - SmartScreen may warn users. Configure Azure Trusted Signing to remove the warning."
-
-    # Windows and Linux include a ReadMe beside the executable.
-    - name: Package (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: pwsh
-      run: |
-        $version = "${{ steps.release_version.outputs.value }}"
-        $bundleDir = "dist/EDOPro HD Sync"
-        $archive = "dist/EDOPro-HD-Sync-Windows-v$version.zip"
-        if (Test-Path $bundleDir) { Remove-Item $bundleDir -Recurse -Force }
-        if (Test-Path $archive) { Remove-Item $archive -Force }
-        New-Item -ItemType Directory -Path "$bundleDir" | Out-Null
-        Move-Item "dist/EDOPro-HD-Sync.exe" -Destination "$bundleDir/EDOPro-HD-Sync.exe"
-        Copy-Item "release_assets/ReadMe-Windows.txt" -Destination "$bundleDir/ReadMe.txt"
-        Compress-Archive -Path $bundleDir -DestinationPath $archive -Force
-
-    # zip (unlike a raw browser download) preserves the executable bit, which is
-    # why the app ships inside an archive rather than as a bare file.
-    - name: Package (macOS)
-      if: matrix.os == 'macos-15'
-      shell: bash
-      run: |
-        version="${{ steps.release_version.outputs.value }}"
-        archive="EDOPro-HD-Sync-macOS-v${version}.zip"
-        app="dist/EDOPro HD Sync.app"
-        mv dist/EDOPro-HD-Sync.app "$app"
-
-        # Editing Info.plist invalidates PyInstaller's existing signature.
-        plist="$app/Contents/Info.plist"
-        /usr/libexec/PlistBuddy -c "Set :CFBundleName EDOPro HD Sync" "$plist"
-        plutil -replace CFBundleDisplayName -string "EDOPro HD Sync" "$plist"
-        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${version}" "$plist"
-        codesign --force --sign - "$app"
-        ditto -c -k --keepParent "$app" "dist/$archive"
-
-    - name: Package (Linux)
-      if: matrix.os == 'ubuntu-22.04'
-      shell: bash
-      run: |
-        version="${{ steps.release_version.outputs.value }}"
-        archive="EDOPro-HD-Sync-Linux-v${version}.zip"
-        bundleDir="dist/EDOPro HD Sync"
-
-        rm -rf "$bundleDir" "dist/$archive"
-        mkdir -p "$bundleDir"
-
-        mv dist/EDOPro-HD-Sync "$bundleDir/EDOPro-HD-Sync"
-        chmod +x "$bundleDir/EDOPro-HD-Sync"
-        cp release_assets/ReadMe-Linux.txt "$bundleDir/ReadMe.txt"
-
-        cd dist && zip -r "$archive" "EDOPro HD Sync"
-
-    - name: Verify the released zip after extraction
-      shell: bash
-      run: |
-        version="${{ steps.release_version.outputs.value }}"
-        case "${{ matrix.os }}" in
-          windows-latest) archive="dist/EDOPro-HD-Sync-Windows-v${version}.zip"; app="EDOPro-HD-Sync.exe" ;;
-          macos-15)   archive="dist/EDOPro-HD-Sync-macOS-v${version}.zip";   app="EDOPro HD Sync.app" ;;
-          *)              archive="dist/EDOPro-HD-Sync-Linux-v${version}.zip";   app="EDOPro-HD-Sync" ;;
-        esac
-
-        rm -rf dist/_verify && mkdir -p dist/_verify
-        if [ "$RUNNER_OS" = "macOS" ]; then
-          ditto -x -k "$archive" dist/_verify
-          test "$(ls -1 dist/_verify)" = "$app"
-          bundle="dist/_verify/$app"
-          exe="$bundle/Contents/MacOS/EDOPro-HD-Sync"
-          test -x "$exe"
-          test -f "$bundle/Contents/Info.plist"
-          codesign --verify --deep --strict --all-architectures "$bundle"
-          archs="$(lipo -archs "$exe")"
-          [[ " $archs " == *" arm64 "* && " $archs " == *" x86_64 "* ]]
-          arch -arm64 "$exe" --health-check --quiet
-          arch -x86_64 "$exe" --health-check --quiet
-        else
-          unzip -q "$archive" -d dist/_verify
-          root="dist/_verify/EDOPro HD Sync"
-          test "$(ls -1 "$root" | wc -l | tr -d ' ')" = 2
-          test -f "$root/ReadMe.txt"
-          test -f "$root/$app"
-          if [ "$RUNNER_OS" != "Windows" ]; then
-            test -x "$root/$app"
-          fi
         fi
+        env -u DISPLAY QT_QPA_PLATFORM=wayland python -m tools.release verify
 
-    - name: Determine release file
-      id: release_file
-      shell: bash
-      run: |
-        version="${{ steps.release_version.outputs.value }}"
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          echo "path=dist/EDOPro-HD-Sync-Windows-v${version}.zip" >> "$GITHUB_OUTPUT"
-        elif [ "${{ matrix.os }}" = "macos-15" ]; then
-          echo "path=dist/EDOPro-HD-Sync-macOS-v${version}.zip" >> "$GITHUB_OUTPUT"
-        else
-          echo "path=dist/EDOPro-HD-Sync-Linux-v${version}.zip" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Hand the zip to the release job
+    - name: Upload the verified release zip
       uses: actions/upload-artifact@v7
       with:
-        name: zip-${{ matrix.os }}
-        path: ${{ steps.release_file.outputs.path }}
+        name: zip-${{ matrix.platform }}
+        path: dist/${{ env.APP_FILE }}-${{ matrix.platform }}-v${{ steps.release_version.outputs.value }}.zip
         if-no-files-found: error
+        compression-level: 0
 
-  # Publishing happens once, here, and never inside the matrix. Three parallel
-  # jobs each creating the same release raced on v5.2.0: two won, macOS died
-  # with "Too many retries" and its zip never got attached, and the release
-  # notes were generated twice. One job, one release, all three zips.
+  # A manual dispatch can select a tag too. Only a pushed version tag can publish.
   release:
     name: Publish the release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
-    - name: Collect every platform's zip
-      uses: actions/download-artifact@v8
+    - uses: actions/download-artifact@v8
       with:
         path: dist
         pattern: zip-*
         merge-multiple: true
 
-    # Exactly one asset per platform: Windows, macOS, Linux. Downloads are
-    # verified against the SHA-256 digest GitHub publishes in its release API,
-    # so no separate .sha256 files are needed.
-    - name: Check all three platforms are present before publishing
-      shell: bash
+    - name: Require exactly one verified asset per platform
+      env:
+        VERSION: ${{ needs.build.outputs.version }}
       run: |
-        version="${{ needs.build.outputs.version }}"
-        missing=0
-        for platform in Windows macOS Linux; do
-          if [ ! -f "dist/EDOPro-HD-Sync-${platform}-v${version}.zip" ]; then
-            echo "::error::Missing the ${platform} download - refusing to publish a partial release."
-            missing=1
-          fi
-        done
-        ls -la dist
-        exit "$missing"
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        expected = {f"{os.environ['APP_FILE']}-{p}-v{os.environ['VERSION']}.zip"
+                    for p in ("Windows", "macOS", "Linux")}
+        actual = {p.name for p in Path("dist").iterdir()}
+        if actual != expected:
+            raise SystemExit(f"Missing {expected - actual}, unexpected {actual - expected}")
+        PY
 
     - name: Release
       uses: softprops/action-gh-release@v3
       with:
-        name: EDOPro HD Cards Downloader v${{ needs.build.outputs.version }}
+        name: ${{ needs.build.outputs.display_name }} v${{ needs.build.outputs.version }}
         generate_release_notes: true
         fail_on_unmatched_files: true
         files: dist/*.zip

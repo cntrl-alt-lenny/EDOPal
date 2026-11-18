@@ -68,7 +68,7 @@ CONFIG_FILENAME = "config.json"
 # Keep this directory name for compatibility with existing packaged installs.
 # The name players see. The data folder below keeps its original name so
 # existing settings, caches and soundtrack libraries are found unchanged.
-APP_NAME = "EDOPro Studio"
+APP_NAME = "EDOPal"
 APP_DATA_NAME = "EDOPro HD Sync"
 
 
@@ -508,12 +508,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Only sync cards used in your EDOPro deck folder (much faster).",
     )
     interface = p.add_mutually_exclusive_group()
-    interface.add_argument("--legacy-gui", action="store_true", help="Open the original Tk window.")
+    interface.add_argument(
+        "--legacy-gui", action="store_true", help="Open the Tk window (source only)."
+    )
+    interface.add_argument(
+        "--gui-smoke-test", action="store_true", help="Test the real Qt window offline and exit."
+    )
     interface.add_argument(
         "--gui",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help=("Open EDOPro Studio. The packaged app shows it by default; use --no-gui to skip it."),
+        help=f"Open {APP_NAME}. The packaged app shows it by default.",
     )
     p.add_argument(
         "--prune",

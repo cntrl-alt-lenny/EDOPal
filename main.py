@@ -2382,6 +2382,18 @@ def main() -> int:
 
     try:
         cfg = Config(defer_discovery=True)
+        if cfg.cli.gui_smoke_test:
+            launched_gui = True
+            from tools.gui_smoke import smoke_test
+
+            return smoke_test(cfg, VERSION, run, _apply_gui_choices)
+        if cfg.cli.legacy_gui and getattr(sys, "frozen", False):
+            from desktop_dialogs import show_startup_error
+
+            show_startup_error(
+                "The Tk window is available from source. Open the app without --legacy-gui for Qt."
+            )
+            return 1
         studio_launch = _should_show_gui(cfg) and not cfg.cli.legacy_gui
         if not cfg.health_check and not studio_launch:
             detect_edopro_folder(cfg)
