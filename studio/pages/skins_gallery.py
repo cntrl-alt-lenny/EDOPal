@@ -29,8 +29,9 @@ from studio.widgets import (
 )
 
 from .skins_grid import AppearanceGrid
-from .skins_model import FILTERS, Look, filter_looks
+from .skins_model import FILTERS, PRESET_FAMILIES, Look, filter_looks
 from .skins_service import Collection, SkinStore
+from .sleeves_widgets import Menu
 
 
 class Choices(QWidget):
@@ -108,7 +109,12 @@ class LookDelegate(QStyledItemDelegate):
         )
         p.setFont(t.font(t.SMALL))
         p.setPen(QColor(t.GREEN if look.active else t.MUTED))
-        p.drawText(left, rect.bottom() - t.SM, look.caption)
+        caption_width = title.width() - (t.XS + 3 * t.MD if not look.pack else 0)
+        p.drawText(
+            left,
+            rect.bottom() - t.SM,
+            p.fontMetrics().elidedText(look.caption, Qt.TextElideMode.ElideRight, caption_width),
+        )
         if not look.pack:
             p.setPen(QPen(QColor(t.EDGE), t.HAIR))
             for i, colour in enumerate(
@@ -158,9 +164,13 @@ class Gallery(QWidget):
         self.count = label("Skins and themes", "heading")
         heading.addWidget(self.count)
         heading.addStretch()
+        self.contrast = Button("High contrast", "quiet")
+        self.contrast.setToolTip("Clear signals · high contrast and color-vision-aware presets")
+        heading.addWidget(self.contrast)
         self.import_file = Button("Import theme", "quiet", "download")
         self.create = Button("Create theme", "primary", "spark")
         self.more = Button("Get more wallpapers", "quiet", "download")
+        self.more.setAccessibleName("Get more wallpapers")
         heading.addWidget(self.more)
         heading.addWidget(self.import_file)
         heading.addWidget(self.create)
@@ -170,7 +180,12 @@ class Gallery(QWidget):
         self.search = SearchField("Search skins and themes")
         self.search.setMinimumWidth(t.TILE_SIZE[0] - t.XXL)
         tools.addWidget(self.filters)
-        tools.addWidget(self.search, 1)
+        self.family = Menu("Theme family", ("All families", *PRESET_FAMILIES))
+        self.family.view().setMinimumWidth(t.TILE_LARGE + t.HUGE)
+        tools.addWidget(self.family, 2)
+        tools.addWidget(self.search, 3)
+        self.family.currentTextChanged.connect(self.filter)
+        self.contrast.clicked.connect(self.show_contrast)
         layout.addLayout(tools)
         self.filters.changed.connect(self.filter)
         self.search.textChanged.connect(self.filter)
@@ -219,18 +234,31 @@ class Gallery(QWidget):
         self.restore.setText(f"Restore original · {data.original_skin}")
         self.filter()
 
+    def show_contrast(self) -> None:
+        self._browse()
+        self.family.setCurrentText("Clear signals")
+        self.grid.setFocus()
+
     def _browse(self) -> None:
+        self.family.setCurrentIndex(0)
         self.search.clear()
         self.filters.buttons["All"].click()
 
     def filter(self) -> None:
         group = self.filters.value
         query = self.search.text()
+        preset_group = group in ("Light", "Dark", "All")
+        self.family.setEnabled(preset_group)
         visible = filter_looks(self.looks, group, query)
+        family = self.family.currentText() if preset_group and self.family.currentIndex() else ""
+        if family:
+            visible = [look for look in visible if look.family == family]
         no_packs = not visible and not query and group == "Downloadable"
         offline = bool(self.data and self.data.catalogue.detail)
         if self.data:
             parts = [f"Current skin · {self.data.active_name}"] if self.game else []
+            if family == "Clear signals":
+                parts.insert(0, "Clear signals · High contrast and color-vision-aware life bars")
             if self.data.sleeve_summary:
                 parts.append(self.data.sleeve_summary)
             self.info.setToolTip(
@@ -284,6 +312,9 @@ class Gallery(QWidget):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        self.more.setText(
+            "Get more" if self.window().width() < t.COMPACT_WIDTH else "Get more wallpapers"
+        )
         compact = self.height() < t.HERO_MAX
         self.hero.description.setVisible(not compact)
         self.hero.headline.setStyleSheet(f"font-size:{t.XXL}px;" if compact else "")

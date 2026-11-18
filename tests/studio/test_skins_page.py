@@ -682,3 +682,46 @@ def test_saved_edits_to_applied_theme_can_be_applied_again(page: SkinsPage, qtbo
     info.apply.click()
     qtbot.waitUntil(lambda: not page.job and info.apply.text() == "Applied")
     assert not info.apply.isEnabled() and info.undo.isVisible()
+
+
+def test_preset_families_and_accessible_themes(page: SkinsPage) -> None:
+    from themes.presets import FAMILIES
+
+    gallery = page.gallery
+    gallery.contrast.click()
+    assert "color-vision-aware" in gallery.info.text()
+    for family, presets in FAMILIES.items():
+        gallery.family.setCurrentText(family)
+        assert {look.theme for look in gallery.delegate.looks} == set(presets)
+        for mode in ("Light", "Dark"):
+            gallery.filters.buttons[mode].click()
+            assert all(
+                v.caption.startswith(mode) and v.family == family for v in gallery.delegate.looks
+            )
+        gallery.filters.buttons["All"].click()
+    gallery.filters.buttons["My themes"].click()
+    assert not gallery.family.isEnabled()
+    assert all(not v.family for v in gallery.delegate.looks)
+
+
+def test_wallpapers_show_and_recolor_every_style(page: SkinsPage, qtbot: QtBot) -> None:
+    from PySide6.QtCore import QSize
+
+    page.gallery.create.click()
+    maker = page.maker
+    maker.wall_toggle.click()
+    grid = maker.wall_grid
+    qtbot.waitUntil(lambda: grid.drawn == grid.palette_key())
+    assert set(maker.styles) == set(themes.STYLES)
+    pixels = {name: b.icon().pixmap(QSize(84, 48)).toImage() for name, b in maker.styles.items()}
+    assert all(not image.isNull() for image in pixels.values())
+    maker.update_theme(background="#602000", accent="#ffcc22")
+    qtbot.waitUntil(lambda: grid.drawn == grid.palette_key())
+    assert all(
+        b.icon().pixmap(QSize(84, 48)).toImage() != pixels[name] for name, b in maker.styles.items()
+    )
+    for name, button in maker.styles.items():
+        button.click()
+        assert maker.theme.wallpaper == name and button.isChecked()
+    maker.wall_toggle.click()
+    assert not grid.timer.isActive()

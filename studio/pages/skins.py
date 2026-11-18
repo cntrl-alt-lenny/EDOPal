@@ -282,7 +282,7 @@ class SkinsPage(AppearancePage):
                 row = next((w for w in data.wallpapers if w.origin.id == wallpaper_pack), None)
                 if row:
                     self.create()
-                    self.maker.fine.setChecked(True)
+                    self.maker.wall_toggle.setChecked(True)
                     self.maker.pick_wallpaper(self.maker.wallpapers.findData(row.digest))
                     self.view.scroll.ensureWidgetVisible(self.maker.wallpapers)
                 else:

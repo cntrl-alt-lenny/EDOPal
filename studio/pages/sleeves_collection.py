@@ -1,18 +1,20 @@
 """The ready-made collection, in-memory filters and portrait crop geometry."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import cached_property
+from itertools import zip_longest
 from pathlib import Path
 
 from sleeves import PALETTES, PATTERNS, Entry, Recipe
+from sleeves.catalog import PALETTE_FAMILIES
 from sleeves.imaging import HEIGHT, WIDTH, Crop
 
-FAMILIES = {
-    "Blue": ("Midnight gilt", "Glacier", "Porcelain", "Kingfisher", "Blue hour"),
-    "Green": ("Koi pond", "Peacock", "Matcha", "Patina"),
-    "Red": ("Lacquer", "Cinnabar"),
-    "Purple": ("Mulberry", "Moonstone"),
-    "Gold": ("Golden hour", "Letterpress"),
-    "Neutral": ("Obsidian",),
+FAMILIES = tuple(dict.fromkeys(PALETTE_FAMILIES.values()))
+TEAMS = ("Saltire", "Relay")
+PARTNERS = {
+    f"{team} {side}": f"{team} {other}"
+    for team in TEAMS
+    for side, other in (("home", "away"), ("away", "home"))
 }
 SOURCES = {
     "preset": "Original sleeve",
@@ -21,8 +23,6 @@ SOURCES = {
     "card art": "Card artwork",
     "recovered": "Recovered sleeve",
 }
-# Alternate scenic, engraved and geometric prints on the opening shelf.
-FEATURED = ("sun", "alpine", "fans", "orbit", "dunes", "stars", "rose", "tide")
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,21 @@ class Choice:
     palette: str = ""
     recipe: Recipe | None = None
     entry: Entry | None = None
+
+    @property
+    def motif(self) -> str:
+        return PATTERNS[self.recipe.pattern].family if self.recipe else ""
+
+    @cached_property
+    def search_text(self) -> str:
+        fields = [self.name, self.detail, self.palette, self.family, self.motif]
+        if self.recipe:
+            fields.append(PATTERNS[self.recipe.pattern].name)
+        if self.entry:
+            fields.extend((*self.entry.tags, str(self.entry.passcode or "")))
+            if self.entry.origin:
+                fields.append(self.entry.origin.id)
+        return " ".join(fields).casefold()
 
     @property
     def tooltip(self) -> str:
@@ -49,18 +64,31 @@ class Choice:
         return f"{self.name} · {self.palette}" if self.recipe and not self.entry else self.name
 
 
+def recolored(item: Choice, palette: str) -> Choice:
+    if item.palette == palette:
+        return item
+    recipe = replace(item.recipe, palette=PALETTES[palette])
+    key = Path("pair") / item.key.name / palette
+    return Choice(key, item.name, palette, family_of(palette), palette, recipe)
+
+
 def family_of(palette: str) -> str:
-    return next((family for family, names in FAMILIES.items() if palette in names), "")
+    return PALETTE_FAMILIES.get(palette, "")
 
 
 def collection() -> list[Choice]:
     palettes = list(PALETTES)
-    order = dict.fromkeys(key for key in (*FEATURED, *PATTERNS) if key in PATTERNS)
+    starts = {name: index for index, name in enumerate(palettes)}
+    families: dict[str, list[str]] = {}
+    for key, spec in PATTERNS.items():
+        families.setdefault(spec.family, []).append(key)
+    # Show a plate from each family before showing another from the same family.
+    order = [key for group in zip_longest(*families.values()) for key in group if key]
     result = []
     for offset in range(len(palettes)):
         for key in order:
             spec = PATTERNS[key]
-            palette = palettes[(palettes.index(spec.palette) + offset) % len(palettes)]
+            palette = palettes[(starts[spec.palette] + offset) % len(palettes)]
             result.append(
                 Choice(
                     Path("print") / key / palette,
@@ -110,13 +138,7 @@ def filtered(
         if not terms:
             result.append(item)
             continue
-        fields = [item.name, item.detail, item.palette, item.family]
-        if entry:
-            fields.extend((*entry.tags, str(entry.passcode or "")))
-            if entry.origin:
-                fields.append(entry.origin.id)
-        searchable = " ".join(fields).casefold()
-        if all(term in searchable for term in terms):
+        if all(term in item.search_text for term in terms):
             result.append(item)
     if source == "Recently used":
         result.sort(key=lambda item: item.entry.last_used, reverse=True)

@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QHideEvent, QImage, QPixmap, QShowEvent
@@ -107,6 +108,7 @@ class PackBrowser(QWidget):
         self.job: Job | None = None
         self.loading = False
         self.preview_job: Job | None = None
+        self.media_lock = Lock()
         self.preview_key: Listing | None = None
         self.paused: set[str] = set()
         self.rows: list[Listing] = []
@@ -374,7 +376,7 @@ class PackBrowser(QWidget):
 
     def start_preview(self) -> None:
         row = self.preview_key
-        if not row or not self.isVisible():
+        if not row or not self.isVisible() or self.job or self.loading:
             return
         pack = row.status.pack if row.status else None
         if not row.local_preview and not (pack and pack.previews):
@@ -383,10 +385,11 @@ class PackBrowser(QWidget):
         self.art.setText("Loading preview…")
 
         def read(worker: WorkerContext) -> QImage:
-            path = row.local_preview or asyncio.run(
-                download.fetch_preview(self.cache, pack, pack.previews[0], cancel=worker.cancel)
-            )
-            return read_image(path, 560)
+            with self.media_lock:
+                path = row.local_preview or asyncio.run(
+                    download.fetch_preview(self.cache, pack, pack.previews[0], cancel=worker.cancel)
+                )
+                return read_image(path, 560)
 
         def ready(img: QImage) -> None:
             if self.preview_key == row and not img.isNull():
@@ -440,6 +443,8 @@ class PackBrowser(QWidget):
         if self.job or self.loading:
             return
         row = self.rows[self.menu.currentRow()]
+        if self.preview_job:
+            self.preview_job.cancel()
         self.paused.discard(row.origin.id)
         self.feedback.setToolTip("")
         self.menu.setEnabled(False)
@@ -457,18 +462,19 @@ class PackBrowser(QWidget):
         )
 
         def work(worker: WorkerContext) -> Changes:
-            if removing:
-                return libraries.remove_pack(self.cache, row.origin.id)
-            return asyncio.run(
-                libraries.make_available(
-                    self.cache,
-                    row.status,
-                    app_version=self.ctx.version,
-                    cancel=worker.cancel,
-                    phase=worker.progress,
-                    progress=worker.progress,
+            with self.media_lock:
+                if removing:
+                    return libraries.remove_pack(self.cache, row.origin.id)
+                return asyncio.run(
+                    libraries.make_available(
+                        self.cache,
+                        row.status,
+                        app_version=self.ctx.version,
+                        cancel=worker.cancel,
+                        phase=worker.progress,
+                        progress=worker.progress,
+                    )
                 )
-            )
 
         def done(changes: Changes) -> None:
             self.job = None

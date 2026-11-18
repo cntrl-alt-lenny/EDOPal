@@ -56,7 +56,12 @@ def pick(page: SleevesPage, qtbot: QtBot, query: str, source: str = "All sleeves
 def test_complete_collection_filter_and_crop() -> None:
     prints = collection()
     assert len({c.key for c in prints}) == len(PATTERNS) * len(PALETTES)
-    assert len(filtered(prints, "sol invictus", "Ready-made", "Green", {})) == 4
+    from sleeves.catalog import PALETTE_FAMILIES
+
+    assert len(filtered(prints, "sol invictus", "Ready-made", "Green", {})) == sum(
+        family == "Green" for family in PALETTE_FAMILIES.values()
+    )
+    assert all(c.family == PALETTE_FAMILIES[c.palette] for c in prints)
     assert not filtered(prints, "", "Saved sleeves", "All colors", {})
     for size in ((622, 622), (1920, 240), (240, 900), (1, 1)):
         for centre in ((0, 0), (0.5, 0.5), (1, 1)):
@@ -391,19 +396,19 @@ def test_fast_scroll_filter_and_surprise_paint_the_selected_print(
     from PySide6.QtCore import QPoint, QRect
     from PySide6.QtGui import QPixmap
 
-    import extras
+    import sleeves
     from studio import theme as t
 
     _, page = desk
     gallery, grid = page.gallery, page.gallery.grid
-    write = extras._atomic_write
+    draw = sleeves.render
+    requests = []
 
-    def readonly_print_cache(path: Path, data: bytes) -> None:
-        if "print-previews-v1" in path.parts:
-            raise PermissionError("Thumbnail cache is read-only")
-        write(path, data)
+    def record(recipe: sleeves.Recipe, *, thumbnail: bool = False) -> QImage:
+        requests.append((threading.get_ident(), thumbnail))
+        return draw(recipe, thumbnail=thumbnail)
 
-    monkeypatch.setattr(extras, "_atomic_write", readonly_print_cache)
+    monkeypatch.setattr(sleeves, "render", record)
     # Change generations while readers from the old viewport can still be running.
     for row in (grid.model().rowCount() - 15, 6, grid.model().rowCount() - 1):
         grid.scrollTo(grid.model().index(row))
@@ -412,14 +417,24 @@ def test_fast_scroll_filter_and_surprise_paint_the_selected_print(
     gallery.search.clear()
     monkeypatch.setattr("studio.pages.sleeves_gallery.random.randrange", lambda count: count - 1)
     gallery.surprise.click()
-    selected = grid.currentIndex()
     assert grid.hasFocus() and page.pending["mine"] == gallery.visible[-1]
+
+    chosen = page.pending["mine"]
+    qtbot.waitUntil(lambda: gallery.measuring is None)
+    selected = grid.currentIndex()
+    assert selected.isValid() and gallery.visible[selected.row()] == chosen
 
     def painted() -> bool:
         pix = selected.data(Qt.ItemDataRole.DecorationRole)
-        return isinstance(pix, QPixmap) and not pix.isNull()
+        return (
+            isinstance(pix, QPixmap)
+            and not pix.isNull()
+            and grid.viewport().rect().contains(grid.visualRect(selected))
+        )
 
     qtbot.waitUntil(painted)
+    assert requests and all(thread != threading.get_ident() and small for thread, small in requests)
+    assert len(grid.tiles.pending) <= 4
     rect = grid.visualRect(selected)
     assert grid.viewport().rect().contains(rect)
     box = rect.adjusted(t.XS + t.SM, t.XS + t.MD, -t.XS - t.SM, -t.XS - t.HUGE)
@@ -641,3 +656,119 @@ def test_crop_uses_final_pointer_position(qtbot: QtBot) -> None:
     qtbot.mousePress(widget, Qt.MouseButton.LeftButton, pos=start)
     with qtbot.waitSignal(widget.moved, timeout=400):
         qtbot.mouseRelease(widget, Qt.MouseButton.LeftButton, pos=start + QPoint(20, 0))
+
+
+def test_combinable_facets_counts_and_range_first_order(desk: tuple) -> None:
+    from sleeves.catalog import PALETTE_FAMILIES
+
+    gallery = desk[1].gallery
+    gallery.source.setCurrentText("Ready-made")
+    families = {spec.family for spec in PATTERNS.values()}
+    assert {item.motif for item in gallery.visible[: len(families)]} == families
+    assert {item.recipe.pattern for item in gallery.visible[: len(PATTERNS)]} == set(PATTERNS)
+    group = "Ancient motifs"
+    gallery.family.setCurrentText(group)
+    gallery.colour.setCurrentText("Gold")
+    patterns = {key for key, spec in PATTERNS.items() if spec.family == group}
+    gold = {key for key, family in PALETTE_FAMILIES.items() if family == "Gold"}
+    assert {(c.recipe.pattern, c.palette) for c in gallery.visible} == {
+        (pattern, palette) for pattern in patterns for palette in gold
+    }
+    assert gallery.family.currentData() == gallery.colour.currentData() == len(patterns) * len(gold)
+    assert gallery.family.itemData(0) == len(PATTERNS) * len(gold)
+    assert gallery.colour.itemData(0) == len(patterns) * len(PALETTES)
+    slot = gallery.visible[0]
+    gallery.search.setText(f"{slot.name} {slot.palette}")
+    assert gallery.visible == [slot]
+
+
+@pytest.mark.parametrize(("team", "target"), [("Saltire", "mine"), ("Relay", "opponent")])
+def test_related_prints_and_matching_pair(
+    desk: tuple, qtbot: QtBot, team: str, target: str
+) -> None:
+    from dataclasses import replace
+
+    from studio.pages.sleeves_collection import saved
+
+    _, page = desk
+    page.select_slot(target)
+    pick(page, qtbot, "Glacier", "Ready-made")
+    pair_action = next(
+        a for a in page.similar.menu().actions() if a.text() == f"Match {team} home and away"
+    )
+    pair_action.trigger()
+    assert {c.palette for c in page.pending.values()} == {team + " home", team + " away"}
+    gallery = page.gallery
+    pick(page, qtbot, team + " home", "Ready-made")
+    selected = page.pending[target]
+    page.by_pattern.trigger()
+    assert {c.palette for c in gallery.visible} == set(PALETTES) - {selected.palette}
+    assert all(c.recipe.pattern == selected.recipe.pattern for c in gallery.visible)
+    page.by_palette.trigger()
+    assert {c.recipe.pattern for c in gallery.visible} == set(PATTERNS) - {selected.recipe.pattern}
+    assert all(c.palette == selected.palette for c in gallery.visible)
+    # A matching away jersey preserves the player's frame and seed, too.
+    selected = saved(page.library.add_design("Home", replace(selected.recipe, seed=17)))
+    page.stage(selected)
+    page.pair.click()
+    partner = page.pending["opponent" if target == "mine" else "mine"]
+    assert partner.recipe == replace(selected.recipe, palette=PALETTES[team + " away"])
+    assert page.pending[target] == selected
+    page.apply.click()
+    ready(qtbot, page)
+    assert all(s.status.matches for s in page.snapshot.slots.values())
+
+
+def test_designer_visual_groups_keyboard_and_back(desk: tuple, qtbot: QtBot) -> None:
+    from sleeves.catalog import PALETTE_FAMILIES
+
+    window, page = desk
+    window.resize(960, 600)
+    page.gallery.actions["design"].click()
+    editor = page.editor
+    editor.pattern.showPopup()
+    picker = editor.picker
+    assert set(picker.keys) == set(PATTERNS)
+    picker.group.setCurrentText("Ancient motifs")
+    assert set(picker.keys) == {key for key, p in PATTERNS.items() if p.family == "Ancient motifs"}
+    idx = picker.grid.model().index(0, 0)
+    picker.grid.setCurrentIndex(idx)
+    qtbot.waitUntil(lambda: idx.data(Qt.ItemDataRole.DecorationRole) is not None)
+    pattern = picker.keys[0]
+    qtbot.keyClick(picker.grid, Qt.Key.Key_Return)
+    assert picker.isHidden() and editor.pattern.currentData() == pattern
+    editor.palette.showPopup()
+    assert set(picker.keys) == set(PALETTES)
+    picker.group.setCurrentText("Blue")
+    assert set(picker.keys) == {name for name, group in PALETTE_FAMILIES.items() if group == "Blue"}
+    recipe = editor.recipe()
+    assert editor.save.isVisible() and window.rect().contains(editor.save.mapTo(window, QPoint()))
+    assert page.escape()
+    assert picker.isHidden() and editor.recipe() == recipe
+
+
+def test_designer_can_edit_every_catalogue_palette(desk: tuple, qtbot: QtBot) -> None:
+    from sleeves.designer import inks
+
+    _, page = desk
+    page.gallery.actions["design"].click()
+    editor = page.editor
+    for name, pigments in PALETTES.items():
+        editor.palette.setCurrentText(name)
+        assert editor.recipe().palette == pigments
+        assert [b.toolTip().lower() for b in editor.inks.buttons] == [
+            color.name() for color in inks(pigments)
+        ]
+    editor.palette.setCurrentText("Saltire home")
+    qtbot.waitUntil(lambda: editor.valid)
+    editor.save.click()
+    ready(qtbot, page)
+    selected = page.pending["mine"]
+    assert selected.palette == "Saltire home" and page.pair.isVisible()
+    page.gallery.actions["design"].click()
+    editor = page.editor
+    editor.inks.buttons[-1].click()
+    slider = editor.inks.sliders[-1]
+    slider.setValue((slider.value() + 90) % 256)
+    assert editor.palette.currentIndex() == -1
+    assert len(editor.recipe().palette) == len(editor.inks.buttons)

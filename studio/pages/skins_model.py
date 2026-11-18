@@ -8,6 +8,11 @@ from content.catalogue import PackState, PackStatus
 from content.download import DownloadError, DownloadFailure
 from themes import PRESETS, InstallState, Theme
 from themes.colors import luminance
+from themes.presets import FAMILIES as PRESET_FAMILIES
+
+PRESET_FAMILY = {
+    preset.name: name for name, presets in PRESET_FAMILIES.items() for preset in presets
+}
 
 FILTERS = ("All", "Dark", "Light", "My themes", "Downloadable")
 STATE_NAMES = {
@@ -62,6 +67,10 @@ class Look:
         return luminance(self.theme.background) > 0.35
 
     @property
+    def family(self) -> str:
+        return PRESET_FAMILY.get(self.name, "") if self.group == "Preset" else ""
+
+    @property
     def caption(self) -> str:
         if self.needs_update:
             return "Saved changes"
@@ -73,6 +82,8 @@ class Look:
             return "Applied"
         if self.pack:
             return self.availability
+        if self.family:
+            return f"{'Light' if self.light else 'Dark'} · {self.family}"
         return (
             "My theme"
             if self.group == "My themes"
