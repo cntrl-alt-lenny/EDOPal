@@ -7,6 +7,7 @@ build/
 dist/
 AppDir/
 *.spec
+!tools/release.spec
 
 # Mac artifacts
 .DS_Store

@@ -4,9 +4,9 @@
 This portable desktop app finds EDOPro installations and downloads missing HD card and field artwork. Players can also preview skins, sleeves, audio and tournament decks before applying them to a selected installation.
 
 **Release packaging requirements must be preserved.** Publish **exactly one asset per platform** — no checksum files, no launchers — so the Releases page reads simply "Windows, macOS, Linux":
-- `EDOPro-HD-Sync-Windows-vVERSION.zip`
-- `EDOPro-HD-Sync-macOS-vVERSION.zip`
-- `EDOPro-HD-Sync-Linux-vVERSION.zip`
+- `EDOPal-Windows-vVERSION.zip`
+- `EDOPal-macOS-vVERSION.zip`
+- `EDOPal-Linux-vVERSION.zip`
 
 **The macOS zip contains only the app. The Windows and Linux zips contain the app and a platform-specific `ReadMe.txt`.** That is the whole promise of the download — unzip, double-click, done. `build.yml` fails the build if a zip ever grows a third entry, loses either file, or ships a non-executable app. Nothing is installed and no support folder is created beside the download; small settings, retry caches, and optional reports use the normal per-user application-data directory for the platform.
 
@@ -119,24 +119,37 @@ PyInstaller bundles do not include system SSL certs automatically. The app uses 
 Texture packs are separate GitHub releases. The app only lists or downloads a pack when its release notes contain explicit `Attribution:` and `License:` lines. Never add texture assets to a release without confirming their creator and redistribution terms.
 
 ## Release process
-Push a version tag -> GitHub Actions builds 3 binaries -> attached to a GitHub Release automatically.
+Build from the repository root with the runtime pins in `requirements.txt`, PyInstaller 6.20.0 and Pillow 13.0.0. CI and local builds use the same commands.
 
-```bash
-git tag v4.x.x && git push origin v4.x.x
+```sh
+python -m tools.release build
+python -m tools.release verify
 ```
 
-The CI matrix builds:
-- `EDOPro-HD-Sync-Windows-vVERSION.zip`
-- `EDOPro-HD-Sync-macOS-vVERSION.zip`
-- `EDOPro-HD-Sync-Linux-vVERSION.zip`
+The build freezes `tools/release.spec`, inspects the embedded payload and writes the platform zip to `dist/`. Verification extracts it into a fresh directory, creates a disposable game and config, then runs both offline flags from the extracted program. Each process has a 60-second deadline. Use `verify --repeat 6` for first-launch and five warm GUI timings. On a headless Windows host set `QT_QPA_PLATFORM=offscreen`. Windows CI uses `windows`, macOS uses `cocoa` for each architecture, and Linux runs separately on Xvfb/xcb and headless Weston/Wayland.
 
-Windows and Linux include a platform-specific `ReadMe.txt`. The workflow also smoke-tests the packaged binary with `--health-check` before the release asset is published.
+Set `APP_FILE` at the top of `.github/workflows/build.yml` to change all executable, bundle and download filenames. Local builds default to `config.APP_NAME`. ReadMe templates and Finder metadata take the display name from that constant. `assets/app-icon.png` is the sole icon source. Replacing it regenerates the window PNG, multi-size ICO and Finder ICNS during the next build.
 
-The macOS job uses universal2 Python to make one native Apple Silicon and
-Intel app. Set all Finder metadata before re-signing the app. Verify the
-signature and smoke-test both architectures after extracting the shipped ZIP.
+The release includes Qt Core, Gui, Widgets and Svg, platform plugins from `tools/qt_payload.py`, the audio decoder, CFFI and certifi. PNG is built into QtGui. JPEG, ICO and WebP use image plugins. Studio renders its SVG glyphs directly with QtSvg. The Tk interface is available with `python main.py --legacy-gui` from source. Skin installation prefers the verified per-user pack cache. Only `shared.zip` ships for the Inter game fonts, built-in sleeves and Thonk effects. The Inter licence, attribution, UI font, appearance previews and music catalogue/covers also ship.
 
-`fail-fast: false` is set so a failure on one platform does not cancel the others.
+The executable must be smaller than **80 MB on Windows, 105 MB on macOS and 120 MB on Linux** (decimal). The packaging audit measured a 71.32 MB Windows backend-plus-widget zip and estimated 83 MB for universal macOS and 96 MB for Linux. The margins cover the full Studio window, SVG, platform libraries and wheel variation. The verifier checks the actual embedded names for the four skin archives and unwanted Qt modules independently of size.
+
+macOS builds need the checksum-verified python.org universal2 interpreter, dual-architecture native dependencies and a 14.4 deployment target. The workflow verifies both slices of the selected Qt binaries before freezing, sets the bundle metadata, signs ad hoc, archives with `ditto` and verifies the extracted signature. The macOS ReadMe is inside the app. Linux uses Ubuntu 22.04 x86_64. Install the Qt host libraries listed in the release workflow before freezing so dependency analysis can resolve the X11 and Wayland clients.
+
+A `v*` tag push whose tag matches `VERSION` builds and publishes all three verified zips in one release job. Pushing a `release-test/**` branch runs the build matrix. To dispatch against a pushed work branch and inspect its results with GitHub CLI:
+
+```powershell
+$branch = git branch --show-current
+gh workflow run build.yml --ref $branch
+gh run list --workflow build.yml --branch $branch --event workflow_dispatch --limit 5
+$runId = Read-Host "ID of the dispatch shown above"
+gh run watch $runId --exit-status
+gh run view $runId
+gh run view $runId --log-failed
+gh run download $runId --dir dist/ci
+```
+
+Branch pushes and manual runs upload workflow artifacts. The publishing job requires a tag push and is skipped for every manual dispatch, even on a tag. The matrix uses `fail-fast: false` so all three platforms report their result.
 
 ## Release notes
 Release notes are auto-generated by GitHub (`generate_release_notes: true` in build.yml) from the commits since the previous tag, so keep commit subjects short and user-readable. The README deliberately has no auto-updating "What's New" panels — the owner removed them; don't re-add them.

@@ -10,6 +10,8 @@ jobs:
   test:
     name: Unit tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
     strategy:
       fail-fast: false
       matrix:
@@ -29,7 +31,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -r requirements.txt
-        pip install ruff==0.15.15
+        pip install ruff==0.15.15 pytest==9.2.0 pytest-qt==4.5.0 pillow==13.0.0
 
     - name: Lint with ruff
       run: ruff check .
@@ -38,4 +40,4 @@ jobs:
       run: ruff format --check .
 
     - name: Run unit tests
-      run: python -m unittest discover tests -v
+      run: python -m pytest -q
