@@ -23,6 +23,7 @@ def test_sidebar_navigation_and_keyboard(
         "sounds",
         "music",
         "decks",
+        "mydecks",
         "settings",
     ]
     for key, button in window.nav.items():

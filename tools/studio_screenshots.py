@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
 
@@ -200,18 +201,34 @@ def parse_size(raw: str) -> tuple[int, int]:
     return w, h
 
 
+# Pages that bring their own synthetic installation render through a module
+# exposing render(out, size, root). Pages in PAGE_RENDERERS above draw inside
+# the shared demo window instead. Add new pages to one of the two.
+STANDALONE_RENDERERS = {
+    "mydecks": "tools.studio_screenshots_mydecks",
+}
+
+
 def main_cli() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--size", type=parse_size, action="append", help="WxH, repeatable")
-    parser.add_argument("--page", choices=PAGE_RENDERERS, help="Render the full set for one page")
+    parser.add_argument(
+        "--page",
+        choices=sorted({*PAGE_RENDERERS, *STANDALONE_RENDERERS}),
+        help="Render the full set of states for one page",
+    )
     args = parser.parse_args()
     app = QApplication.instance() or QApplication(["EDOPro Studio"])
     app.setQuitOnLastWindowClosed(False)
     for width, height in args.size or [(1280, 800), (1600, 1000)]:
         name = f"{width}x{height}"
         with tempfile.TemporaryDirectory(prefix=".studio-preview-", dir=ROOT) as temporary:
-            files = render(args.out / name, (width, height), Path(temporary), page=args.page)
+            target, size, root = args.out / name, (width, height), Path(temporary)
+            if args.page in STANDALONE_RENDERERS:
+                files = import_module(STANDALONE_RENDERERS[args.page]).render(target, size, root)
+            else:
+                files = render(target, size, root, page=args.page)
         print(f"Rendered {len(files)} views at {name} in {files[0].parent}")
 
 
