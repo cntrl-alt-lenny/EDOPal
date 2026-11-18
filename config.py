@@ -563,6 +563,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="Which curated texture pack to download (default: the standard set).",
     )
+    p.add_argument(
+        "--undo-last-sync",
+        action="store_true",
+        help="Restore the images changed or deleted by the last artwork sync in this installation.",
+    )
     return p
 
 
@@ -754,6 +759,6 @@ class Config:
         normalized_path = os.path.abspath(os.path.expanduser(edopro_path))
         self.edopro_path = normalized_path
         self.pics_path = os.path.join(self.edopro_path, "pics")
-        if save:
+        if save and not self.dry_run:
             return save_edopro_path(self.config_path, self.edopro_path)
         return True

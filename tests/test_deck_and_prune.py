@@ -84,6 +84,14 @@ class PruneOrphansTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
+        self.cfg = main.Config(
+            [
+                "--edopro-path",
+                self.temp_dir.name,
+                "--config",
+                os.path.join(self.temp_dir.name, "config.json"),
+            ]
+        )
         self.pics = os.path.join(self.temp_dir.name, "pics")
         os.makedirs(self.pics, exist_ok=True)
 
@@ -95,7 +103,7 @@ class PruneOrphansTests(unittest.TestCase):
         self._touch("89631139.jpg")
         self._touch("999999.jpg")  # orphan
 
-        pruned = main.prune_orphan_images(self.pics, {46986414, 89631139})
+        pruned = main.prune_orphan_images(self.pics, {46986414, 89631139}, cfg=self.cfg)
 
         self.assertEqual(pruned, 1)
         self.assertTrue(os.path.exists(os.path.join(self.pics, "46986414.jpg")))
@@ -108,7 +116,7 @@ class PruneOrphansTests(unittest.TestCase):
         self._touch("notes.jpg.bak")
         self._touch("weird-name.jpg")
 
-        pruned = main.prune_orphan_images(self.pics, {46986414})
+        pruned = main.prune_orphan_images(self.pics, {46986414}, cfg=self.cfg)
 
         self.assertEqual(pruned, 0)
         # All four files should still be there.

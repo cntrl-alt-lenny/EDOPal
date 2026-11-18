@@ -271,6 +271,7 @@ class CardsPage(Page):
         run = self.ctx.run_coro
 
         async def reversible(job_cfg: Config) -> Any:
+            # Injected workers (including the offline demo) share the production journal.
             with remember_changes(job_cfg):
                 return await run(job_cfg)
 
