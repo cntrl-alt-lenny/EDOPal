@@ -2,25 +2,48 @@
 
 import os
 import sqlite3
+import stat
 from contextlib import closing
 from pathlib import Path
 
 
-def get_db_files(edopro_path: str, *, unreadable: list[str] | None = None) -> list[str]:
+def get_db_files(
+    edopro_path: str, *, unreadable: list[str] | None = None, confined: bool = False
+) -> list[str]:
     """Find card DBs in the EDOPro root, expansions/, and repository delta folders."""
     dbs: list[str] = []
+
+    def local_path(path: str) -> bool:
+        if not confined:
+            return True
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            if unreadable is not None:
+                unreadable.append(path)
+            return False
+        # Windows junctions can lead outside the selected game or form directory cycles.
+        return not (
+            stat.S_ISLNK(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        )
+
     root_db = os.path.join(edopro_path, "cards.cdb")
-    if os.path.exists(root_db):
+    if local_path(root_db) and os.path.exists(root_db):
         dbs.append(root_db)
 
     exp_path = os.path.join(edopro_path, "expansions")
-    if os.path.isdir(exp_path):
+    if local_path(exp_path) and os.path.isdir(exp_path):
         for filename in sorted(os.listdir(exp_path)):
             if filename.endswith(".cdb"):
-                dbs.append(os.path.join(exp_path, filename))
+                path = os.path.join(exp_path, filename)
+                if local_path(path):
+                    dbs.append(path)
 
     repo_path = os.path.join(edopro_path, "repositories")
-    if os.path.isdir(repo_path):
+    if local_path(repo_path) and os.path.isdir(repo_path):
 
         def record_error(exc: OSError) -> None:
             if unreadable is not None:
@@ -28,9 +51,13 @@ def get_db_files(edopro_path: str, *, unreadable: list[str] | None = None) -> li
 
         for current_root, dirnames, filenames in os.walk(repo_path, onerror=record_error):
             dirnames.sort()
+            if confined:
+                dirnames[:] = [d for d in dirnames if local_path(os.path.join(current_root, d))]
             for filename in sorted(filenames):
                 if filename.endswith(".delta.cdb"):
-                    dbs.append(os.path.join(current_root, filename))
+                    path = os.path.join(current_root, filename)
+                    if local_path(path):
+                        dbs.append(path)
     return dbs
 
 
