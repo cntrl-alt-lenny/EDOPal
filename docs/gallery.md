@@ -2,24 +2,23 @@
 
 [Back to EDOPal](../README.md) · [Documentation](index.md)
 
-Captures of the rebuilt app are pending. The table gives their order and filenames. Use the final EDOPal build and synthetic installations. Capture each view at 1600×1000 and check the layout at 1280×800. Turn off **Save a sync report** for the results capture so the full local report path stays out of the image.
+These 1280×800 captures use synthetic installations and sample data. Select a view to open it full size. [Regenerate the gallery](screenshots/README.md)
 
-| Order | Planned file | What to show |
-| --- | --- | --- |
-| 1 | `docs/screenshots/edopal-overview.png` | README hero with the sidebar, a selected demo installation and HD Cards set to **My decks**. |
-| 2 | `docs/screenshots/hd-cards-results.png` | A completed deck-only artwork sync with card and Field Spell results. |
-| 3 | `docs/screenshots/skins-theme-maker.png` | Theme Maker with colour controls and a generated wallpaper in the duel preview. |
-| 4 | `docs/screenshots/sleeves-designer.png` | A patterned sleeve design with distinct player and opponent previews. |
-| 5 | `docs/screenshots/sounds.png` | A sound set with individual duel cues and audition controls. |
-| 6 | `docs/screenshots/music.png` | One game selected, a music moment and a playlist of playable demo tracks. |
-| 7 | `docs/screenshots/tournament-decks.png` | Event standings and a published deck preview ready to import. |
-| 8 | `docs/screenshots/my-decks.png` | Two saved versions compared with section changes visible. |
-| 9 | `docs/screenshots/replays.png` | The replay shelf with a selected demo replay, its details and notes. |
-| 10 | `docs/screenshots/backup-transfer.png` | A restore preview showing a conflict and the choices for keeping both files. |
-| 11 | `docs/screenshots/health-check.png` | Health findings for a demo installation and the support summary action. |
-| 12 | `docs/screenshots/content-packs.png` | A redistributable example pack with its creator, licence, size and download state. |
-
-Add the hero image to the README and link the gallery images here once the files exist. Use the [capture command](../CONTRIBUTING.md#pages-tests-and-screenshots) as a starting point.
+| View | What it shows |
+| --- | --- |
+| [HD Cards home](screenshots/edopal-overview.png) | Selected installation, coverage and **My decks** scope. |
+| [HD Cards results](screenshots/hd-cards-results.png) | A simulated sync receipt with artwork counts and undo. |
+| [Theme maker](screenshots/skins-theme-maker.png) | A duel preview and generated wallpaper controls. |
+| [Sleeve designer](screenshots/sleeves-designer.png) | A patterned sleeve, palette controls and two sleeve slots. |
+| [Sounds](screenshots/sounds.png) | The custom mixer with audition and per-cue choices. |
+| [Music](screenshots/music.png) | A game album with demo tracks, playback and scene assignment. |
+| [Tournament decks](screenshots/tournament-decks.png) | Standings beside the highlighted deck’s preview. |
+| [My decks](screenshots/my-decks.png) | A saved deck scrolled to its Extra and Side sections. |
+| [Replays](screenshots/replays.png) | A recorded duel with its label, tags and notes. |
+| [Backup & transfer](screenshots/backup-transfer.png) | Restore conflicts previewed with **Keep both** selected. |
+| [Health check](screenshots/health-check.png) | Problems and warnings above notes and passed checks, with the support summary control. |
+| [Content packs](screenshots/content-packs.png) | Downloadable sample music and cover listings with credits and licence. |
+| [Settings](screenshots/settings.png) | About, project links and data-source credits. |
 
 ## EDOPro duel example
 

@@ -9,7 +9,7 @@ Use the project's Python environment. From a fresh developer environment, instal
 ```powershell
 $py = 'python' # Set to the full path to your project's Python if needed.
 & $py -m pip install -r requirements.txt
-& $py -m pip install pytest pytest-qt ruff==0.15.15 Pillow
+& $py -m pip install pytest==9.2.0 pytest-qt==4.5.0 ruff==0.15.15 Pillow==13.0.0
 ```
 
 Work against a disposable installation and pass a config path inside your checkout. The demo maker refuses to overwrite an existing game folder. Use a fresh demo directory each time.
@@ -31,9 +31,9 @@ Work against a disposable installation and pass a config path inside your checko
 | Appearance and audio engines | [themes](themes/README.md), [sleeves](sleeves/__init__.py), [sounds](docs/sounds.md), [music](music/__init__.py), [music_library.py](music_library.py), [music_import.py](music_import.py), [music_player.py](music_player.py), [extras.py](extras.py) |
 | Tournament imports and personal decks | [tournament_decks.py](tournament_decks.py), [goat_versions.py](goat_versions.py), [decks](decks/__init__.py) |
 | Content, transfer, health and replays | [content](docs/content-packs.md), [backup](docs/backup.md), [doctor and replays](docs/doctor-replays.md) |
-| Legacy Tkinter UI, scheduled for removal after migration | [gui.py](gui.py), [appearance_gallery.py](appearance_gallery.py), [desktop_dialogs.py](desktop_dialogs.py), [music_window.py](music_window.py), [tournament_window.py](tournament_window.py) |
+| Legacy Tkinter UI, available from source | [gui.py](gui.py), [appearance_gallery.py](appearance_gallery.py), [desktop_dialogs.py](desktop_dialogs.py), [music_window.py](music_window.py), [tournament_window.py](tournament_window.py) |
 
-Both interfaces use `artwork_flow.py` for artwork choices and summaries. Each imported-deck sync gets its own job configuration and cancellation event.
+Both interfaces use `artwork_flow.py` for artwork choices and summaries. Qt uses the shared deck-contents view for tournament previews and saved decks. Each imported-deck sync gets its own job configuration and cancellation event.
 
 ## Pages, tests and screenshots
 
@@ -41,66 +41,78 @@ Use the [Qt page guide](studio/README.md#add-or-replace-a-page) for page registr
 
 ```powershell
 $env:QT_QPA_PLATFORM = 'offscreen'
-$env:PYTEST_QT_API = 'pyside6'
-$env:TEMP = $env:TMP = [IO.Path]::GetFullPath('build/tmp')
-[IO.Directory]::CreateDirectory($env:TEMP) | Out-Null
-& $py -m pytest -q --basetemp build/tests-all
-& $py -m ruff check .
-& $py tools/studio_screenshots.py --out build/studio-shots --size 1280x800 --size 1600x1000
+python -m pytest -q
+ruff check .
+ruff format --check .
+python tools/studio_screenshots.py --out build/edopal-shots --size 960x600 --size 1280x800
 ```
 
-The renderer uses a synthetic game, simulated artwork downloads and the real coverage pipeline. It writes one gallery per size under the output folder. Check both sizes when changing a page. Use the [gallery capture list](docs/gallery.md) for release images.
+The renderer uses synthetic installations, simulated downloads and the real Qt pages. It writes one directory per size. Use `--help` for page-specific sets. Check 960×600 for compact banners and sidebar scrolling, and follow the release recipe for the curated 1280×800 images. [Release screenshot recipe](docs/screenshots/README.md)
 
 ## Safe game writes
 
 - Stage and validate replacements before publishing them. Replace files atomically and preserve originals for undo when touching existing player files. New deck and replay copies use unused names and publish without overwriting an existing file.
 - For a recoverable change, write a journal with the expected file states and saved originals before publishing changes. Validate every target again during undo or recovery. Stop on an unexpected edit so the player can keep it.
-- Use the lock that owns the write. Appearance, generated themes, sleeves, effects and audio settings share the installation-level `.edopro-appearance.lock`. Restore has its own game and app-data locks, and music uses scene locks for playlists. Keep the lock files as stable identities. Close the game for appearance and audio writes, and before changing active configuration during restore.
-- Keep installation locks out of network waits. Retain atomic artwork replacement and explicit maintenance options. Those operations have different recovery limits from the journalled writers. [Write locations and recovery](docs/safety.md)
+- Use the lock that owns the write. Appearance, generated themes, sleeves, effects and audio settings share the installation-level `.edopro-appearance.lock`. Restore has its own game and app-data locks, and music uses scene locks for playlists. Keep the lock files as stable identities. Close the game for appearance, audio and other guarded writes. An unknown process state also stops guarded writes. Ask the player to close EDOPro and retry.
+- Keep installation locks out of network waits. Qt artwork jobs keep a restore point per installation through `cards_undo.py`. CLI artwork jobs use atomic replacement without this journal. [Write locations and recovery](docs/safety.md)
 
-## Release packaging
+## Releases
 
-**Release packaging requirements must be preserved.** Publish **exactly one asset per platform** — no checksum files, no launchers — so the Releases page reads simply "Windows, macOS, Linux":
+### Packaging contract
+
+Publish exactly one portable ZIP per platform.
+
 - `EDOPal-Windows-vVERSION.zip`
 - `EDOPal-macOS-vVERSION.zip`
 - `EDOPal-Linux-vVERSION.zip`
 
-**The macOS zip contains only the app. The Windows and Linux zips contain the app and a platform-specific `ReadMe.txt`.** That is the whole promise of the download — unzip, double-click, done. `build.yml` fails the build if a zip ever grows a third entry, loses either file, or ships a non-executable app. Nothing is installed and no support folder is created beside the download; small settings, retry caches, and optional reports use the normal per-user application-data directory for the platform.
+Windows and Linux archive the executable and a platform ReadMe. The macOS ZIP contains a single `.app` with the ReadMe in `Contents/Resources/`. Keep the PyInstaller builds one-file and use windowed mode on Windows and macOS. Updates remain manual downloads from GitHub Releases. See the packaging history below for the launcher and startup issues these rules address.
 
-**The Windows build must stay `--windowed`, and `build.yml` checks the PE subsystem byte to prove it.** A console build shows a stray black console window behind the app on every double-click. Do **not** try to fix that at runtime by hiding the console: that was tried and it does not hold. The console Explorer creates for a double-click is not the same object as the pseudo-console a terminal hands a child process, so the fix cannot be verified from any terminal — it looked like it worked in testing and still shipped the bug. Not creating a console at all is the only version that cannot regress. Output still reaches an inherited pipe or terminal, so `--health-check` and the CI smoke test are unaffected. On macOS `--windowed` is what *produces* the `.app` bundle, so it is required there too (see the macOS packaging rule above).
+### Build and verify
 
-Related: `should_pause_before_exit()` requires an interactive `sys.stdin`. A windowed double-click has no console, so pausing for Enter there would hang the app on input nobody can see.
+Build from the repository root with the runtime pins in `requirements.txt`, PyInstaller 6.20.0 and Pillow 13.0.0. CI and local builds use the same commands.
 
-**Windows and Linux ship a bare executable; macOS ships a `.app` bundle.** A zip preserves the executable bit (a browser download does not — mode 644 caused the "you do not have appropriate access privileges" bug in v5.0.0), so a raw binary double-clicks fine on Windows and Linux. **macOS is different: Finder runs a bare Unix executable by opening Terminal**, so v5.2.0 put a blue Terminal window behind the app on every launch. A `.app` bundle is the only fix — verified locally, bare executable opens Terminal, bundle does not. The bundle is still *one icon* in Finder, so the download remains a single app, and it is not a launcher script: the bundle's executable is the same one-file PyInstaller binary. `build.yml` fails the build if the macOS zip does not contain a real bundle (`Contents/Info.plist`). Keep `.zip` (not `.7z`) for native unzip support.
-
-**Build with PyInstaller `--onefile`, never `--onedir`.** Onedir is faster to start (0.3 s vs 1.9 s measured on the owner's machine, 23.6 MB binary) but spreads the app over ~1,000 files in an `_internal/` folder, which forced a launcher script to exist purely to hide it. That launcher was the single biggest source of bugs in the project's history (see below). One file, ~2 s to start, no launcher: that trade is deliberate — do not reverse it to shave a second off a tool people run occasionally.
-
-**There is no launcher, and adding one back is a regression.** `EDOPro-HD-Sync.bat` / `.command` / `.sh` were deleted in v5.2.0. They existed to install the onedir app into a support folder and self-update it, and they broke repeatedly: the macOS executable-bit bug (v5.0.0), the Windows checksum bug, and finally a Windows launcher left copying a single `.exe` after the app became a folder — which created `app\EDOPro-HD-Sync.exe.new` inside a directory that was never created, so **every Windows install of v5.1.0/v5.1.1 failed outright**. Three launchers in three languages could not be kept in step with the packaging. Updates are now just a notice in the app pointing at the Releases page.
-
-## Release process
-Push a version tag -> GitHub Actions builds 3 binaries -> attached to a GitHub Release automatically.
-
-```bash
-git tag v4.x.x && git push origin v4.x.x
+```sh
+python -m tools.release build
+python -m tools.release verify
 ```
 
-The CI matrix builds:
-- `EDOPro-HD-Sync-Windows-vVERSION.zip`
-- `EDOPro-HD-Sync-macOS-vVERSION.zip`
-- `EDOPro-HD-Sync-Linux-vVERSION.zip`
+The build freezes `tools/release.spec`, inspects the embedded payload and writes the platform zip to `dist/`. Verification extracts it into a fresh directory, creates a disposable game and config, then runs both offline flags from the extracted program. Each process has a 60-second deadline. Use `verify --repeat 6` for first-launch and five warm GUI timings. On a headless Windows host set `QT_QPA_PLATFORM=offscreen`. Windows CI uses `windows`, macOS uses `cocoa` for each architecture, and Linux runs separately on Xvfb/xcb and headless Weston/Wayland.
 
-Windows and Linux include a platform-specific `ReadMe.txt`. The workflow also smoke-tests the packaged binary with `--health-check` before the release asset is published.
+Set `APP_FILE` at the top of `.github/workflows/build.yml` to change all executable, bundle and download filenames. Local builds default to `config.APP_NAME`. ReadMe templates and Finder metadata take the display name from that constant. `assets/app-icon.png` is the sole icon source. Replacing it regenerates the window PNG, multi-size ICO and Finder ICNS during the next build.
 
-The macOS job uses universal2 Python to make one native Apple Silicon and
-Intel app. Set all Finder metadata before re-signing the app. Verify the
-signature and smoke-test both architectures after extracting the shipped ZIP.
+The release includes Qt Core, Gui, Widgets and Svg, platform plugins from `tools/qt_payload.py`, the audio decoder, CFFI and certifi. PNG is built into QtGui. JPEG, ICO and WebP use image plugins. EDOPal renders its SVG glyphs directly with QtSvg. The Tk interface is available with `python main.py --legacy-gui` from source. Skin installation prefers the verified per-user pack cache. Only `shared.zip` ships for the Inter game fonts, built-in sleeves and Thonk effects. The Inter licence, attribution, UI font, appearance previews and music catalogue/covers also ship.
 
-`fail-fast: false` is set so a failure on one platform does not cancel the others.
+The executable must be smaller than **80 MB on Windows, 105 MB on macOS and 120 MB on Linux** (decimal). The packaging audit measured a 71.32 MB Windows backend-plus-widget zip and estimated 83 MB for universal macOS and 96 MB for Linux. The margins cover the full EDOPal window, SVG, platform libraries and wheel variation. The verifier checks the actual embedded names for the four skin archives and unwanted Qt modules independently of size.
 
-## Release notes
-Release notes are auto-generated by GitHub (`generate_release_notes: true` in build.yml) from the commits since the previous tag, so keep commit subjects short and user-readable. The README deliberately has no auto-updating "What's New" panels — the owner removed them; don't re-add them.
+macOS builds need the checksum-verified python.org universal2 interpreter, dual-architecture native dependencies and a 14.4 deployment target. The workflow verifies both slices of the selected Qt binaries before freezing, sets the bundle metadata, signs ad hoc, archives with `ditto` and verifies the extracted signature. The macOS ReadMe is inside the app. Linux uses Ubuntu 22.04 x86_64. Install the Qt host libraries listed in the release workflow before freezing so dependency analysis can resolve the X11 and Wayland clients.
+
+Pushing a `release-test/**` branch runs the build matrix. To dispatch against a pushed work branch and inspect its results with GitHub CLI:
+
+```powershell
+$branch = git branch --show-current
+gh workflow run build.yml --ref $branch
+gh run list --workflow build.yml --branch $branch --event workflow_dispatch --limit 5
+$runId = Read-Host "ID of the dispatch shown above"
+gh run watch $runId --exit-status
+gh run view $runId
+gh run view $runId --log-failed
+gh run download $runId --dir dist/ci
+```
+
+Branch pushes and manual runs upload workflow artifacts. The publishing job requires a tag push and is skipped for every manual dispatch, even on a tag. The matrix uses `fail-fast: false` so all three platforms report their result.
+
+### Publish
+
+Push a `v*` tag whose version matches `VERSION` to publish all three verified ZIPs. Release notes are auto-generated by GitHub (`generate_release_notes: true` in build.yml) from the commits since the previous tag, so keep commit subjects short and user-readable. The README deliberately has no auto-updating "What's New" panels — the owner removed them; don't re-add them.
 
 ## History and rationale
+
+### Portable packaging history
+
+- The Windows console build opened a black console on every Explorer double-click. Hiding it at runtime appeared to work from a terminal but failed in Explorer, which creates a different console. The verifier checks the PE subsystem, and the packaged smoke probes check output through pipes. `should_pause_before_exit()` requires interactive standard input so a double-click never waits for invisible input.
+- Finder opened a bare Unix binary in Terminal in v5.2.0. A windowed macOS build puts the same one-file binary inside a Finder app. ZIP preserves the Unix execute bit, which was lost in the v5.0.0 download. It also works with native extraction tools.
+- A measured one-directory build started faster but required a support directory and launcher. The old `EDOPro-HD-Sync.bat`, `.command` and `.sh` launchers broke on executable permissions, Windows checksum checks and an invalid update destination. The stale copy step stopped every Windows install of v5.1.0 and v5.1.1. The launchers were removed in v5.2.0.
 
 ### Soundtrack covers
 
@@ -115,6 +127,7 @@ EDOPro stores cards in SQLite `.cdb` files. The tool scans:
 - `cards.cdb` at the EDOPro root (often an empty placeholder - skip if 0 bytes)
 - every `*.cdb` in `expansions/`
 - every `*.delta.cdb` under `repositories/`
+- `prerelease-*.cdb` and `release-*.cdb` directly under `repositories/delta-bagooska/`. Later release or delta data takes precedence over provisional definitions.
 
 From these it builds two maps:
 - `id_to_name` - every card ID -> name
@@ -135,7 +148,7 @@ The numbered list records the original fallback design. The GOAT and Pre-Errata 
 - IDs >= 100,000,000 -> Rush Duel (160M range, tracked via the DB filename) and anime/custom cards. All still get the direct YGOProDeck attempt.
 
 ### Field Spell playmat art
-Field Spells (datas.type has both `0x2` SPELL and `0x80000` FIELD bits — `FIELD_SPELL_TYPE`) also get their cropped playmat artwork downloaded into `pics/field/{id}.jpg` from `https://images.ygoprodeck.com/images/cards_cropped/{id}.jpg`. EDOPro reads `.png` or `.jpg` there. Runs after the card sync, is incremental, has its own failure cache (`failed_fields.json`), is covered by `--repair`, and can be disabled with `--no-field-art` (or `"field_art": false` in config.json).
+A separate field-art pass writes JPEG or PNG to `pics/field/`. `download_field_art()` tries the card's own cropped image from YGOProDeck and Project Ignis, then an eligible donor illustration. A donor can come from disk or either provider. If those fail and the card face is available, EDOPal makes a local crop using the applicable card layout. Derived crops can be upgraded when a published image becomes available. Disable the pass with `--no-field-art` or `"field_art": false`.
 
 ### GOAT / Pre-Errata artwork: sharpness vs. correct wording
 `build_download_candidates()` tries manual overrides, base-card name matches,
@@ -161,7 +174,7 @@ Cards like "Dark Magician GOAT" have a custom DB ID but the same artwork as "Dar
 Cards that fail to download are remembered for 14 days so repeat runs skip them (`failed_cards.json` for card art, `failed_fields.json` for field art). **Only definitive misses are cached** — `_try_download` returns a `FetchResult` (`OK` / `MISSING` / `ERROR`), and a card is cached only when every source said `MISSING` (HTTP 404). Timeouts, connection errors, rate limits, and 5xx are `ERROR` (transient) and are retried on the next run — never cache them, or one bad Wi-Fi day would silence hundreds of cards for two weeks.
 
 ### Concurrency
-50 async workers drain a shared `asyncio.Queue`. Each worker loops until the queue is empty. This keeps a steady number of requests in flight without spawning tens of thousands of coroutines.
+By default, 50 async workers drain a shared `asyncio.Queue`. Each worker loops until the queue is empty. This keeps a steady number of requests in flight without spawning tens of thousands of coroutines.
 
 ### SSL certificates and proxies
 PyInstaller bundles do not include system SSL certs automatically. The app uses `certifi` and passes it to `aiohttp.TCPConnector` via `ssl.create_default_context(cafile=certifi.where())`. The build uses `--collect-data certifi` to include the cert bundle. **Do not remove this - it will silently break all downloads.** `_create_http_session()` also uses `trust_env=True`, so standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` settings work. `EDOPRO_CA_BUNDLE` can add a private PEM CA bundle for managed networks.
@@ -169,63 +182,28 @@ PyInstaller bundles do not include system SSL certs automatically. The app uses 
 ### Optional textures
 Texture packs are separate GitHub releases. The app only lists or downloads a pack when its release notes contain explicit `Attribution:` and `License:` lines. Never add texture assets to a release without confirming their creator and redistribution terms.
 
-## Release process
-Build from the repository root with the runtime pins in `requirements.txt`, PyInstaller 6.20.0 and Pillow 13.0.0. CI and local builds use the same commands.
-
-```sh
-python -m tools.release build
-python -m tools.release verify
-```
-
-The build freezes `tools/release.spec`, inspects the embedded payload and writes the platform zip to `dist/`. Verification extracts it into a fresh directory, creates a disposable game and config, then runs both offline flags from the extracted program. Each process has a 60-second deadline. Use `verify --repeat 6` for first-launch and five warm GUI timings. On a headless Windows host set `QT_QPA_PLATFORM=offscreen`. Windows CI uses `windows`, macOS uses `cocoa` for each architecture, and Linux runs separately on Xvfb/xcb and headless Weston/Wayland.
-
-Set `APP_FILE` at the top of `.github/workflows/build.yml` to change all executable, bundle and download filenames. Local builds default to `config.APP_NAME`. ReadMe templates and Finder metadata take the display name from that constant. `assets/app-icon.png` is the sole icon source. Replacing it regenerates the window PNG, multi-size ICO and Finder ICNS during the next build.
-
-The release includes Qt Core, Gui, Widgets and Svg, platform plugins from `tools/qt_payload.py`, the audio decoder, CFFI and certifi. PNG is built into QtGui. JPEG, ICO and WebP use image plugins. Studio renders its SVG glyphs directly with QtSvg. The Tk interface is available with `python main.py --legacy-gui` from source. Skin installation prefers the verified per-user pack cache. Only `shared.zip` ships for the Inter game fonts, built-in sleeves and Thonk effects. The Inter licence, attribution, UI font, appearance previews and music catalogue/covers also ship.
-
-The executable must be smaller than **80 MB on Windows, 105 MB on macOS and 120 MB on Linux** (decimal). The packaging audit measured a 71.32 MB Windows backend-plus-widget zip and estimated 83 MB for universal macOS and 96 MB for Linux. The margins cover the full Studio window, SVG, platform libraries and wheel variation. The verifier checks the actual embedded names for the four skin archives and unwanted Qt modules independently of size.
-
-macOS builds need the checksum-verified python.org universal2 interpreter, dual-architecture native dependencies and a 14.4 deployment target. The workflow verifies both slices of the selected Qt binaries before freezing, sets the bundle metadata, signs ad hoc, archives with `ditto` and verifies the extracted signature. The macOS ReadMe is inside the app. Linux uses Ubuntu 22.04 x86_64. Install the Qt host libraries listed in the release workflow before freezing so dependency analysis can resolve the X11 and Wayland clients.
-
-A `v*` tag push whose tag matches `VERSION` builds and publishes all three verified zips in one release job. Pushing a `release-test/**` branch runs the build matrix. To dispatch against a pushed work branch and inspect its results with GitHub CLI:
-
-```powershell
-$branch = git branch --show-current
-gh workflow run build.yml --ref $branch
-gh run list --workflow build.yml --branch $branch --event workflow_dispatch --limit 5
-$runId = Read-Host "ID of the dispatch shown above"
-gh run watch $runId --exit-status
-gh run view $runId
-gh run view $runId --log-failed
-gh run download $runId --dir dist/ci
-```
-
-Branch pushes and manual runs upload workflow artifacts. The publishing job requires a tag push and is skipped for every manual dispatch, even on a tag. The matrix uses `fail-fast: false` so all three platforms report their result.
-
-## Release notes
-Release notes are auto-generated by GitHub (`generate_release_notes: true` in build.yml) from the commits since the previous tag, so keep commit subjects short and user-readable. The README deliberately has no auto-updating "What's New" panels — the owner removed them; don't re-add them.
-
-## Finding the EDOPro folder
+### Finding the EDOPro folder
 The app locates the folder itself, so the user never has to know where EDOPro lives. `main.detect_edopro_folder()` runs once at startup (skipped entirely when `--edopro-path` was passed — an explicit answer is never second-guessed) and calls `config.find_edopro_folder()`, which checks, in order:
 
 1. the caller's guesses — the remembered `edopro_path` from `config.json`, or the folder the app is sitting in
 2. `EDOPRO_FOLDER_NAMES` joined onto each `_search_parents()` entry (home, Games, Desktop, Downloads, Documents, plus `%LOCALAPPDATA%\Programs`, `/Applications`, `~/.local/share`, …) — pure `isdir` checks, instant
 3. one level inside each of those parents, for people who renamed the folder
 
-Candidates are **scored, not first-match**: a folder with card databases (2) always beats one that merely looks like EDOPro (1), so a fresh install with no `.cdb` files yet never shadows a real one. The scan is capped by `_SEARCH_TIME_BUDGET_SECONDS` so startup can never appear to hang.
+Candidates are **scored, not first-match**: a folder with card databases (2) always beats one that merely looks like EDOPro (1), so a fresh install with no `.cdb` files yet never shadows a real one. The scan is capped by `_SEARCH_TIME_BUDGET_SECONDS` to bound the discovery scan.
 
 Two folder predicates exist on purpose and must not be merged:
 - `folder_has_card_databases()` — **mirrors `main.get_db_files()` exactly.** If that returns nothing, this must be False, or the app would "find" a folder it then can't sync. `tests/test_folder_detection.py` asserts the two agree on every shape (root `cards.cdb`, `expansions/*.cdb`, `repositories/**/*.delta.cdb`, empty dirs, an `expansions/` with no `.cdb`). Keep that test passing whenever either function changes.
 - `looks_like_edopro_folder()` — deliberately looser (accepts `EDOPro.exe` alone), because a freshly installed EDOPro that has not downloaded its databases yet is still the right folder.
 
-**The user confirms the folder before anything downloads.** In the original Tk interface, the OPTIONS screen's top card shows the folder with a **Change…** button, and pressing Start *is* the confirmation (`gui._render_folder` also disables Start when no folder is set). In the console flow, `main.confirm_edopro_folder()` asks "Use this folder?" defaulting to yes, and declining hands over to `prompt_for_edopro_path()`. The console prompt is gated on `cfg.folder_detected and cfg.interactive_prompts and not cfg.quiet`, so the window never double-asks and scripted runs never block.
+**The player reviews the installation before artwork sync.** The Qt installation bar shows the current selection and the **Change folder** action. In the original Tk interface, the OPTIONS screen's top card shows the folder with a **Change…** button, and pressing Start *is* the confirmation (`gui._render_folder` also disables Start when no folder is set). In the console flow, `main.confirm_edopro_folder()` asks "Use this folder?" defaulting to yes, and declining hands over to `prompt_for_edopro_path()`. The console prompt is gated on `cfg.folder_detected and cfg.interactive_prompts and not cfg.quiet`, so the window never double-asks and scripted runs never block.
 
 ### Updates
 There is no self-updating machinery. `check_for_update()` compares `VERSION` against the latest GitHub tag and shows a notice pointing at the Releases page; the user downloads the new zip and replaces the one file. This replaced a launcher-driven auto-updater that broke the Windows install twice.
 
 ### Output files
 - `pics/{id}.jpg` - downloaded card images (in the EDOPro folder)
-- `pics/field/{id}.jpg` - Field Spell playmat artwork
+- `pics/field/{id}.jpg` or `.png` - Field Spell playmat artwork
+- `artwork-restore/` - the last changing Qt artwork sync per installation and config directory
 - `failed_cards.json` / `failed_fields.json` - 14-day caches of definitively-missing art (in the packaged app's per-user data directory)
 - `config.json` - user config (beside the script from source; in the packaged app's per-user data directory; override with `--config PATH`)
 - `sync-report-*.txt` - optional timestamped reports beside `config.json`
