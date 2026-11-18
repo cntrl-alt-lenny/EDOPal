@@ -317,6 +317,7 @@ def parse_size(raw: str) -> tuple[int, int]:
 # exposing render(out, size, root). Pages in PAGE_RENDERERS above draw inside
 # the shared demo window instead. Add new pages to one of the two.
 STANDALONE_RENDERERS = {
+    "display": ("tools.studio_display", "render"),
     "practice": ("tools.studio_practice_shots", "render"),
     "mydecks": ("tools.studio_screenshots_mydecks", "render"),
     "music": ("tools.music_screenshots", "render_music"),
