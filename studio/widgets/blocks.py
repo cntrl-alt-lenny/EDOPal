@@ -69,6 +69,23 @@ class Notice(Panel):
         self.setVisible(bool(message))
 
 
+class GameClosedBlock(Panel):
+    """Inline recovery after AppContext.require_game_closed stops a write."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.body.addWidget(label("Close EDOPro to continue", "heading", True))
+        self.detail = label("", "body", True)
+        self.body.addWidget(self.detail)
+        self.retry = Button("Retry", "primary")
+        self.body.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignLeft)
+
+    def show_reason(self, reason: str) -> None:
+        self.detail.setText(reason)
+        self.show()
+        self.retry.setFocus()
+
+
 class ProgressBlock(Panel):
     def __init__(self) -> None:
         super().__init__()

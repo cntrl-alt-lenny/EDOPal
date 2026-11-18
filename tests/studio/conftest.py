@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -26,7 +26,10 @@ def game(tmp_path: Path) -> Config:
 
 
 @pytest.fixture
-def make_window(qapp: QApplication, qtbot: QtBot, game: Config, monkeypatch) -> Callable:
+def make_window(
+    qapp: QApplication, qtbot: QtBot, game: Config, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Callable]:
+    monkeypatch.setattr("music.settings._game_running", lambda _: False)
     theme.apply(qapp)
 
     def offline(url: str, *, limit: int) -> bytes:
@@ -43,6 +46,13 @@ def make_window(qapp: QApplication, qtbot: QtBot, game: Config, monkeypatch) -> 
         window.show()
         window.activateWindow()
         qapp.processEvents()
+        windows.append(window)
         return window
 
-    return factory
+    windows: list[StudioWindow] = []
+    yield factory
+    # HD Cards measures the installation in the background when it is selected.
+    # Let that finish before the temporary game folder is removed, so one test's
+    # worker can never fail the next test.
+    for window in windows:
+        qtbot.waitUntil(lambda w=window: not w.ctx.tasks.jobs, timeout=15000)

@@ -179,8 +179,13 @@ def generate_default_config(path: str) -> None:
 
 def save_setting(path: str, key: str, value) -> bool:
     """Update a single setting in the config file, leaving the rest alone."""
+    return save_settings(path, {key: value})
+
+
+def save_settings(path: str, values: dict) -> bool:
+    """Save one set of related choices together."""
     config_data = _load_config_file(path)
-    config_data[key] = value
+    config_data.update(values)
     try:
         _write_config_file(path, config_data)
     except OSError as exc:
@@ -710,6 +715,10 @@ class Config:
         self.deck_paths: list[str] = list(self.cli.deck or [])
         self.decks_folder: str | None = self.cli.decks_folder
         self.my_decks: bool = self.cli.my_decks
+        scope = file_cfg.get("studio_scope")
+        self.studio_scope = scope if scope in ("library", "decks") else "auto"
+        self.studio_theme = file_cfg.get("studio_theme") is True
+        self.studio_repair = self.cli.repair or file_cfg.get("studio_repair") is True
         self.gui: bool | None = self.cli.gui
         # Console questions are skipped when the options window already ran.
         self.interactive_prompts: bool = True

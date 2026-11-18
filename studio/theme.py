@@ -15,6 +15,15 @@ GOLD, PALE, PRESSED, ON_GOLD = "#ebc987", "#f7dfac", "#d5af6a", "#251f15"
 GREEN, RED = "#99cfb2", "#f1a499"
 HERO_DARK, HERO_LIGHT, BRONZE = "#272326", "#594539", "#af885a"
 FOIL = {
+    "folder": ("#20262a", "#44545b"),
+    "download": ("#252833", "#515774"),
+    "spark": ("#242732", "#485e78"),
+    "arrow": ("#242b2a", "#40574e"),
+    "brand": ("#24262c", "#565363"),
+    "mydecks": ("#262532", "#555979"),
+    "replays": ("#222c31", "#386477"),
+    "backup": ("#28282a", "#6d5949"),
+    "health": ("#202927", "#416953"),
     "check": ("#202927", "#41574a"),
     "warning": ("#302327", "#674747"),
     "skins": ("#20252f", "#45526c"),
@@ -33,6 +42,7 @@ ICON, ICON_BIG, BRAND_ICON = 20, 28, 38
 BUTTON_H, TILE_H, NAV_H = 40, 84, 44
 RAIL_WIDTH, RAIL_COMPACT = 218, 208
 HERO_MIN, HERO_MAX = 218, 600
+CARDS_COLUMNS = 930
 WIDE_CONTENT, TILE_LARGE, PICKER_ROWS = 1250, 144, 5
 CONTENT_MAX, ROOMY_WIDTH, TALL_HEIGHT = 1920, 1750, 1000
 DEFAULT_SIZE, MIN_SIZE = (1180, 760), (960, 600)
@@ -42,6 +52,11 @@ THUMB_SIZE = (130, 132)
 MOTION_MS, NOTICE_MS = 150, 6500
 UI = "Inter"
 SERIF = "Georgia"
+
+
+def landing_hero_height(width: int, viewport_height: int) -> int:
+    extra = max(0, viewport_height - (DEFAULT_SIZE[1] - XL))
+    return max(HERO_MIN, min(HERO_MAX, round(width * 0.20 + extra * 0.65)))
 
 
 def font(size: int = BODY, *, bold: bool = False, serif: bool = False) -> QFont:
@@ -101,6 +116,7 @@ def stylesheet() -> str:
     QWidget {{ color: {INK}; font-family: "{UI}", "Segoe UI", sans-serif; font-size: {BODY}px; }}
     QMainWindow, QWidget#canvas, QScrollArea, QScrollArea > QWidget > QWidget {{ background: {CANVAS}; }}
     QWidget#rail {{ background: {RAIL}; border-right: 1px solid {EDGE}; }}
+    QScrollArea#railScroll, QWidget#railItems {{ background: {RAIL}; }}
     QWidget#installBar {{ background: {CANVAS}; border-bottom: 1px solid {EDGE}; }}
     QLabel {{ background: transparent; border: none; }}
     QLabel[role="muted"] {{ color: {MUTED}; font-size: {SMALL}px; }}

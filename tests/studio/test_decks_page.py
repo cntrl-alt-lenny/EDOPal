@@ -38,7 +38,8 @@ def test_readiness_and_installation_picker_inline(
     assert page.browser.choose.hasFocus()
     assert page.browser.unavailable.isVisible()
     assert not page.browser.search.isEnabled()
-    assert not window.ctx.tasks.jobs
+    # Nothing is left running: the page starts no request without an installation.
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
 
     monkeypatch.setattr("config.find_edopro_folders", lambda **_: [])
     page.browser.choose.click()

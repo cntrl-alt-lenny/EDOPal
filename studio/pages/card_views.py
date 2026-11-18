@@ -99,12 +99,38 @@ class OptionsView(QWidget):
         library.addLayout(self.tools)
         library.addStretch()
         self.groups.addLayout(library, 2)
+        self.snapshot = Panel(t.LG)
+        self.snapshot.body.addWidget(label("THIS INSTALLATION", "goldKicker"))
+        metrics = QHBoxLayout()
+        self.values, self.captions = [], []
+        for caption in ("Card artwork", "Saved decks", "Artwork on disk"):
+            column = QVBoxLayout()
+            number = label("…", "metric")
+            name = label(caption, "muted", True)
+            column.addWidget(number)
+            column.addWidget(name)
+            metrics.addLayout(column, 1)
+            self.values.append(number)
+            self.captions.append(name)
+        self.snapshot.body.addLayout(metrics)
+        self.snapshot.body.addWidget(line())
+        self.last = label("", "small", True)
+        bottom = QHBoxLayout()
+        bottom.addWidget(self.last, 1)
+        self.undo = Button("Undo artwork changes", "secondary", "back")
+        self.undo.setToolTip(
+            "Restore files replaced by the last sync and remove the files it added."
+        )
+        self.undo.hide()
+        bottom.addWidget(self.undo)
+        self.snapshot.body.addLayout(bottom)
+        self.body.addWidget(self.snapshot)
         self.body.addStretch(1)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         width = self.width()
-        wide = width >= t.WIDE_CONTENT
+        wide = width >= t.CARDS_COLUMNS
         self.body.setStretch(0, int(width >= t.ROOMY_WIDTH and self.height() >= t.TALL_HEIGHT))
         self.groups.setDirection(
             QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
@@ -115,29 +141,48 @@ class OptionsView(QWidget):
         self.rule.setVisible(not wide)
         pad = t.LG if width < t.COMPACT_WIDTH * 0.75 else t.XXL
         margins(self.body, pad)
-        self.hero.setFixedHeight(max(t.HERO_MIN, min(t.HERO_MAX, round(width * 0.255))))
-        tile_height = max(t.TILE_H, min(t.TILE_LARGE, width // 13)) if wide else t.TILE_H
+        viewport = self.parentWidget()
+        self.hero.setFixedHeight(
+            t.landing_hero_height(width, viewport.height() if viewport else self.height())
+        )
+        tile_height = max(t.TILE_H, min(t.TILE_LARGE, width // 16)) if wide else t.TILE_H
         for button in self.scope.buttons:
             button.setMinimumHeight(tile_height)
 
 
 class SettingsView(QWidget):
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, *, global_defaults: bool = False) -> None:
         super().__init__()
         body = page_layout(self)
-        self.back = Button("HD Cards", "quiet", "back")
+        self.back = Button("Settings" if global_defaults else "HD Cards", "quiet", "back")
         body.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
         body.addWidget(
-            SectionHeader("Sync settings", "Choose what to include in the next artwork sync.")
+            SectionHeader(
+                "HD Cards defaults" if global_defaults else "Sync settings",
+                "Save your choices for future artwork syncs. You can change them at any time.",
+            )
         )
+        self.scope = (
+            SegmentedControl(
+                (
+                    ("Recommended", "Choose for this game", "spark"),
+                    ("Full library", "All installed cards", "library"),
+                    ("My decks", "Cards in saved decks", "deck"),
+                )
+            )
+            if global_defaults
+            else None
+        )
+        if self.scope:
+            body.addWidget(label("Default artwork selection", "subheading"))
+            body.addWidget(self.scope)
         panel = Panel(t.SM)
         panel.body.setSpacing(t.XS)
         self.toggles: dict[str, ToggleSwitch] = {}
         for key, title, hint, default in CHECKBOXES:
             if key in ("audio", "my_decks"):
                 continue
-            checked = not cfg.original_text if key == "hd_era_art" else getattr(cfg, key, default)
-            switch = ToggleSwitch(title, hint, checked)
+            switch = ToggleSwitch(title, hint, default)
             if self.toggles:
                 panel.body.addWidget(line())
             panel.body.addWidget(switch)
@@ -145,9 +190,32 @@ class SettingsView(QWidget):
         body.addWidget(panel)
         actions = QHBoxLayout()
         self.coverage = Button("Show coverage", "secondary", "coverage")
-        self.done = Button("Done", "primary", "check")
+        self.coverage.setVisible(not global_defaults)
+        self.done = Button("Save defaults", "primary", "check")
         actions.addWidget(self.coverage)
         actions.addStretch()
         actions.addWidget(self.done)
         body.addLayout(actions)
         body.addStretch()
+
+        self.load(cfg)
+
+    def load(self, cfg: Config) -> None:
+        values = {
+            "hd_era_art": not cfg.original_text,
+            "theme": cfg.studio_theme,
+            "repair": cfg.studio_repair,
+        }
+        for key, toggle in self.toggles.items():
+            toggle.setChecked(values[key] if key in values else getattr(cfg, key))
+        if self.scope:
+            self.scope.select(("auto", "library", "decks").index(cfg.studio_scope))
+
+    def preferences(self) -> dict[str, bool | str]:
+        values = {key: toggle.isChecked() for key, toggle in self.toggles.items()}
+        values["original_text"] = not values.pop("hd_era_art")
+        values["studio_theme"] = values.pop("theme")
+        values["studio_repair"] = values.pop("repair")
+        if self.scope:
+            values["studio_scope"] = ("auto", "library", "decks")[self.scope.group.checkedId()]
+        return values
