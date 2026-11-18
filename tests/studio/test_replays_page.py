@@ -77,7 +77,7 @@ def test_search_sort_edit_undo_export_and_reveal(
         seen.append(path)
         return True
 
-    monkeypatch.setattr(page_module, "reveal_file", reveal)
+    monkeypatch.setattr("desktop_helpers.reveal_file", reveal)
     page.form.reveal.click()
     qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
     assert seen == [entry.path]
@@ -170,7 +170,15 @@ def test_empty_new_duel_unreadable_and_folder_change(
         page.list.viewport(), Qt.MouseButton.LeftButton, pos=page.list.visualRect(index).center()
     )
     assert page.state == "detail" and page.selected.error
-    assert any("incomplete" in line.text() for line in page.findChildren(QLabel))
+    assert any(
+        "Check that the file is complete" in line.text() for line in page.findChildren(QLabel)
+    )
+    button(window, "Technical details").click()
+    qtbot.waitUntil(
+        lambda: any(
+            "incomplete" in line.text() and line.isVisible() for line in page.findChildren(QLabel)
+        )
+    )
     ctx.set_installation(Installation(str(tmp_path / "unmounted"), False))
     qtbot.waitUntil(lambda: page.state == "error")
     (tmp_path / "unmounted").mkdir()

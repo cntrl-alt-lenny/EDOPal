@@ -2,6 +2,8 @@
 
 import math
 import shutil
+from collections.abc import Callable, Iterator
+from concurrent.futures import CancelledError
 from pathlib import Path
 
 from artwork_coverage import scan_artwork_coverage
@@ -27,10 +29,13 @@ def _artwork(
     paths: set[Path],
     database_rows: dict[Path, dict[int, Card]],
     findings: list[Finding],
+    cancelled: Callable[[], bool] | None,
 ) -> None:
     id_to_name = {}
     fields = set()
     for path in sorted(paths):
+        if cancelled is not None and cancelled():
+            raise CancelledError
         for code, card in database_rows.get(path, {}).items():
             id_to_name[code] = card.name
             if card.type & FIELD_SPELL_TYPE == FIELD_SPELL_TYPE:
@@ -38,7 +43,8 @@ def _artwork(
     try:
         pics = local_path(root, root / "pics")
         local_path(root, pics / "field")
-        stats = scan_artwork_coverage(str(pics), id_to_name, fields)
+        options = {"cancelled": cancelled} if cancelled is not None else {}
+        stats = scan_artwork_coverage(str(pics), id_to_name, fields, **options)
         findings.append(finding("artwork.coverage", path=pics, **stats))
     except (OSError, ValueError):
         findings.extend((finding("artwork.unavailable"), finding("storage.unknown")))
@@ -67,6 +73,27 @@ def _artwork(
             estimated_mib=math.ceil(missing / _MIB),
         )
     )
+
+
+def _engine_journals(root: Path, config: Path) -> Iterator[tuple[Path, str]]:
+    import backup
+    from themes.transaction import STATE, safe_file
+
+    try:
+        pending = safe_file(root, f"{STATE}/pending.json")
+        if pending.is_file():
+            yield pending, "skins"
+    except (OSError, ValueError, RuntimeError):
+        pass
+    try:
+        from backup.journal import _home
+
+        install = backup.Installation.at(root, config)
+        for transaction in backup.transactions(install):
+            if transaction.status in {"pending", "rolling_back"}:
+                yield _home(install) / transaction.id / "journal.json", "backup"
+    except (OSError, ValueError, RuntimeError):
+        pass
 
 
 def _state(root: Path, config: Path, findings: list[Finding]) -> None:
@@ -103,6 +130,9 @@ def _state(root: Path, config: Path, findings: list[Finding]) -> None:
         if present:
             interrupted = True
             findings.append(finding("state.interrupted", path=path, category=category))
+    for path, category in _engine_journals(root, config):
+        interrupted = True
+        findings.append(finding("state.interrupted", path=path, category=category))
     if not interrupted:
         findings.append(finding("state.clean"))
 
@@ -111,8 +141,15 @@ def inspect_installation(
     installation: str | Path,
     *,
     config_path: str | Path | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> DoctorReport:
     """Return a local report. Paths in evidence are intended for the player's own device."""
+
+    def checkpoint() -> None:
+        if cancelled is not None and cancelled():
+            raise CancelledError
+
+    checkpoint()
     root = Path(installation).resolve()
     studio_version = app_version()
     default = Path(user_data_dir()) / CONFIG_FILENAME
@@ -157,12 +194,21 @@ def inspect_installation(
         status = "unknown"
     findings.append(finding("process." + status))
 
+    checkpoint()
     repositories = scan_repositories(root, findings)
+    checkpoint()
     cards, mappings, rows = scan_databases(root, repositories, artwork_paths, findings)
+    checkpoint()
     banlists = scan_banlists(root, repositories, findings)
-    _artwork(root, artwork_paths, rows, findings)
+    checkpoint()
+    _artwork(root, artwork_paths, rows, findings, cancelled)
+    checkpoint()
     scan_decks(root, cards, mappings, findings)
+    checkpoint()
     scan_settings(root, findings)
+    checkpoint()
     scan_windbot(root, cards, mappings, banlists, findings)
+    checkpoint()
     _state(root, config, findings)
+    checkpoint()
     return DoctorReport(root, studio_version, version, tuple(findings))

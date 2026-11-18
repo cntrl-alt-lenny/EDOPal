@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QBoxLayout, QLineEdit, QWidget
 
 from replays import ReplayEntry, ReplayNotes
 from studio import theme as t
-from studio.pages.health_layout import editor, row
+from studio.pages.health_layout import editor, row, technical_details
 from studio.pages.replays_library import format_tags, notes_from_fields, players, watch_instructions
 from studio.widgets import Button, ElidedLabel, Panel, label, margins
 
@@ -22,7 +22,10 @@ class ReplayForm(QWidget):
         info.body.addWidget(label(players(entry), "heading", True))
         if entry.error:
             info.body.addWidget(label("Replay could not be read", "subheading"))
-            info.body.addWidget(label(entry.error, "body", True))
+            info.body.addWidget(
+                label("Check that the file is complete, then refresh Replays.", "body", True)
+            )
+            technical_details(info.body, entry.error)
         info.body.addWidget(label("Watch in EDOPro", "subheading"))
         info.body.addWidget(label(watch_instructions(entry), "body", True))
         filename = ElidedLabel()
@@ -34,18 +37,17 @@ class ReplayForm(QWidget):
         info.body.addWidget(label("Share a copy", "subheading"))
         info.body.addWidget(
             label(
-                "The export includes the recording, player names and your saved notes. To undo an export, remove the exported file.",
+                "This ZIP contains the replay, including player names, plus your saved label, tags and notes. Review them before sharing.",
                 "body",
                 True,
             )
         )
-        self.export = Button("Export with notes", "secondary", "download")
+        self.export = Button("Export replay and notes", "secondary", "download")
         info.body.addWidget(self.export, 0, Qt.AlignmentFlag.AlignLeft)
         info.body.addStretch()
         notes = Panel(t.LG)
         self.columns.addWidget(notes, 1)
-        notes.body.addWidget(label("YOUR NOTEBOOK", "goldKicker"))
-        notes.body.addWidget(label("Label and notes", "heading"))
+        notes.body.addWidget(label("Replay details", "heading"))
         self.name = QLineEdit(entry.annotation.label)
         self.tags = QLineEdit(format_tags(entry.annotation.tags))
         for text, control, hint in (
@@ -63,11 +65,11 @@ class ReplayForm(QWidget):
         self.notes.setMinimumHeight(t.TILE_H)
         notes.body.addWidget(self.notes, 1)
         buttons = row()
-        self.undo = Button("Undo notes", "quiet", "back")
+        self.undo = Button("Undo last replay edit", "quiet", "back")
         self.undo.setToolTip("Restore the previous label, tags and notes.")
         buttons.addWidget(self.undo)
         buttons.addStretch()
-        self.save = Button("Save notes", "primary", "check")
+        self.save = Button("Save replay details", "primary", "check")
         buttons.addWidget(self.save)
         notes.body.addLayout(buttons)
         for field in (self.name, self.tags, self.notes):

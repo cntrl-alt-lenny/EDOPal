@@ -4,6 +4,7 @@ import os
 import struct
 import zlib
 from collections.abc import Callable, Mapping
+from concurrent.futures import CancelledError
 from pathlib import Path
 
 # File servers can return a successful status for an error page. Check the framing too.
@@ -106,6 +107,8 @@ def _scan_art_folder(
     extensions: tuple[str, ...],
     is_valid: Callable[[bytes], bool],
     derived: set[int] | None = None,
+    *,
+    cancelled: Callable[[], bool] | None = None,
 ) -> tuple[set[int], int]:
     ids: set[int] = set()
     size = 0
@@ -113,6 +116,8 @@ def _scan_art_folder(
         return ids, size
     with os.scandir(folder) as entries:
         for entry in entries:
+            if cancelled is not None and cancelled():
+                raise CancelledError
             if not entry.is_file():
                 continue
             stem, _, ext = entry.name.rpartition(".")
@@ -141,13 +146,18 @@ def scan_artwork_coverage(
     field_ids: set[int],
     *,
     optional_missing: set[int] | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> dict[str, int]:
     """Measure images on disk against the caller's card index."""
-    card_files, card_bytes = _scan_art_folder(pics_path, ("jpg",), looks_like_jpeg)
+    card_files, card_bytes = _scan_art_folder(
+        pics_path, ("jpg",), looks_like_jpeg, cancelled=cancelled
+    )
     derived: set[int] = set()
     field_files, field_bytes = _scan_art_folder(
-        field_art_dir(pics_path), ("jpg", "png"), looks_like_image, derived
+        field_art_dir(pics_path), ("jpg", "png"), looks_like_image, derived, cancelled=cancelled
     )
+    if cancelled is not None and cancelled():
+        raise CancelledError
     return {
         "cards_total": len(id_to_name),
         "cards_expected": len(id_to_name)

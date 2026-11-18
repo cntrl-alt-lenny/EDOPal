@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 import backup
 from studio import theme as t
 from studio.icons import icon
-from studio.pages.backup_data import CATEGORIES, Row, amount
+from studio.pages.backup_data import CATEGORIES, Row, amount, undo_blocked_text
 from studio.widgets import Button, ElidedLabel, Panel, glyph, label, margins
 
 
@@ -49,6 +49,30 @@ def actions(*buttons: Button, description: str = "") -> Panel:
         row.addWidget(button)
     panel.body.addLayout(row)
     return panel
+
+
+class UndoStatus(QWidget):
+    def __init__(self, text: str = "") -> None:
+        super().__init__()
+        body = QVBoxLayout(self)
+        margins(body, 0)
+        body.setSpacing(t.XS)
+        self.message = label(text, "body", True)
+        self.path = path_label("")
+        body.addWidget(self.message)
+        body.addWidget(self.path)
+        self.path.hide()
+
+    def set_message(self, text: str) -> None:
+        self.message.setText(text)
+        self.path.hide()
+
+    def show_preview(self, preview: backup.UndoPreview, help_text: str) -> None:
+        self.set_message(help_text if preview.available else undo_blocked_text(preview))
+        if preview.target:
+            self.path.set_value(preview.target)
+            self.path.setToolTip(text_tooltip(preview.target))
+            self.path.show()
 
 
 def text_tooltip(value: str) -> str:
@@ -172,9 +196,11 @@ class RowDelegate(QStyledItemDelegate):
     def __init__(self, parent: QListView, show_action: bool) -> None:
         super().__init__(parent)
         self.show_action = show_action
+        self.compact = False
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
-        return QSize(0, t.TILE_H - t.SM if self.show_action else t.BUTTON_H + t.MD)
+        height = t.TILE_H - t.SM if self.show_action else t.BUTTON_H + t.MD
+        return QSize(0, t.HUGE + t.SM if self.compact and self.show_action else height)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         row = index.data(Qt.ItemDataRole.UserRole)
@@ -185,11 +211,12 @@ class RowDelegate(QStyledItemDelegate):
             painter.fillRect(rect, QColor(t.ACTIVE))
         painter.setPen(QColor(t.EDGE))
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-        top = rect.y() + t.SM
+        top = rect.y() + (t.XS if self.compact else t.SM)
+        first, rest = (t.LG + t.XS, t.LG) if self.compact else (t.XL - t.XS, t.LG + t.XS)
         for value, colour, size, height in (
-            (row.title, t.PALE if selected else t.INK, t.BODY, t.XL - t.XS),
-            (row.detail, t.TEXT, t.SMALL, t.LG + t.XS),
-            (row.action, t.GOLD, t.SMALL, t.LG + t.XS),
+            (row.title, t.PALE if selected else t.INK, t.BODY, first),
+            (row.detail, t.TEXT, t.SMALL, rest - (t.XS // 2 if self.compact else 0)),
+            (row.action, t.GOLD, t.SMALL, rest - (t.XS // 2 if self.compact else 0)),
         ):
             if not value:
                 continue
@@ -230,6 +257,7 @@ class GroupedList(Panel):
         self.headings = headings
         self.groups: dict[str, list[Row]] = {}
         self.tabs: dict[str, Button] = {}
+        show_action = "add" in headings
         group = QButtonGroup(self)
         toolbar = QHBoxLayout()
         toolbar.setSpacing(t.SM)
@@ -244,9 +272,10 @@ class GroupedList(Panel):
         toolbar.addStretch()
         self.details_button = Button("Item details", "quiet")
         self.details_button.setCheckable(True)
-        toolbar.addWidget(self.details_button)
+        if show_action:
+            toolbar.addWidget(self.details_button)
         self.body.addLayout(toolbar)
-        self.list = ReviewList("File review", show_action=headings.get("add") is not None)
+        self.list = ReviewList("File review", show_action=show_action)
         self.list.setMinimumHeight(t.TILE_H * 2)
         self.body.addWidget(self.list, 1)
         self.empty = label("", "body", True)
@@ -260,6 +289,8 @@ class GroupedList(Panel):
         self.details_button.toggled.connect(self.details.setVisible)
         self.list.selectionModel().currentChanged.connect(self._item_changed)
         self.body.addWidget(self.details)
+        if not show_action:
+            self.body.addWidget(self.details_button, 0, Qt.AlignmentFlag.AlignRight)
 
     def _item_changed(self, current: QModelIndex, _previous: QModelIndex) -> None:
         item = current.data(Qt.ItemDataRole.UserRole)
@@ -274,9 +305,16 @@ class GroupedList(Panel):
         return True
 
     def compact(self, small: bool) -> None:
-        height = t.TILE_H if small else t.TILE_H * 2
+        delegate = self.list.itemDelegate()
+        if delegate.compact != small:
+            delegate.compact = small
+            self.list.doItemsLayout()
+            self.list.viewport().update()
+        height = (
+            (t.HUGE + t.SM) * 3 + 2 * t.HAIR if small and delegate.show_action else t.TILE_H * 2
+        )
         self.list.setMinimumHeight(height)
-        self.empty.setMinimumHeight(height)
+        self.empty.setMinimumHeight(t.TILE_H if small else t.TILE_H * 2)
 
     def set_groups(self, groups: dict[str, list[Row]], preferred: str | None = None) -> None:
         self.groups = groups

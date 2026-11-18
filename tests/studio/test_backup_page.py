@@ -2,7 +2,7 @@ import json
 import os
 from collections.abc import Callable
 from pathlib import Path
-from threading import Event
+from threading import Event, current_thread, main_thread
 from time import sleep
 from zipfile import ZIP_STORED, ZipFile
 
@@ -16,11 +16,10 @@ from backup.core import Cancel, Progress
 from studio.context import Installation
 from studio.pages.backup import BackupPage
 from studio.pages.backup_data import comparison_rows
+from studio.pages.backup_review import CompareScreen, PreviewScreen
 from studio.pages.backup_screens import (
     ArchiveScreen,
-    CompareScreen,
     HomeScreen,
-    PreviewScreen,
     SaveScreen,
 )
 from studio.widgets import Button
@@ -78,7 +77,7 @@ def page(make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -
 
 
 def open_preview(page: BackupPage, qtbot: QtBot) -> None:
-    button(page, "Restore").click()
+    button(page, "Restore from backup").click()
     qtbot.waitUntil(lambda: isinstance(page.screen, ArchiveScreen))
     page.screen.review.click()
     qtbot.waitUntil(lambda: page.plan is not None)
@@ -138,11 +137,15 @@ def test_save_counts_retry_and_open_folder(
     assert all(entry.modified_at is not None for entry in manifest.entries)
     assert "Copy this file to your other device" in words(page)
     opened = []
-    monkeypatch.setattr(
-        "studio.pages.backup.QDesktopServices.openUrl",
-        lambda url: opened.append(Path(url.toLocalFile())) or True,
-    )
+
+    def open_link(path: Path) -> bool:
+        assert current_thread() is not main_thread()
+        opened.append(path)
+        return True
+
+    monkeypatch.setattr("desktop_helpers.open_link", open_link)
     button(page, "Open backup folder").click()
+    qtbot.waitUntil(lambda: bool(opened))
     assert opened == [tmp_path]
 
 
@@ -168,7 +171,7 @@ def test_preview_case_policy_confirmation_and_undo(
     assert "Nothing has been changed yet" in words(page)
     groups = page.screen.grouped
     conflict = groups.list.rows.rows[0]
-    assert "Here · 4 B" in conflict.detail and "Backup · 13 B" in conflict.detail
+    assert "In this EDOPro folder · 4 B" in conflict.detail and "Backup · 13 B" in conflict.detail
     assert "date unavailable" not in conflict.detail
     assert "Blue.ydk" in conflict.tooltip and "BLUE.ydk" in conflict.tooltip
     groups.details_button.click()
@@ -188,24 +191,22 @@ def test_preview_case_policy_confirmation_and_undo(
     new_copy = root / "deck/Blue (incoming).ydk"
     page.screen.restore.click()
     assert local.read_bytes() == b"mine" and not new_copy.exists()
-    assert "reviewed changes" in confirmations[0][1]
+    assert confirmations[0][0].startswith("Apply ") and confirmations[0][0].endswith(" changes?")
     assert "Nothing has been changed yet" in confirmations[0][1]
     page.screen.restore.click()
-    qtbot.waitUntil(lambda: "Restore complete" in words(page))
+    qtbot.waitUntil(lambda: "Restore complete" in words(page) and page.job is None)
     assert local.read_bytes() == b"mine"
     assert new_copy.read_bytes() == b"incoming deck" and unrelated.exists()
     button(page, "Undo this restore").click()
     qtbot.waitUntil(lambda: "Previous files restored" in words(page))
     assert local.read_bytes() == b"mine" and unrelated.exists()
     assert not new_copy.exists() and not (root / "deck/New arrival.ydk").exists()
-    button(page, "Back to backups").click()
-    qtbot.waitUntil(
-        lambda: any(
-            control.text() == "Undo selected restore" and control.isVisible()
-            for control in page.screen.findChildren(Button)
-        )
+    button(page, "Done").click()
+    qtbot.waitUntil(lambda: "This restore has already been undone." in words(page))
+    assert not any(
+        control.text() == "Undo this restore" and control.isVisible()
+        for control in page.screen.findChildren(Button)
     )
-    assert not button(page, "Undo selected restore").isEnabled()
 
 
 def test_restore_preview_without_conflicts(
@@ -225,6 +226,46 @@ def test_restore_preview_without_conflicts(
     assert isinstance(page.screen, ArchiveScreen)
 
 
+def test_undo_preflights_the_completion_and_history_on_a_worker(
+    page: BackupPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = Path(page.ctx.installation.path)
+    affected = root / "deck/New arrival.ydk"
+    choose(monkeypatch, snapshot(tmp_path))
+    monkeypatch.setattr(page.ctx, "confirm", lambda *_: True)
+    started, release = Event(), Event()
+    preview = backup.preview_undo
+
+    def blocked(install: backup.Installation, token: str, **options: object) -> backup.UndoPreview:
+        assert current_thread() is not main_thread()
+        started.set()
+        assert release.wait(8)
+        return preview(install, token, **options)
+
+    monkeypatch.setattr(backup, "preview_undo", blocked)
+    open_preview(page, qtbot)
+    page.screen.restore.click()
+    try:
+        qtbot.waitUntil(started.is_set)
+        assert page.screen.undo.isHidden()
+        affected.write_bytes(b"Player edited this restored deck")
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: "A file was edited after the restore." in words(page))
+    assert page.screen.status.path.accessibleDescription() == str(affected)
+    assert page.screen.undo.isHidden()
+    button(page, "Done").click()
+    qtbot.waitUntil(lambda: "A file was edited after the restore." in words(page))
+    assert any(
+        label.isVisible() and label.accessibleDescription() == str(affected)
+        for label in page.screen.findChildren(QLabel)
+    )
+    assert not any(
+        control.text() == "Undo this restore" and control.isVisible()
+        for control in page.screen.findChildren(Button)
+    )
+
+
 def test_leaving_while_opening_an_archive_discards_the_previous_selection(
     page: BackupPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -239,7 +280,7 @@ def test_leaving_while_opening_an_archive_discards_the_previous_selection(
         return inspect(path)
 
     monkeypatch.setattr(backup, "inspect", delayed)
-    button(page, "Restore").click()
+    button(page, "Restore from backup").click()
     try:
         qtbot.waitUntil(started.is_set)
         assert page.ctx.navigate("cards")
@@ -265,7 +306,7 @@ def test_compare_and_unknown_format(
     put(root, "deck/Identical.ydk", b"same deck")
     archive = snapshot(tmp_path)
     choose(monkeypatch, archive)
-    button(page, "Compare with a backup").click()
+    button(page, "Compare with backup").click()
     qtbot.waitUntil(lambda: isinstance(page.screen, ArchiveScreen))
     page.screen.review.click()
     qtbot.waitUntil(lambda: isinstance(page.screen, CompareScreen))
@@ -289,7 +330,7 @@ def test_compare_and_unknown_format(
     assert "newer version" in words(page)
 
 
-@pytest.mark.parametrize("choice", ["Finish restore", "Roll back"])
+@pytest.mark.parametrize("choice", ["Finish restore", "Undo interrupted restore"])
 def test_busy_cancel_after_first_write_and_recover(
     page: BackupPage,
     qtbot: QtBot,
@@ -331,7 +372,10 @@ def test_busy_cancel_after_first_write_and_recover(
     assert page.ctx.busy and not window.change.isEnabled()
     window.nav["cards"].click()
     assert window.current is page
-    qtbot.keyClick(button(page, "Cancel"), Qt.Key.Key_Escape)
+    cancel_button = button(page, "Cancel backup operation")
+    qtbot.keyClick(cancel_button, Qt.Key.Key_Escape)
+    assert page.job and not page.job.cancel_event.is_set()
+    cancel_button.click()
     qtbot.waitUntil(lambda: "Restore was interrupted" in words(page))
     assert not page.ctx.busy and window.change.isEnabled()
     button(page, "Back").click()
@@ -339,10 +383,10 @@ def test_busy_cancel_after_first_write_and_recover(
     window.nav["backup"].click()
     qtbot.waitUntil(lambda: "Restore was interrupted" in words(page))
     source.unlink()
-    if choice == "Roll back":
+    if choice == "Undo interrupted restore":
         monkeypatch.setattr("studio.pages.backup._game_running", lambda _: True)
     button(page, choice).click()
-    if choice == "Roll back":
+    if choice == "Undo interrupted restore":
         qtbot.waitUntil(lambda: "Close EDOPro to continue" in words(page))
         monkeypatch.setattr("studio.pages.backup._game_running", lambda _: False)
         button(page, "Retry").click()
@@ -411,11 +455,37 @@ def test_preview_reflows_and_lists_thousands(
     page.screen.save.click()
     qtbot.waitUntil(lambda: isinstance(page.screen, SaveScreen))
     assert page.screen.width() <= page.scroll.viewport().width()
+    guidance = next(
+        item for item in page.screen.findChildren(QLabel) if "Export library" in item.text()
+    )
+    qtbot.waitUntil(
+        lambda: (
+            guidance.mapTo(page.scroll.viewport(), guidance.rect().bottomLeft()).y()
+            < page.scroll.viewport().height()
+        )
+    )
     qtbot.keyClick(page.screen.choices["decks"], Qt.Key.Key_Escape)
     qtbot.waitUntil(lambda: page.screen.restore.isEnabled())
+    root = Path(page.ctx.installation.path)
+    put(root, "deck/Blue.ydk", b"local")
+    put(root, "deck/Identical.ydk", b"edited")
+    put(root, "deck/New arrival.ydk", b"another deck")
     choose(monkeypatch, snapshot(tmp_path))
     open_preview(page, qtbot)
     assert page.screen.width() <= page.scroll.viewport().width()
+    view = page.screen.grouped.list
+
+    def three_conflicts_visible() -> bool:
+        third = view.visualRect(view.model().index(2, 0))
+        bottom = view.viewport().mapTo(page.scroll.viewport(), third.bottomLeft()).y()
+        button = page.screen.restore
+        footer = button.mapTo(page.scroll.viewport(), button.rect().bottomLeft()).y()
+        return (
+            view.viewport().rect().contains(third)
+            and bottom < footer < page.scroll.viewport().height()
+        )
+
+    qtbot.waitUntil(three_conflicts_visible)
     large_review = comparison_rows(
         tuple(
             backup.Difference(f"game/deck/Deck {i:04}.ydk", None, "incoming", "right only")
@@ -425,6 +495,12 @@ def test_preview_reflows_and_lists_thousands(
     compare = CompareScreen("Backup.zip", large_review, page.show_home)
     page._show(compare)
     view = compare.grouped.list
+    qtbot.waitUntil(
+        lambda: (
+            compare.width() <= page.scroll.viewport().width()
+            and compare.grouped.details_button.isVisible()
+        )
+    )
     assert view.model().rowCount() == 5000
     last = view.model().index(4999, 0)
     view.scrollTo(last)
