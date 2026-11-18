@@ -84,8 +84,9 @@ def _texture(theme: Theme, name: str) -> QImage:
         p.setPen(Qt.PenStyle.NoPen)
         p.drawRoundedRect(bounds.adjusted(1, 1, -1, -1), radius, radius)
         p.setClipping(False)
-        p.setPen(QPen(QColor(c.border), 1))
-        p.drawLine(1, 25, w.width - 2, 25)
+        # Fill one device row; an antialiased integer-centred pen also bleeds
+        # half a contrasting divider into the caption's last row of pixels.
+        p.fillRect(1, 25, w.width - 2, 1, QColor(c.border))
         p.setPen(QPen(QColor(c.accent), 2))
         p.drawLine(2, 8, 2, 18)
     elif active:
