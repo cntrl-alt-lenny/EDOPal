@@ -14,8 +14,12 @@ import os
 import sys
 import time
 from collections.abc import Iterator
+from copy import deepcopy
+from pathlib import Path
+from uuid import uuid4
 
 from card_databases import iter_db_files
+from durable_write import durable_write, sync_directory, waiting_lock
 
 # Only these installed HD prints need refreshing when upgrading from hd-v2.
 CORRECTED_HD_PRINTS = {
@@ -143,42 +147,89 @@ def _ensure_bool(name: str, value, default: bool) -> bool:
     return value
 
 
-def _load_config_file(path: str) -> dict:
-    """Read config.json if it exists; return empty dict otherwise."""
-    if not os.path.exists(path):
-        return {}
+class _EraPolicies(dict):
+    """Keep the caller's starting point for the per-installation/card edit."""
+
+    def __init__(self, values: dict) -> None:
+        super().__init__(values)
+        self.baseline = deepcopy(values)
+
+
+def _apply_edits(current: dict, before: dict, after: dict) -> None:
+    for key in before.keys() - after.keys():
+        current.pop(key, None)
+    for key, value in after.items():
+        if key in before and before[key] == value:
+            continue
+        if isinstance(value, dict):
+            nested = current.get(key)
+            old = before.get(key)
+            if not isinstance(nested, dict):
+                nested = current[key] = {}
+            _apply_edits(nested, old if isinstance(old, dict) else {}, value)
+        else:
+            current[key] = value
+
+
+def _read_preferences(path: Path) -> dict:
+    with path.open(encoding="utf-8") as stream:
+        data = json.load(stream)
+    if not isinstance(data, dict):
+        raise ValueError("expected a JSON object")
+    return data
+
+
+def _read_for_update(path: Path) -> dict:
+    """Called under the preference lock. I/O errors must stop the save."""
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            print(f"Warning: {path} must contain a JSON object at the top level; using defaults.")
-            return {}
+        return _read_preferences(path)
+    except FileNotFoundError:
+        return {}
+    except (ValueError, RecursionError) as exc:
+        aside = path.with_name(f"{path.name}.corrupt-{uuid4().hex}")
+        path.rename(aside)
+        sync_directory(path.parent)
+        # An empty current-release file also prevents a later launch from
+        # migrating obsolete preferences beside the executable a second time.
+        _write_config_file(str(path), {})
+        print(f"Warning: Invalid preferences ({exc}). Preserved at {aside}; using defaults.")
+        return {}
+
+
+def _preference_lock(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+def _load_config_file(path: str) -> dict:
+    target = Path(path)
+    try:
+        try:
+            data = _read_preferences(target)
+        except (ValueError, RecursionError):
+            # A writer might have repaired the file since our unlocked read.
+            with waiting_lock(_preference_lock(target)):
+                data = _read_for_update(target)
+        if isinstance(data.get("era_art_applied"), dict):
+            data["era_art_applied"] = _EraPolicies(data["era_art_applied"])
         return data
-    except (json.JSONDecodeError, OSError) as exc:
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
         print(f"Warning: Could not read {path}: {exc}; using defaults.")
         return {}
 
 
 def _write_config_file(path: str, config_data: dict) -> None:
-    """Write config data atomically with a stable, user-editable layout."""
-    parent_dir = os.path.dirname(os.path.abspath(path))
-    if parent_dir:
-        os.makedirs(parent_dir, exist_ok=True)
-    tmp_path = f"{path}.part"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=2)
-            f.write("\n")
-        os.replace(tmp_path, path)
-    except OSError:
-        with contextlib.suppress(OSError):
-            os.remove(tmp_path)
-        raise
+    """Caller holds the lock. Keep the existing user-editable JSON layout."""
+    durable_write(Path(path), (json.dumps(config_data, indent=2) + "\n").encode("utf-8"))
 
 
 def generate_default_config(path: str) -> None:
     """Write a fresh config.json with all defaults so users can edit it."""
-    _write_config_file(path, DEFAULTS)
+    target = Path(path)
+    with waiting_lock(_preference_lock(target)):
+        _read_for_update(target)
+        _write_config_file(path, DEFAULTS)
     print(f"Generated default config at {path}")
 
 
@@ -189,10 +240,22 @@ def save_setting(path: str, key: str, value) -> bool:
 
 def save_settings(path: str, values: dict) -> bool:
     """Save one set of related choices together."""
-    config_data = _load_config_file(path)
-    config_data.update(values)
+    target = Path(path)
     try:
-        _write_config_file(path, config_data)
+        with waiting_lock(_preference_lock(target)):
+            config_data = _read_for_update(target)
+            updates = dict(values)
+            policies = updates.get("era_art_applied")
+            if isinstance(policies, dict):
+                current = config_data.get("era_art_applied")
+                merged = current if isinstance(current, dict) else {}
+                baseline = policies.baseline if isinstance(policies, _EraPolicies) else {}
+                _apply_edits(merged, baseline, policies)
+                updates["era_art_applied"] = merged
+            config_data.update(updates)
+            _write_config_file(path, config_data)
+            if isinstance(policies, _EraPolicies):
+                policies.baseline = deepcopy(dict(policies))
     except OSError as exc:
         print(f"Warning: Could not write {path}: {exc}")
         return False
@@ -583,8 +646,13 @@ class Config:
             generate_default_config(self.config_path)
             raise SystemExit(0)
 
+        migrate = (
+            getattr(sys, "frozen", False)
+            and not self.cli.config
+            and not os.path.exists(self.config_path)
+        )
         file_cfg = _load_config_file(self.config_path)
-        if getattr(sys, "frozen", False) and not file_cfg and not self.cli.config:
+        if migrate and not file_cfg:
             # Versions before the per-user state change stored config beside the
             # executable. Read it once and migrate it when the new location is
             # writable; the app still works if the old bundle is read-only.
@@ -594,7 +662,12 @@ class Config:
                 if legacy_cfg:
                     file_cfg = legacy_cfg
                     with contextlib.suppress(OSError):
-                        _write_config_file(self.config_path, legacy_cfg)
+                        target = Path(self.config_path)
+                        with waiting_lock(_preference_lock(target)):
+                            if target.exists():
+                                file_cfg = _read_for_update(target)
+                            else:
+                                _write_config_file(self.config_path, legacy_cfg)
 
         self.edopro_path: str = ""
         self.pics_path: str = ""
@@ -704,7 +777,11 @@ class Config:
             DEFAULTS["original_text"],
         )
         applied = file_cfg.get("era_art_applied", {})
-        self.era_art_applied: dict = applied if isinstance(applied, dict) else {}
+        self.era_art_applied: dict = (
+            applied
+            if isinstance(applied, _EraPolicies)
+            else _EraPolicies(applied if isinstance(applied, dict) else {})
+        )
         self.refresh_era_ids: set[int] = set()
         self.stats: bool = self.cli.stats
         self.no_pause: bool = self.cli.no_pause

@@ -102,6 +102,21 @@ def test_save_failure_keeps_choices_for_retry(
     assert "Could not save" in window.notice.message.text()
 
 
+def test_stale_defaults_form_preserves_console_edit(make_window: Callable, qtbot: QtBot) -> None:
+    window = make_window()
+    window.navigate("settings")
+    page = window.current
+    page.tiles["defaults"].click()
+    cfg = window.ctx.cfg
+    assert config.save_setting(cfg.config_path, "field_art", not cfg.field_art)
+    page.defaults.toggles["force"].click()
+    page.defaults.done.click()
+    qtbot.waitUntil(lambda: page.section == "home")
+    saved = config._load_config_file(cfg.config_path)
+    assert saved["force"] == cfg.force
+    assert saved["field_art"] != cfg.field_art
+
+
 def test_game_folders_switch_forget_and_readd(
     make_window: Callable, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

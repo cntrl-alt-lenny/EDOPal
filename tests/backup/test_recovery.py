@@ -95,6 +95,31 @@ def test_destination_reparse_point(pair: tuple, snapshot: Path, tmp_path: Path) 
             redirect.unlink()
 
 
+def test_pending_journal_flush_failure_prevents_first_live_write(
+    pair: tuple, snapshot: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src, dest = pair
+    for install, data in ((src, b"replacement"), (dest, b"original")):
+        deck = install.target("game/deck/final.ydk")
+        deck.parent.mkdir()
+        deck.write_bytes(data)
+    backup.create(src, snapshot)
+    plan = backup.plan_restore(snapshot, dest, "take_theirs")
+
+    def fail_flush(fd: int) -> None:
+        raise OSError("journal flush failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", fail_flush)
+        with pytest.raises(OSError, match="journal flush failed"):
+            backup.execute(plan)
+    assert deck.read_bytes() == b"original" and not backup.transactions(dest)
+    tx = backup.execute(plan)
+    assert deck.read_bytes() == b"replacement"
+    backup.recover(dest, tx.id, "rollback")
+    assert deck.read_bytes() == b"original"
+
+
 def test_disk_budget_and_journal_integrity(
     pair: tuple, snapshot: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
