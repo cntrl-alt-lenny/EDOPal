@@ -3,6 +3,7 @@ import lzma
 import struct
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 from zipfile import ZipFile
 
 import pytest
@@ -169,6 +170,19 @@ def test_annotations_survive_rename_and_index_search_sort(tmp_path: Path) -> Non
     assert search_replays(entries, sort="turns", descending=False)[-1].error
     store.set(entry.replay_id, ReplayNotes())
     assert store.get(entry.replay_id) == ReplayNotes()
+
+
+def test_index_reads_small_replays_without_reserving_the_format_limit(tmp_path: Path) -> None:
+    data = streamed()
+    path = put(tmp_path, "small.yrpX", data)
+    with (
+        path.open("rb") as stream,
+        patch.object(stream, "read", wraps=stream.read) as read,
+        patch.object(Path, "open", return_value=stream),
+    ):
+        (entry,) = index_replays(tmp_path)
+    assert entry.details is not None
+    read.assert_called_once_with(len(data) + 1)
 
 
 def test_bad_payload_retains_verified_header_in_index(tmp_path: Path) -> None:

@@ -16,7 +16,15 @@ from studio import theme as t
 from studio.icons import icon
 from studio.pages.health_layout import row
 from studio.pages.replays_library import SORTS, details_line, played, players, title
-from studio.widgets import Button, Panel, SearchField, SectionHeader, glyph, label
+from studio.widgets import (
+    ActivateOnEnter,
+    Button,
+    Panel,
+    SearchField,
+    SectionHeader,
+    glyph,
+    label,
+)
 
 
 class ReplayModel(QAbstractListModel):
@@ -141,6 +149,7 @@ class ReplayRow(QStyledItemDelegate):
 class ReplayList(QListView):
     def __init__(self) -> None:
         super().__init__()
+        ActivateOnEnter(self)
         self.setAccessibleName("Replay library")
         self.setUniformItemSizes(True)
         self.setMouseTracking(True)

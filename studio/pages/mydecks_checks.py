@@ -36,7 +36,7 @@ from studio.pages.mydecks_logic import (
 )
 from studio.pages.mydecks_widgets import Contents, Screen, choice
 from studio.tasks import Job, TaskRunner, WorkerContext
-from studio.widgets import Hero, SectionHeader, glyph, label
+from studio.widgets import ActivateOnEnter, Hero, SectionHeader, glyph, label
 
 STATUS = {
     "legal": ("check", t.GREEN),
@@ -183,6 +183,7 @@ class FormatCheck(Screen):
         self.totals.hide()
         panel.body.addWidget(self.totals)
         self.results = QListWidget()
+        ActivateOnEnter(self.results)
         self.results.setAccessibleName("Deck verdicts. Open a deck to read its findings.")
         self.results.setObjectName("installList")
         self.results.setMinimumHeight(t.TILE_H)

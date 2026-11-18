@@ -92,8 +92,9 @@ class Job(QObject):
     _packet = Signal(str, object)
     _settled = Signal()
 
-    def __init__(self, owner: QObject | None = None) -> None:
+    def __init__(self, work: Work, owner: QObject | None = None) -> None:
         super().__init__()
+        self.work = work
         self.cancel_event = threading.Event()
         self.active = True
         self._deliver_to_ui = True
@@ -124,6 +125,8 @@ class Job(QObject):
                 self.progress.emit(value)
             return
         self.active = False
+        # A closure can own widgets. Drop it on this thread after the call has returned.
+        del self.work
         if self._deliver_to_ui:
             (self.error if kind == "error" else self.result).emit(value)
         if self._deliver_to_ui and self.cancel_event.is_set():
@@ -134,15 +137,15 @@ class Job(QObject):
 
 
 class _Worker(QRunnable):
-    def __init__(self, job: Job, work: Work) -> None:
+    def __init__(self, job: Job) -> None:
         super().__init__()
-        self.job, self.work = job, work
+        self.job = job
 
     def run(self) -> None:
         send = self.job._packet.emit
         ctx = WorkerContext(self.job.cancel_event, lambda event: send("progress", event))
         try:
-            result = self.work(ctx)
+            result = self.job.work(ctx)
         except (Exception, SystemExit, asyncio.CancelledError) as exc:
             send("error", exc)
         else:
@@ -158,11 +161,11 @@ class TaskRunner(QObject):
         self.jobs: set[Job] = set()
 
     def start(self, work: Work, *, owner: QObject | None = None) -> Job:
-        job = Job(owner)
+        job = Job(work, owner)
         job.setParent(self)
         self.jobs.add(job)
         job._settled.connect(self._release)
-        self.pool.start(_Worker(job, work))
+        self.pool.start(_Worker(job))
         return job
 
     @Slot()

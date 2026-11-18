@@ -21,7 +21,7 @@ from sleeves import (
 )
 from studio import theme as t
 from studio.tasks import TaskRunner
-from studio.widgets import Button, ElidedLabel, SearchField, label
+from studio.widgets import ActivateOnEnter, Button, ElidedLabel, SearchField, label
 
 from .sleeves_collection import crop_box
 from .sleeves_design import palette_menu
@@ -53,6 +53,7 @@ class ImageEditor(Editor):
             self.search = SearchField("Search card names or numbers")
             self.form.addWidget(self.search)
             self.results = QListWidget()
+            ActivateOnEnter(self.results)
             self.results.setAccessibleName("Choose a card to load its artwork")
             self.results.setObjectName("installList")
             self.results.setMinimumHeight(t.BUTTON_H)

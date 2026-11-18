@@ -85,7 +85,7 @@ def _snapshot(path: Path) -> tuple[tuple[int, ...], bytes]:
     with path.open("rb") as stream:
         if _signature(os.fstat(stream.fileno())) != signature:
             raise OSError("The replay changed while it was being opened.")
-        data = stream.read(MAX_FILE_BYTES + 1)
+        data = stream.read(initial.st_size + 1)
         if len(data) != initial.st_size or _signature(os.fstat(stream.fileno())) != signature:
             raise OSError("The replay changed while it was being read.")
     if _signature(path.lstat()) != signature:

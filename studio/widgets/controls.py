@@ -1,8 +1,9 @@
 from collections.abc import Sequence
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPaintEvent, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QColorDialog,
     QFrame,
@@ -17,6 +18,27 @@ from PySide6.QtWidgets import (
 
 from studio import theme as t
 from studio.icons import icon
+
+
+class ActivateOnEnter(QObject):
+    """Read-only lists use Return to open a row, including on macOS where Qt edits it."""
+
+    def __init__(self, view: QAbstractItemView) -> None:
+        super().__init__(view)
+        view.installEventFilter(self)
+
+    def eventFilter(self, view: QAbstractItemView, event: QEvent) -> bool:
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+            and event.modifiers()
+            in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier)
+            and view.currentIndex().isValid()
+        ):
+            event.accept()
+            view.activated.emit(view.currentIndex())
+            return True
+        return False
 
 
 def label(text: str, role: str = "body", wrap: bool = False) -> QLabel:

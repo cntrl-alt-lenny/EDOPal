@@ -1,10 +1,28 @@
 import threading
+from weakref import finalize
 
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from studio.tasks import TaskRunner, WorkerContext
+
+
+def test_work_closure_is_released_on_gui_thread(qtbot: QtBot) -> None:
+    runner = TaskRunner()
+    release = threading.Event()
+    disposed_on = []
+
+    def work(_: WorkerContext) -> None:
+        assert release.wait(5)
+
+    finalize(work, lambda: disposed_on.append(threading.get_ident()))
+    runner.start(work)
+    del work
+    release.set()
+    assert runner.pool.waitForDone(5000)
+    qtbot.waitUntil(lambda: not runner.jobs)
+    assert disposed_on == [threading.get_ident()]
 
 
 def test_work_and_all_signals_use_the_right_threads(qapp: QApplication, qtbot: QtBot) -> None:

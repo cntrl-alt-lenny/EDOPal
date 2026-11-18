@@ -307,8 +307,9 @@ def test_large_library_returns_to_the_same_replay_and_updates_in_place(
     seed_replays(game, tmp_path, extra=320)
     window.nav["replays"].click()
     page = window.current
-    qtbot.waitUntil(lambda: page.state == "library")
-    assert page.preserve.isVisible()
+    qtbot.waitUntil(
+        lambda: page.state == "library" and page.preserve is not None and page.preserve.isVisible()
+    )
     assert page.list.records.rowCount() == 327
     last = page.list.records.index(325)
     page.list.setCurrentIndex(last)

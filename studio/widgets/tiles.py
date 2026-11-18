@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QListView, QStyle, QStyledItemDelegate, QStyleOpti
 from studio import theme as t
 from studio.icons import icon
 from studio.tasks import Job, TaskRunner, WorkerContext
+from studio.widgets.controls import ActivateOnEnter
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,7 @@ class ImageTileGrid(QListView):
         self, runner: TaskRunner, loader: Callable[[Path, WorkerContext], QImage] = _read_thumbnail
     ) -> None:
         super().__init__()
+        ActivateOnEnter(self)
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setMovement(QListView.Movement.Static)

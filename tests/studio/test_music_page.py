@@ -399,6 +399,7 @@ def test_scaled_library_loads_on_worker_and_switches_without_rescanning(
     make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
+    window.resize(1280, 800)
     page = window.pages["music"]
     seed_music(page.game, page.root)
     read = music_page.read_library
@@ -420,7 +421,14 @@ def test_scaled_library_loads_on_worker_and_switches_without_rescanning(
     finally:
         release.set()
     wait(qtbot, page, "home")
-    assert page.toggle_music.mapTo(page, page.toggle_music.rect().topLeft()).y() < page.hero.y()
+    qtbot.waitUntil(
+        lambda: (
+            page.hero.isVisible()
+            and page.toggle_music.isVisible()
+            and page.toggle_music.mapToGlobal(page.toggle_music.rect().topLeft()).y()
+            < page.hero.mapToGlobal(page.hero.rect().topLeft()).y()
+        )
+    )
     assert len(list(page.root.rglob("*.wav"))) == 84
     assert len({p.parent.parent for p in page.root.rglob("*.wav")}) == 19
     assert len(page.data.albums["forbidden"].tracks) == 12
