@@ -76,7 +76,11 @@ class CuratedTexturesTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.cfg = types.SimpleNamespace(
-            edopro_path=self.tmp.name, timeout=30, max_retries=1, force=False
+            edopro_path=self.tmp.name,
+            config_path=os.path.join(self.tmp.name, "config.json"),
+            timeout=30,
+            max_retries=1,
+            force=False,
         )
         patcher = mock.patch.object(main.asyncio, "sleep", new=mock.AsyncMock())
         patcher.start()

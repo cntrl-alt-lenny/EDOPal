@@ -55,7 +55,8 @@ class TryDownloadTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
-        self.filepath = os.path.join(self.temp_dir.name, "card.jpg")
+        os.mkdir(os.path.join(self.temp_dir.name, "card-art"))
+        self.filepath = os.path.join(self.temp_dir.name, "card-art", "123.jpg")
         self.timeout = aiohttp.ClientTimeout(total=1)
         # No real sleeps so tests stay fast; keep a handle to assert on delays.
         self.sleep_mock = mock.AsyncMock(return_value=None)
@@ -150,7 +151,7 @@ class TryDownloadTests(unittest.TestCase):
 
         with open(self.filepath, "rb") as dest:
             self.assertEqual(dest.read(), original)
-        self.assertEqual(os.listdir(self.temp_dir.name), ["card.jpg"])
+        self.assertEqual(os.listdir(os.path.dirname(self.filepath)), ["123.jpg"])
 
     def test_honors_retry_after_on_429(self):
         session = _FakeSession(
@@ -221,12 +222,11 @@ class TryDownloadTests(unittest.TestCase):
         session = _FakeSession([(200, _jpeg_body())])
 
         # Point tmp_path at a directory that doesn't exist so open() raises OSError.
-        broken_path = os.path.join(self.temp_dir.name, "missing-subdir", "card.jpg")
-        result = asyncio.run(
-            main._try_download(session, "http://example/x.jpg", broken_path, self.timeout, 3)
-        )
-
-        self.assertIs(result, main.FetchResult.ERROR)
+        broken_path = os.path.join(self.temp_dir.name, "missing-subdir", "card-art", "123.jpg")
+        with self.assertRaises(main.ArtworkStorageError):
+            asyncio.run(
+                main._try_download(session, "http://example/x.jpg", broken_path, self.timeout, 3)
+            )
         self.assertFalse(os.path.exists(broken_path + ".part"))
 
 

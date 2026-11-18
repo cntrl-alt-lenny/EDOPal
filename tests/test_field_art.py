@@ -106,6 +106,8 @@ class DownloadFieldArtTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.cfg = types.SimpleNamespace(
             pics_path=os.path.join(self.tmp.name, "pics"),
+            edopro_path=self.tmp.name,
+            config_path=os.path.join(self.tmp.name, "config.json"),
             sources={"field": "http://field-source"},
             timeout=1,
             max_retries=1,
