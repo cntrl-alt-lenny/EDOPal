@@ -3,9 +3,11 @@ import hashlib
 import json
 import os
 import sqlite3
+import stat
 import subprocess
 import sys
-from contextlib import closing, nullcontext
+from collections.abc import Iterator
+from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 from typing import IO, Any
 from unittest.mock import AsyncMock
@@ -13,10 +15,18 @@ from unittest.mock import AsyncMock
 import pytest
 
 import main
+import state_lock
 from artwork_flow import STORAGE_MESSAGE, sync_summary
 from config import Config
 from state_lock import locked
-from studio.pages.cards_undo import has_restore, remember_changes, restore_artwork
+from studio.pages import cards_undo
+from studio.pages.cards_undo import (
+    _history,
+    has_restore,
+    recover_publication,
+    remember_changes,
+    restore_artwork,
+)
 from tests.test_field_art import JPEG_BODY, _FakeSession
 from tests.test_textures import PNG_BODY, _Session
 
@@ -327,3 +337,127 @@ def test_dry_run_prevents_write_only_commands(
     monkeypatch.setattr(sys, "argv", ["main.py", *cfg.argv, "--dry-run", action])
     assert main.main() == 2
     assert not Path(cfg.config_path).parent.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows refuses to replace a read-only file.")
+def test_readonly_card_allows_retry_and_undo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = installation(tmp_path, "--force", "--concurrency", "1")
+    pics = Path(cfg.pics_path)
+    pics.mkdir()
+    card = pics / "101.jpg"
+    card.write_bytes(b"personal")
+    card.chmod(stat.S_IREAD)
+    offline(monkeypatch, 2)
+    try:
+        failed = asyncio.run(main.run(cfg))
+        assert failed.storage_error and card.read_bytes() == b"personal"
+        assert not list(pics.glob("*.part"))
+    finally:
+        card.chmod(stat.S_IWRITE)
+    assert not asyncio.run(main.run(cfg)).storage_error
+    assert restore_artwork(cfg) == 1 and card.read_bytes() == b"personal"
+
+
+@pytest.mark.parametrize("player_edited", [False, True])
+def test_recover_abandoned_readonly_stage(
+    tmp_path: Path, player_edited: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = installation(tmp_path)
+    pics = Path(cfg.pics_path)
+    with remember_changes(cfg) as writer:
+        writer.publish(pics / "202.jpg", b"previous sync")
+    card = pics / "101.jpg"
+    current = b"player edit" if player_edited else b"original"
+    card.write_bytes(current)
+    stage = "a" * 32
+    part = pics / f".101.jpg.{stage}.part"
+    part.write_bytes(b"incoming")
+    part.chmod(stat.S_IREAD)
+    with closing(sqlite3.connect(_history(cfg))) as conn, conn:
+        conn.execute(
+            "INSERT INTO pending VALUES(?,?,?,?,?,?)",
+            (
+                "pics/101.jpg",
+                b"original",
+                hashlib.sha256(b"original").hexdigest(),
+                hashlib.sha256(b"incoming").hexdigest(),
+                1,
+                stage,
+            ),
+        )
+    recover_publication(cfg)
+    assert not part.exists() and card.read_bytes() == current
+    with closing(sqlite3.connect(_history(cfg))) as conn:
+        assert conn.execute("SELECT name FROM pending").fetchall() == []
+        assert conn.execute("SELECT name FROM changes").fetchall() == [("pics/202.jpg",)]
+    if player_edited:
+        assert "pics/101.jpg" in caplog.text
+    assert restore_artwork(cfg) == 1 and card.read_bytes() == current
+
+
+@pytest.mark.parametrize("bundled", [True, False], ids=["bundled", "curated"])
+def test_artwork_lock_precedes_appearance_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bundled: bool
+) -> None:
+    cfg = installation(tmp_path)
+    acquired = []
+
+    @contextmanager
+    def trace(directory: Path, filename: str) -> Iterator[None]:
+        with locked(directory, filename):
+            acquired.append(filename)
+            yield
+
+    monkeypatch.setattr(state_lock, "locked", trace)
+    monkeypatch.setattr(cards_undo, "locked", trace)
+    if bundled:
+        cfg.theme = True
+        offline(monkeypatch)
+        assert not asyncio.run(main.run(cfg)).storage_error
+    else:
+        session = _Session(
+            {"assets": [{"name": "board.png", "browser_download_url": "https://fixture/board"}]}
+        )
+        assert asyncio.run(main.download_curated_textures(session, cfg)) == (1, 0, 1)
+    expected = [".edopro-artwork.lock", ".edopro-appearance.lock"]
+    assert acquired[:2] == expected
+    acquired.clear()
+    assert restore_artwork(cfg) > 0
+    assert acquired[:2] == expected
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows refuses to replace a read-only file.")
+def test_readonly_undo_destination_leaves_no_stage(tmp_path: Path) -> None:
+    cfg = installation(tmp_path)
+    dest = Path(cfg.pics_path) / "101.jpg"
+    dest.parent.mkdir()
+    dest.write_bytes(b"original")
+    with remember_changes(cfg) as writer:
+        writer.publish(dest, b"installed")
+    dest.chmod(stat.S_IREAD)
+    try:
+        with pytest.raises(PermissionError):
+            restore_artwork(cfg)
+        assert list(dest.parent.iterdir()) == [dest]
+        assert has_restore(cfg)
+    finally:
+        dest.chmod(stat.S_IWRITE)
+    assert restore_artwork(cfg) == 1 and dest.read_bytes() == b"original"
+
+
+def test_console_partial_undo_reports_edited_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = installation(tmp_path)
+    pics = Path(cfg.pics_path)
+    with remember_changes(cfg) as writer:
+        writer.publish(pics / "101.jpg", b"installed")
+        writer.publish(pics / "202.jpg", b"installed")
+    (pics / "202.jpg").write_bytes(b"player edit")
+    monkeypatch.setattr(sys, "argv", ["main.py", *cfg.argv, "--undo-last-sync"])
+    assert main.main() == 0
+    out = capsys.readouterr().out
+    assert "Restored 1 file" in out and "pics/202.jpg" in out
+    assert not (pics / "101.jpg").exists() and (pics / "202.jpg").read_bytes() == b"player edit"

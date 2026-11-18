@@ -522,7 +522,7 @@ def parse_ydk(path: str) -> set[int]:
     """
     ids: set[int] = set()
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for raw in f:
                 token = raw.strip()
                 if not token or token[0] in "#!":
@@ -554,11 +554,9 @@ def prune_orphan_images(pics_path: str, known_ids: set[int], *, cfg: Config | No
             if not entry.endswith(".jpg"):
                 continue
             stem = entry[:-4]
-            try:
-                cid = int(stem)
-            except ValueError:
+            if not re.fullmatch(r"[0-9]+", stem):
                 continue
-            if cid in known_ids:
+            if int(stem) in known_ids:
                 continue
             target = os.path.join(pics_path, entry)
             if writer.publish(target, None):
@@ -1320,6 +1318,7 @@ async def download_curated_textures(
                 console.print(f"  [yellow]could not download {name}[/yellow]")
                 continue
             try:
+                writer.lock_installation()
                 with appearance_lock(game):
                     dest = extras._regular_path(game, textures_dir / name)
                     if dest.exists() and not force:
@@ -2021,6 +2020,7 @@ async def _run_sync(cfg: Config, stats: DownloadStats) -> DownloadStats | None:
                     cfg.notice_sink(f"Installing {label}…")
                 try:
                     with remember_changes(cfg) as writer:
+                        writer.lock_installation()
                         extras.install(cfg.edopro_path, cfg.config_path, group)
                         writer.finish()
                 except OSError as exc:
@@ -2612,12 +2612,17 @@ def main() -> int:
             if cfg.dry_run:
                 console.print(f"Would undo the last artwork sync in {cfg.edopro_path}.")
                 return 0
+            skipped: list[str] = []
             try:
-                restored = restore_artwork(cfg)
+                restored = restore_artwork(cfg, skipped=skipped)
             except (ValueError, OSError, sqlite3.DatabaseError) as exc:
                 console.print(f"Could not undo the last artwork sync: {exc}")
                 return 1
-            console.print(f"Undid the last artwork sync. Restored {restored} file(s).")
+            console.print(f"Restored {restored} file(s) from the last artwork sync.")
+            if skipped:
+                console.print("Kept edited files. Their undo copies are still available.")
+                for name in skipped:
+                    console.print(f"  {name}")
             return 0
         if cfg.cli.gui_smoke_test:
             launched_gui = True

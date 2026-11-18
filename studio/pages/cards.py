@@ -7,8 +7,16 @@ from typing import Any
 
 from PySide6.QtCore import QTimer, Slot
 
-from artwork_flow import Summary, coverage_summary, make_run_config, sync_summary, valid_decks
+from artwork_flow import (
+    ArtworkStorageError,
+    Summary,
+    coverage_summary,
+    make_run_config,
+    sync_summary,
+    valid_decks,
+)
 from config import Config
+from main import DownloadStats
 from studio.context import AppContext, GameOpenError, Installation
 from studio.pages.card_results import player_summary, retry_summary
 from studio.pages.card_stage import CardStage
@@ -268,8 +276,15 @@ class CardsPage(CardStage):
 
         async def reversible(job_cfg: Config) -> Any:
             # Injected workers (including the offline demo) share the production journal.
-            with remember_changes(job_cfg):
-                return await run(job_cfg)
+            stats = None
+            try:
+                with remember_changes(job_cfg):
+                    stats = await run(job_cfg)
+            except ArtworkStorageError as exc:
+                if stats is None:
+                    stats = DownloadStats()
+                stats.storage_error = stats.storage_error or str(exc)
+            return stats
 
         self.job = self.ctx.tasks.sync(cfg, run if stats_only else reversible, prepare)
         self.job.progress.connect(self._event)
@@ -420,23 +435,30 @@ class CardsPage(CardStage):
         self.open_view("progress")
         cfg = copy(self.ctx.cfg)
 
+        skipped: list[str] = []
+
         def restore(_: WorkerContext) -> int:
             self.ctx.require_game_closed(Path(cfg.edopro_path))
-            return restore_artwork(cfg)
+            return restore_artwork(cfg, skipped=skipped)
 
         def restored(count: int) -> None:
             self.ctx.cfg.era_art_applied = cfg.era_art_applied
             self.ctx.set_busy(False)
             self.restoring = False
-            self.results.undo.hide()
+            self.results.undo.setVisible(bool(skipped))
+            note = f"{count:,} file {'change' if count == 1 else 'changes'} undone."
+            if skipped:
+                note += "\nKept edited files. Their undo copies are still available.\n" + "\n".join(
+                    skipped
+                )
+            else:
+                note += " Your previous artwork will appear next time you start EDOPro."
             self.summary = Summary(
-                "Previous artwork restored",
-                note=f"{count:,} file {'change' if count == 1 else 'changes'} undone. "
-                "Your previous artwork will appear next time you start EDOPro.",
+                "Edited artwork kept" if skipped else "Previous artwork restored",
+                note=note,
+                warning=bool(skipped),
             )
-            self.ctx.state.setValue(
-                self._history_key(), "Last change   ·   Previous artwork restored"
-            )
+            self.ctx.state.setValue(self._history_key(), f"Last change   ·   {self.summary.title}")
             self._snapshot(self.ctx.installation)
             self.results.show_result(self.summary)
             self.open_view("results")
