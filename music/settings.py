@@ -2,16 +2,33 @@
 
 from __future__ import annotations
 
-import contextlib
-import os
 import re
 import shutil
-import subprocess
-import sys
 import tempfile
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
+from music.processes import (
+    GameProcessStatus,
+    GameProcessUnknown,
+    _linux_game_running,
+    game_process_status,
+    is_game_running,
+)
 from state_lock import appearance_lock
+
+__all__ = [
+    "GameProcessStatus",
+    "GameProcessUnknown",
+    "_linux_game_running",
+    "game_process_status",
+    "is_game_running",
+    "music_enabled",
+    "music_disabled",
+    "write_music_enabled",
+    "write_audio_enabled",
+]
+
+_game_running = is_game_running
 
 _ENABLE_MUSIC = re.compile(
     rb"(?m)^(?:\xef\xbb\xbf)?[ \t]*enable_music[ \t]*=[ \t]*([01])(?=[ \t]*(?:[#;][^\r\n]*)?\r?$)"
@@ -29,78 +46,6 @@ def music_enabled(game: Path) -> bool | None:
 
 def music_disabled(game: Path) -> bool:
     return music_enabled(game) is False
-
-
-def _linux_game_running(root: Path, processes: Path) -> bool:
-    for proc in processes.iterdir():
-        if not proc.name.isdigit():
-            continue
-        try:
-            exe = (proc / "exe").readlink()
-        except OSError:
-            # A sandbox may hide the path while still reporting the process name.
-            with contextlib.suppress(OSError):
-                if (proc / "comm").read_bytes().strip().lower() in {
-                    b"edopro",
-                    b"ygopro",
-                    b"edopro.exe",
-                    b"ygopro.exe",
-                }:
-                    return True
-            continue
-        if exe.stem.casefold() in {"edopro", "ygopro"} and exe.resolve().is_relative_to(root):
-            return True
-        if exe.name.startswith("wine"):
-            # Proton may expose the Wine loader as /proc/PID/exe. Its Windows
-            # drive letters cannot reliably be compared with a native game path.
-            with contextlib.suppress(OSError), (proc / "cmdline").open("rb") as stream:
-                for arg in stream.read(8192).split(b"\0"):
-                    if PureWindowsPath(os.fsdecode(arg)).name.lower() in {
-                        "edopro.exe",
-                        "ygopro.exe",
-                    }:
-                        return True
-    return False
-
-
-def _game_running(game: Path) -> bool:
-    """Match the executable path so an unrelated portable installation can remain open."""
-    root = game.resolve()
-    if sys.platform.startswith("linux"):
-        return _linux_game_running(root, Path("/proc"))
-    else:
-        if sys.platform == "win32":
-            command = [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); "
-                "Get-Process -Name EDOPro,ygopro -ErrorAction SilentlyContinue | "
-                "ForEach-Object {if ($_.Path) {$_.Path} else {$_.ProcessName}}; exit 0",
-            ]
-        else:
-            command = ["ps", "-axo", "comm="]
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=8,
-                check=True,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise OSError(
-                "Could not check whether EDOPro is open. Close the game and try again."
-            ) from exc
-        executables = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
-    return any(
-        exe.stem.casefold() in {"edopro", "ygopro"}
-        and (not exe.is_absolute() or exe.resolve().is_relative_to(root))
-        for exe in executables
-    )
 
 
 def write_music_enabled(game: Path, enabled: bool) -> None:

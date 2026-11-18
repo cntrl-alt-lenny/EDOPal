@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from desktop_helpers import desktop_environment
 
 if TYPE_CHECKING:
     from miniaudio import Backend
@@ -145,12 +146,14 @@ class PreviewPlayer:
         self._device = miniaudio.PlaybackDevice(
             sample_rate=self.RATE, buffersize_msec=80, backends=self._backends
         )
+        if self._device.backend == "Null" and miniaudio.Backend.NULL not in (self._backends or []):
+            raise OSError("No audio device is available for preview.")
         self._running = True
         self._started = time.monotonic()
         self._device.start(callback)
 
     def _play_system(self, path: Path):
-        env = os.environ.copy()
+        env = desktop_environment()
         if sys.platform == "win32":
             # WPF is included with Windows PowerShell and uses the installed system codecs.
             env["EDOPRO_PREVIEW_AUDIO"] = str(path)

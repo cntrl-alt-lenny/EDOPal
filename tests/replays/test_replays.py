@@ -245,3 +245,51 @@ def test_export_zip_contains_exact_replay_and_notes(tmp_path: Path) -> None:
         export_replay(entry, tmp_path / "stale.zip")
     assert not (tmp_path / "stale.zip").exists()
     assert not list(tmp_path.glob(".replay-*"))
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_linkless_preserve_and_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    import ctypes
+    import errno
+    import os
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from backup import core
+
+    def exclusive(source: bytes, target: bytes) -> int:
+        src, dst = Path(os.fsdecode(source)), Path(os.fsdecode(target))
+        assert src.parent == dst.parent and src.stat().st_size
+        if dst.exists():
+            ctypes.set_errno(errno.EEXIST)
+            return -1
+        src.rename(dst)
+        return 0
+
+    libc = SimpleNamespace(
+        renameat2=lambda a, src, b, dst, flag: exclusive(src, dst),
+        renamex_np=lambda src, dst, flag: exclusive(src, dst),
+    )
+    posix = Mock(wraps=os)
+    posix.name = "posix"
+    # ENOTSUP and EOPNOTSUPP are aliases on Linux and macOS, unlike on the Windows test host.
+    posix.link.side_effect = OSError(errno.ENOTSUP, "no hard links")
+    monkeypatch.setattr(core, "os", posix)
+    monkeypatch.setattr(core, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **kw: libc)
+    monkeypatch.setattr(engine, "sleep", lambda _: None)
+    data = streamed()
+    put(tmp_path, "_LastReplay.yrpX", data)
+    saved = preserve_last_replay(tmp_path)
+    assert saved and saved.read_bytes() == data
+    assert preserve_last_replay(tmp_path) == saved
+    entry = index_replays(tmp_path)[0]
+    archive = export_replay(entry, tmp_path / "copy.zip")
+    with ZipFile(archive) as bundle:
+        assert bundle.read("replay.yrpX") == data
+    archive.write_bytes(b"keep this")
+    with pytest.raises(FileExistsError):
+        export_replay(entry, archive)
+    assert archive.read_bytes() == b"keep this" and posix.link.call_count == 4
