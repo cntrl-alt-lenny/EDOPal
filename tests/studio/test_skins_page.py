@@ -24,6 +24,7 @@ from studio.context import Installation
 from studio.pages.skins import SkinsPage
 from studio.pages.skins_model import Look, filter_looks, preset_id, surprise
 from studio.shell import StudioWindow
+from themes import PRESETS
 from themes.transaction import Store
 from tools.studio_skins_screenshots import sample_pack
 
@@ -62,7 +63,7 @@ def test_model_filters_and_palette_only_surprise() -> None:
     looks = [Look(preset_id(p), p, "Preset") for p in themes.PRESETS]
     light = filter_looks(looks, "Light", "")
     dark = filter_looks(looks, "Dark", "")
-    assert light and dark and len(light) + len(dark) == 16
+    assert light and dark and len(light) + len(dark) == len(PRESETS)
     assert filter_looks(light, "All", "  pOrCeLaIn ")[0].name == "Porcelain Blue"
     original = replace(themes.PRESETS[0], text="#123456", depth=99)
     changed = surprise(original)
@@ -109,11 +110,11 @@ def test_invalid_catalogue_keeps_local_looks(
             and "Invalid catalog URL" in page.gallery.info.toolTip()
         )
     )
-    assert page.gallery.grid.model().rowCount() == 16
+    assert page.gallery.grid.model().rowCount() == len(PRESETS)
 
 
 def test_gallery_keyboard_empty_and_game_changes(page: SkinsPage, qtbot: QtBot) -> None:
-    assert page.gallery.grid.model().rowCount() == 16
+    assert page.gallery.grid.model().rowCount() == len(PRESETS)
     page.gallery.filters.buttons["My themes"].click()
     assert page.gallery.empty.isVisible()
     page.gallery.filters.buttons["Light"].click()
@@ -304,7 +305,7 @@ def test_import_and_collection_errors_stay_recoverable(
         )
     page.retry_button.click()
     qtbot.waitUntil(lambda: page.gallery.refresh.isEnabled())
-    assert len(page.data.looks) == 16
+    assert len(page.data.looks) == len(PRESETS)
 
 
 def test_pack_download_cancel_resume_apply_highlight_restore(
@@ -534,7 +535,7 @@ def test_missing_game_and_unreadable_sleeves_leave_the_gallery_usable(
     monkeypatch.setattr(sleeves, "status", Mock(side_effect=ValueError("Unreadable library")))
     page.reload()
     qtbot.waitUntil(lambda: "Could not read assigned sleeves" in page.gallery.info.text())
-    assert len(page.data.looks) == 16
+    assert len(page.data.looks) == len(PRESETS)
     missing = tmp_path / "Disconnected game"
     page.ctx.set_installation(Installation(str(missing), True))
     qtbot.waitUntil(lambda: page.data is not None)
