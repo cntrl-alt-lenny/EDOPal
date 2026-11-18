@@ -19,7 +19,7 @@ Work against a disposable installation and pass a config path inside your checko
 & $py main.py --gui --config build/demo/config.json --edopro-path build/demo/Games/ProjectIgnis
 ```
 
-**Show coverage** reads local artwork. **Sync HD cards** in the source app makes real image requests. For offline review, use the screenshot renderer below. The normal packaged launch opens the Qt window. A plain source launch runs the console flow and `python main.py --legacy-gui` opens the original Tk window. Run `python main.py --help` for power flags.
+**Check artwork coverage** reads local artwork. **Sync HD cards** in the source app makes real image requests. For offline review, use the screenshot renderer below. The normal packaged launch opens the Qt window. A plain source launch runs the console flow and `python main.py --legacy-gui` opens the original Tk window. Run `python main.py --help` for power flags.
 
 ## Source layout
 
@@ -47,7 +47,7 @@ ruff format --check .
 python tools/studio_screenshots.py --out build/edopal-shots --size 960x600 --size 1280x800
 ```
 
-The renderer uses synthetic installations, simulated downloads and the real Qt pages. It writes one directory per size. Use `--help` for page-specific sets. Check 960×600 for compact banners and sidebar scrolling, and follow the release recipe for the curated 1280×800 images. [Release screenshot recipe](docs/screenshots/README.md)
+The renderer uses synthetic installations, simulated downloads and the real Qt pages. It writes one directory per size. Use `--page <sidebar-id>` for a page’s scenarios, `--page shell` for HD Cards and Settings, or `--page all` (the default) for the overview. Run with `--help` to list the IDs. Check 960×600 for compact banners and sidebar scrolling, and follow the release recipe for the curated 1280×800 images. [Release screenshot recipe](docs/screenshots/README.md)
 
 ## Safe game writes
 

@@ -19,6 +19,7 @@ def test_sidebar_navigation_and_keyboard(
     make_window: Callable[..., StudioWindow], qtbot: QtBot
 ) -> None:
     window = make_window()
+    window.resize(960, 600)
     assert window.windowTitle() == "EDOPal"
     assert window.nav["backup"].text() == "Backup && transfer"
     assert (
@@ -30,7 +31,10 @@ def test_sidebar_navigation_and_keyboard(
         "EDOPal",
         "Unofficial EDOPro companion",
     ]
-    assert list(window.pages) == [
+    from studio.shell import PAGES
+
+    assert list(window.pages) == [page.id for page in PAGES]
+    existing = [
         "cards",
         "skins",
         "sleeves",
@@ -45,6 +49,7 @@ def test_sidebar_navigation_and_keyboard(
         "health",
         "settings",
     ]
+    assert [key for key in window.pages if key in existing] == existing
     for key, button in window.nav.items():
         button.click()
         assert window.current is window.pages[key]
@@ -232,7 +237,7 @@ def test_empty_installation_cta_and_browse_validation(
     window.ctx.set_installation(Installation())
     window.current.options.connect_game.click()
     assert window.content.currentWidget() is window.picker
-    qtbot.waitUntil(lambda: "No installations" in window.picker.hint.text())
+    qtbot.waitUntil(lambda: "No EDOPro folders" in window.picker.hint.text())
     monkeypatch.setattr(window.ctx, "choose_folder", lambda _: str(tmp_path))
     window.picker.browse.click()
     qtbot.waitUntil(lambda: "containing EDOPro" in window.picker.hint.text())
@@ -241,3 +246,217 @@ def test_empty_installation_cta_and_browse_validation(
     window.picker.browse.click()
     qtbot.waitUntil(lambda: window.ctx.installation.ready)
     assert window.content.currentWidget() is window.stack
+
+
+def test_lazy_pages_receive_latest_folder_and_close_only_built_pages(
+    make_window: Callable, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    assert list(window.pages.built) == ["cards"]
+    assert list(window.nav) == list(window.pages) and "settings" in window.pages
+    assert len(window.pages.built) == 1
+    new = tmp_path / "Second"
+    new.mkdir()
+    window.ctx.set_installation(Installation(str(new)))
+    settings = window.pages["settings"]
+    assert settings.tiles["games"].hint.text() == "Second"
+    window.ctx.set_installation(Installation())
+    assert settings.tiles["games"].hint.text() == "No EDOPro folder selected"
+    assert window.current.id == "cards" and len(window.pages.built) == 2
+    closed = []
+    for key, page in window.pages.built.items():
+        monkeypatch.setattr(page, "request_close", lambda key=key: closed.append(key) or True)
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+    assert window.close()
+    assert closed == ["cards", "settings"] and len(window.pages.built) == 2
+
+
+def test_escape_on_every_page_root_with_and_without_background_work(
+    make_window: Callable, qtbot: QtBot
+) -> None:
+    window = make_window()
+    for key in window.pages:
+        assert window.navigate(key)
+        qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+        qtbot.keyClick(window, Qt.Key.Key_Escape)
+        assert window.isVisible() and window.current.id == key
+        release = Event()
+        job = window.ctx.tasks.start(lambda _, release=release: release.wait(5))
+        try:
+            for writing in (False, True):
+                window.ctx.set_busy(writing)
+                qtbot.keyClick(window.nav[key], Qt.Key.Key_Escape)
+                assert window.isVisible() and not window.closing and not job.cancel_event.is_set()
+        finally:
+            window.ctx.set_busy(False)
+            release.set()
+        qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+
+
+def test_escape_during_unlocked_music_job_and_search(make_window: Callable, qtbot: QtBot) -> None:
+    window = make_window()
+    window.navigate("music")
+    page = window.current
+    qtbot.waitUntil(lambda: page.state == "home")
+    release = Event()
+    page.run("Reading tracks", lambda _: release.wait(5), lambda _: page.home())
+    try:
+        qtbot.keyClick(page.progress.cancel, Qt.Key.Key_Escape)
+        assert not window.ctx.busy and not page.job.cancel_event.is_set()
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: page.state == "home")
+    window.navigate("decks")
+    search = window.current.browser.search
+    search.setText("search term")
+    qtbot.keyClick(search, Qt.Key.Key_Escape)
+    assert not search.text() and window.isVisible()
+
+
+@pytest.mark.parametrize("width,height", [(533, 533), (531, 531), (1280, 800)])
+def test_scaled_work_area_keeps_navigation_picker_and_footer_reachable(
+    make_window: Callable, qtbot: QtBot, width: int, height: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QApplication
+
+    window = make_window()
+    window.setMinimumSize(1, 1)
+    window.resize(width, height)
+    window._update("v5.6.0")
+    for key, button in window.nav.items():
+        button.setFocus()
+        qtbot.keyClick(button, Qt.Key.Key_Return)
+        assert window.current.id == key and window.rect().contains(
+            button.mapTo(window, button.rect().center())
+        )
+        assert button.accessibleName() == button.toolTip()
+    window.navigate("cards")
+    small = width < 960
+    assert (window.nav["cards"].text() == "") == small
+    assert window.minimumSizeHint().boundedTo(window.size()) == window.minimumSizeHint()
+    for target in (window.current.options.start, window.change):
+        target.setFocus()
+        QApplication.processEvents()
+        assert window.rect().contains(target.mapTo(window, target.rect().bottomRight()))
+    monkeypatch.setattr(config, "find_edopro_folders", lambda _: [window.ctx.installation.path])
+    window.change.click()
+    qtbot.waitUntil(lambda: window.picker.use.isEnabled())
+    window.picker.use.setFocus()
+    assert window.rect().contains(window.picker.use.mapTo(window, QPoint(2, 2)))
+    qtbot.keyClick(window.picker.use, Qt.Key.Key_Escape)
+    assert window.content.currentWidget() is window.stack and window.change.hasFocus()
+
+
+@pytest.mark.parametrize("maximized", [True, False])
+def test_wayland_restores_size_and_maximization_without_placing_window(
+    make_window: Callable, monkeypatch: pytest.MonkeyPatch, maximized: bool
+) -> None:
+    from unittest.mock import Mock
+
+    from PySide6.QtWidgets import QApplication
+
+    window = make_window()
+    window.settings.setValue("window/normal", QRect(-8000, 7000, 1040, 680))
+    window.settings.setValue("window/maximized", maximized)
+    monkeypatch.setattr(QApplication, "platformName", lambda: "wayland-egl")
+    move = Mock(side_effect=AssertionError("Compositor owns placement"))
+    monkeypatch.setattr(window, "move", move)
+    resize, maximize = Mock(), Mock()
+    monkeypatch.setattr(window, "resize", resize)
+    monkeypatch.setattr(window, "showMaximized", maximize)
+    from studio.widgets.window import restore_window, save_window
+
+    restore_window(window, window.settings)
+    frame = window.windowHandle().frameMargins()
+    decor = QSize(frame.left() + frame.right(), frame.top() + frame.bottom())
+    resize.assert_called_once_with(
+        QSize(1040, 680).boundedTo(window.screen().availableSize() - decor)
+    )
+    save_window(window, window.settings)
+    assert window.settings.value("window/size") == window.size()
+    assert (
+        window.settings.value("window/normal").topLeft() == QRect(-8000, 7000, 1040, 680).topLeft()
+    )
+    assert maximize.called == maximized
+    move.assert_not_called()
+
+
+def test_confirmation_has_named_commit_and_safe_escape(make_window: Callable) -> None:
+    from PySide6.QtCore import QTimer
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    window = make_window()
+    for title, safe, commit, affirmative in (
+        ("Discard unsaved changes?", "Cancel", "Discard changes", None),
+        ("Remove downloaded files?", "Cancel", "Remove downloaded files", None),
+        ("Review restore", "Cancel", "Restore to ProjectIgnis", "Restore to ProjectIgnis"),
+    ):
+        observed = []
+
+        def dismiss(observed: list = observed) -> None:
+            box = QApplication.activeModalWidget()
+            assert isinstance(box, QMessageBox)
+            observed.append((box.defaultButton().text(), {b.text() for b in box.buttons()}))
+            QTest.keyClick(box, Qt.Key.Key_Escape)
+
+        QTimer.singleShot(0, dismiss)
+        assert not window.ctx.confirm(title, "Review this change.", affirmative)
+        assert observed == [(safe, {safe, commit})]
+
+
+def test_short_sidebar_fits_the_upcoming_sections_and_release(
+    make_window: Callable, qtbot: QtBot
+) -> None:
+    from tools.studio_shell_shots import preview_deck_sections
+
+    with preview_deck_sections():
+        window = make_window()
+    window.resize(1280, 800)
+    window._update("v5.6.0")
+    viewport = window.rail_scroll.viewport()
+    qtbot.waitUntil(lambda: window.rail_scroll.verticalScrollBar().maximum() == 0)
+    for key, button in window.nav.items():
+        target = window if key == "settings" else viewport
+        assert target.rect().contains(
+            button.rect().translated(button.mapTo(target, button.rect().topLeft()))
+        )
+    assert window.release.isVisible()
+    # There is room even for a thirteenth ordinary section in addition to Settings.
+    assert viewport.height() - window.rail.entries.minimumSize().height() >= (
+        window.nav["formats"].height() + window.rail.entries.spacing()
+    )
+    assert list(window.pages.built) == ["cards"]
+    assert window.navigate("practice") and window.navigate("formats")
+
+
+def test_worker_callable_is_disposed_on_gui_thread(make_window: Callable, qtbot: QtBot) -> None:
+    import threading
+    import weakref
+
+    runner = make_window().ctx.tasks
+    released = []
+    gate = Event()
+
+    class Work:
+        def __call__(self, _: WorkerContext) -> None:
+            assert gate.wait(3)
+
+    work = Work()
+    watcher = weakref.finalize(work, lambda: released.append(threading.get_ident()))
+    runner.start(work)
+    del work
+    gate.set()
+    qtbot.waitUntil(lambda: not runner.jobs)
+    assert not watcher.alive and released == [threading.get_ident()]
+
+
+def test_unavailable_volume_updates_folder_bar(
+    make_window: Callable, qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = make_window()
+    missing = tmp_path / "unplugged"
+    window.ctx.set_installation(Installation(str(missing), ready=True))
+    qtbot.waitUntil(lambda: window.folder_name.text() == "Folder unavailable")
+    assert window.folder_name.toolTip() == str(missing)

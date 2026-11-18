@@ -44,28 +44,34 @@ def make_window(
     def factory(run: RunCoro | None = None) -> StudioWindow:
         ctx = AppContext(game, main.VERSION, run or DemoSync(), main._apply_gui_choices)
         window = StudioWindow(ctx, startup=False)
-        windows.append(window)
+        windows.append((window, ctx))
         ctx.set_installation(Installation.inspect(game.edopro_path))
         window.show()
         window.activateWindow()
         qapp.processEvents()
+        # Give tests a settled installation before they edit the synthetic fixture.
+        # On Windows an artwork snapshot can still have one of its images open.
+        qtbot.waitUntil(lambda: not ctx.tasks.jobs)
         return window
 
-    windows: list[StudioWindow] = []
+    windows: list[tuple[StudioWindow, AppContext]] = []
     yield factory
     # One owner controls shutdown, including any final jobs scheduled by a result.
     while windows:
-        window = windows.pop()
-        runner = window.ctx.tasks
+        window, ctx = windows.pop()
+        # A failed assertion may leave an edited draft behind.
+        monkeypatch.setattr(ctx, "confirm", lambda *_: True)
+        runner = ctx.tasks
         runner.cancel_all()
         if isValid(window):
             window.close()
         qtbot.waitUntil(lambda runner=runner: not runner.jobs, timeout=15000)
         assert runner.pool.waitForDone(15000)
         if isValid(window):
-            window.close()
+            if window.isVisible():
+                window.close()
             window.deleteLater()
-        window.ctx.deleteLater()
+        ctx.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         del runner, window
     # Collect Python cycles containing layout wrappers here, while all workers are idle.

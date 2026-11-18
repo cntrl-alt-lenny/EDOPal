@@ -43,8 +43,8 @@ def add_about(ctx: AppContext, panel_for: Callable[[str], Panel]) -> None:
     panel.body.addLayout(brand)
     panel.body.addWidget(
         label(
-            "EDOPal is an independent fan-made companion for EDOPro. EDOPro is a Project Ignis project. "
-            "EDOPal is unaffiliated with Project Ignis, Konami, and Shueisha and has no endorsement from them. "
+            f"{config.APP_NAME} is an independent fan-made companion for EDOPro. EDOPro is a Project Ignis project. "
+            f"{config.APP_NAME} is unaffiliated with Project Ignis, Konami, and Shueisha and has no endorsement from them. "
             "Yu-Gi-Oh! and related marks belong to their respective rights holders.",
             "body",
             True,
@@ -56,11 +56,11 @@ def add_about(ctx: AppContext, panel_for: Callable[[str], Panel]) -> None:
             button("Report an issue", lambda: open_url(QUrl(PROJECT + "/issues"), ctx), "link"),
         )
     )
-    credits = panel_for("Licences & credits")
+    credits = panel_for("Licenses & credits")
     for name, detail in (
         (
             "Application",
-            "© 2026 Lenny · MIT licence. Based on NiiMiyo’s original HD downloader.",
+            "© 2026 Lenny · MIT license. Based on NiiMiyo’s original HD downloader.",
         ),
         ("Typeface", "Inter by The Inter Project Authors · SIL Open Font License 1.1."),
         ("Card artwork", "YGOProDeck and ProjectIgnis"),
@@ -75,13 +75,13 @@ def add_about(ctx: AppContext, panel_for: Callable[[str], Panel]) -> None:
     credits.body.addLayout(
         actions(
             button(
-                "Read MIT licence",
+                "Read MIT license",
                 lambda: open_url(QUrl(PROJECT + "/blob/HEAD/LICENSE"), ctx),
                 "link",
                 "quiet",
             ),
             button(
-                "Read font licence",
+                "Read font license",
                 lambda: open_url(
                     QUrl(PROJECT + "/blob/HEAD/assets/window/fonts/Inter-OFL.txt"), ctx
                 ),

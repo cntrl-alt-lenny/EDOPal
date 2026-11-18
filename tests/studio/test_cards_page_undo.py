@@ -52,7 +52,8 @@ def test_real_sync_and_restore_including_extras(
     cards.options.start.click()
     qtbot.waitUntil(lambda: cards.state == "results")
     assert cards.summary.title == "Sync complete", cards.summary.note
-    assert cards.results.undo.isVisible() and has_restore(cfg)
+    qtbot.waitUntil(cards.results.undo.isVisible)
+    assert has_restore(cfg)
     assert pic.read_bytes() == old and field.is_file()
     assert any((game / "textures").rglob("*.png"))
     monkeypatch.setattr("music.settings._game_running", lambda _: True)
@@ -105,3 +106,77 @@ def test_partial_run_and_installation_boundaries(game: Config, tmp_path: Path) -
         record_artwork_change(tmp_path / "external.jpg", b"wrong folder")
     assert restore_artwork(game) == 1
     assert not addition.exists()
+
+
+def test_refused_first_write_retains_previous_undo_and_offers_retry(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from studio.pages.cards_undo import ArtworkStorageError
+
+    window = make_window(main.run)
+    page = window.current
+    cfg = window.ctx.cfg
+    prior = Path(cfg.pics_path) / "54321.jpg"
+    with remember_changes(cfg):
+        record_artwork_change(prior, b"previous")
+        prior.write_bytes(b"previous")
+
+    async def refuse(*args: object, **kwargs: object) -> None:
+        raise ArtworkStorageError("read-only test installation")
+
+    original = main.download_card
+    monkeypatch.setattr(main, "download_card", refuse)
+    image = (Path(cfg.pics_path) / "1000.jpg").read_bytes()
+    monkeypatch.setattr(main, "_create_http_session", lambda **_: OfflineImages(image))
+    page.settings.toggles["force"].setChecked(True)
+    page.settings.toggles["field_art"].setChecked(False)
+    page.options.start.click()
+    qtbot.waitUntil(lambda: page.state == "results" and page.results.undo.isVisible())
+    assert page.summary.title == "Couldn't save artwork"
+    assert main.STORAGE_MESSAGE in page.summary.note
+    assert page.summary.first == ("0", "Downloaded")
+    assert page.results.retry.isVisible() and page.results.retry.text() == "Retry"
+    monkeypatch.setattr(main, "download_card", original)
+    page.results.retry.click()
+    qtbot.waitUntil(lambda: page.state == "results")
+    assert page.summary.title == "Sync complete" and page.run_config.my_decks
+
+
+def test_network_retry_requests_only_the_failed_face_and_field(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def interrupted(_: Config) -> main.DownloadStats:
+        stats = main.DownloadStats()
+        stats.ok_hd = 2
+        stats.record_failure(1001, "Card one", transient=True)
+        stats.record_field_failure(1002, "Card two", transient=True)
+        return stats
+
+    window = make_window(interrupted)
+    page = window.current
+    page.settings.toggles["force"].setChecked(True)
+    page.options.start.click()
+    qtbot.waitUntil(lambda: page.state == "results")
+    assert page.summary.first == ("2", "Downloaded")
+    assert page.summary.title == "2 downloads need another try"
+    assert page.results.retry.text() == "Retry 2 downloads"
+    calls = []
+
+    async def face(session: object, card_id: int, *args: object, **kwargs: object) -> None:
+        calls.append(("face", card_id))
+
+    async def field(session: object, card_id: int, *args: object, **kwargs: object) -> None:
+        calls.append(("field", card_id))
+
+    monkeypatch.setattr(window.ctx, "run_coro", main.run)
+    monkeypatch.setattr(main, "download_card", face)
+    monkeypatch.setattr(main, "download_field_art", field)
+    monkeypatch.setattr(main, "_create_http_session", lambda **_: OfflineImages(b""))
+    monkeypatch.setattr("music.settings._game_running", lambda _: True)
+    page.results.retry.click()
+    qtbot.waitUntil(lambda: page.state == "blocked")
+    assert not calls
+    monkeypatch.setattr("music.settings._game_running", lambda _: False)
+    page.guard.retry.click()
+    qtbot.waitUntil(lambda: page.state == "results")
+    assert sorted(calls) == [("face", 1001), ("field", 1002)]

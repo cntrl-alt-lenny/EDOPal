@@ -242,6 +242,8 @@ def test_cancel_batch_blocks_navigation_and_preserves_completed_files(
         assert page.view is page.import_view and window.ctx.busy
         assert not window.change.isEnabled() and not window.navigate("cards")
         qtbot.keyClick(page.import_view.progress.cancel, Qt.Key.Key_Escape)
+        assert page.import_view.progress.cancel.isEnabled()
+        page.import_view.progress.cancel.click()
         assert not page.import_view.progress.cancel.isEnabled()
     finally:
         archive.release.set()

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QBoxLayout, QFrame, QHBoxLayout, QScrollArea, QVBo
 from artwork_flow import CHECKBOXES
 from config import Config
 from studio import theme as t
+from studio.context import AppContext
 from studio.widgets import (
     ActionTile,
     Button,
@@ -60,7 +61,9 @@ class OptionsView(QWidget):
         self.groups.setSpacing(t.XL)
         self.body.addLayout(self.groups)
 
-        sync = QVBoxLayout()
+        self.selection = QWidget()
+        sync = QVBoxLayout(self.selection)
+        margins(sync, 0)
         sync.setSpacing(t.LG)
         sync.addWidget(SectionHeader("Artwork to sync"))
         self.scope = SegmentedControl(
@@ -70,19 +73,20 @@ class OptionsView(QWidget):
             )
         )
         sync.addWidget(self.scope)
-        self.connect_game = ActionTile(
-            "Choose your game folder", "Find your installation or browse to ProjectIgnis.", "folder"
-        )
-        sync.addWidget(self.connect_game)
-        actions = QHBoxLayout()
+        self.connect_game = Button("Choose your EDOPro folder", "primary", "folder")
+        self.check_again = Button("Check again", "primary", "search")
+        self.actions = QWidget()
+        actions = QHBoxLayout(self.actions)
+        margins(actions, 0)
         actions.setSpacing(t.MD)
         self.status = label("", "small", True)
         actions.addWidget(self.status, 1)
         self.start = Button("Sync HD cards", "primary", "download")
+        actions.addWidget(self.connect_game)
+        actions.addWidget(self.check_again)
         actions.addWidget(self.start)
-        sync.addLayout(actions)
         sync.addStretch()
-        self.groups.addLayout(sync, 3)
+        self.groups.addWidget(self.selection, 3)
 
         library = QVBoxLayout()
         library.setSpacing(t.LG)
@@ -92,7 +96,9 @@ class OptionsView(QWidget):
         self.tools = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self.tools.setSpacing(t.MD)
         self.settings = ActionTile("Sync settings", "Artwork, reports and maintenance", "settings")
-        self.coverage = ActionTile("Show coverage", "See what’s already on disk", "coverage")
+        self.coverage = ActionTile(
+            "Check artwork coverage", "See what’s already on disk", "coverage"
+        )
         self.tools.addWidget(self.settings, 1)
         self.tools.addWidget(self.coverage, 1)
         library.addLayout(self.tools)
@@ -116,7 +122,7 @@ class OptionsView(QWidget):
         self.last = label("", "small", True)
         bottom = QHBoxLayout()
         bottom.addWidget(self.last, 1)
-        self.undo = Button("Undo artwork changes", "secondary", "back")
+        self.undo = Button("Undo last artwork sync", "secondary", "back")
         self.undo.setToolTip(
             "Restore files replaced by the last sync and remove the files it added."
         )
@@ -153,7 +159,8 @@ class SettingsView(QWidget):
         super().__init__()
         self.setMaximumWidth(t.WIDE_CONTENT)
         body = page_layout(self)
-        self.back = Button("Settings" if global_defaults else "HD Cards", "quiet", "back")
+        self.back = Button("Back", "quiet", "back")
+        self.back.setAccessibleName("Back to Settings" if global_defaults else "Back to HD Cards")
         body.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
         body.addWidget(
             SectionHeader(
@@ -181,23 +188,41 @@ class SettingsView(QWidget):
         for key, title, hint, default in CHECKBOXES:
             if key in ("audio", "my_decks"):
                 continue
+            if key == "force":
+                title, hint = (
+                    "Re-download selected artwork",
+                    "Replace existing images in this selection.",
+                )
+            elif key == "hd_era_art":
+                title = "Use HD artwork with modern text"
+                hint = "Turn off to prefer original wording on GOAT and Pre-Errata cards."
             switch = ToggleSwitch(title, hint, default)
             if self.toggles:
                 panel.body.addWidget(line())
             panel.body.addWidget(switch)
             self.toggles[key] = switch
         body.addWidget(panel)
-        actions = QHBoxLayout()
-        self.coverage = Button("Show coverage", "secondary", "coverage")
+        self.actions = QWidget()
+        actions = QHBoxLayout(self.actions)
+        margins(actions, 0)
+        self.coverage = Button("Check artwork coverage", "secondary", "coverage")
         self.coverage.setVisible(not global_defaults)
         self.done = Button("Save defaults", "primary", "check")
         actions.addWidget(self.coverage)
+        self.unsaved = label("Unsaved changes", "small")
         actions.addStretch()
+        actions.addWidget(self.unsaved)
         actions.addWidget(self.done)
-        body.addLayout(actions)
         body.addStretch()
 
         self.load(cfg)
+        for toggle in self.toggles.values():
+            toggle.toggled.connect(self._edited)
+        if self.scope:
+            self.scope.changed.connect(self._edited)
+
+    def _edited(self) -> None:
+        self.unsaved.setVisible(self.preferences() != self.saved)
 
     def load(self, cfg: Config) -> None:
         values = {
@@ -209,6 +234,18 @@ class SettingsView(QWidget):
             toggle.setChecked(values[key] if key in values else getattr(cfg, key))
         if self.scope:
             self.scope.select(("auto", "library", "decks").index(cfg.studio_scope))
+        self.saved = self.preferences()
+        self._edited()
+
+    def discard(self, ctx: AppContext) -> bool:
+        draft = self.preferences()
+        if any(value != getattr(ctx.cfg, key) for key, value in draft.items()):
+            if not ctx.confirm(
+                "Discard unsaved changes?", "Leave without saving your artwork defaults?"
+            ):
+                return False
+            self.load(ctx.cfg)
+        return True
 
     def preferences(self) -> dict[str, bool | str]:
         values = {key: toggle.isChecked() for key, toggle in self.toggles.items()}

@@ -172,6 +172,9 @@ class TaskRunner(QObject):
     def _release(self) -> None:
         job = self.sender()
         self.jobs.discard(job)
+        # The job normally drops its callable when the result is delivered.
+        if hasattr(job, "work"):
+            del job.work
         # Subscribers can capture widgets. Release their Qt connections on the GUI thread.
         job.deleteLater()
         if not self.jobs:

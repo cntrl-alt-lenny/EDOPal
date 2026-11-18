@@ -20,7 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QEventLoop, Qt  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, Qt  # noqa: E402
 from PySide6.QtGui import QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -28,11 +28,12 @@ import main  # noqa: E402
 from config import APP_NAME, Config  # noqa: E402
 from studio import theme  # noqa: E402
 from studio.context import AppContext, Installation  # noqa: E402
-from studio.shell import StudioWindow  # noqa: E402
+from studio.shell import PAGES, StudioWindow  # noqa: E402
 from tools.studio_backup_screenshots import capture_backup  # noqa: E402
 from tools.studio_decks_screenshots import render_decks  # noqa: E402
 from tools.studio_health_replays_shots import render_tools  # noqa: E402
 from tools.studio_shell_shots import (  # noqa: E402
+    preview_deck_sections,
     render_artwork_recovery,
     render_picker_states,
     render_settings_states,
@@ -59,7 +60,7 @@ def create_demo(root: Path) -> Config:
             ((1000 + n, main.FIELD_SPELL_TYPE if n < 16 else 1) for n in range(128)),
         )
         conn.executemany(
-            "INSERT INTO texts VALUES(?,?)", ((1000 + n, f"Studio card {n}") for n in range(128))
+            "INSERT INTO texts VALUES(?,?)", ((1000 + n, f"Sample card {n}") for n in range(128))
         )
     from PIL import Image
 
@@ -81,6 +82,15 @@ class DemoSync:
     async def __call__(self, cfg: Config) -> main.DownloadStats | None:
         if cfg.stats:
             return await main.run(cfg)
+        if self.outcome in {"no_decks", "empty_decks"}:
+            title = (
+                "No cards found in your decks — nothing to sync"
+                if self.outcome == "empty_decks"
+                else "No decks found — nothing to sync"
+            )
+            cfg.idle_summary = title, "Save a deck with cards in EDOPro, or choose Full library."
+            cfg.notice_sink(title)
+            return None
         if self.outcome == "idle":
             return None
         if self.outcome == "error":
@@ -133,6 +143,12 @@ def grab_window(window: StudioWindow) -> QPixmap:
 
 
 def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = None) -> list[Path]:
+    if page == "all":
+        page = None
+    if page in STANDALONE_RENDERERS:
+        return standalone_renderer(page)(out, size, root)
+    if page not in {None, "shell", *(p.id for p in PAGES)}:
+        raise ValueError(f"Unknown page: {page}")
     app = QApplication.instance() or QApplication([APP_NAME])
     theme.apply(app)
     cfg = create_demo(root)
@@ -156,6 +172,21 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
     window.show()
     window.setFocus(Qt.FocusReason.OtherFocusReason)
     try:
+        if page == "skins":
+            window.navigate("skins")
+            render_skins(window, shot, settle)
+            return files
+        if page == "backup":
+            capture_backup(window, root, shot, settle)
+            return files
+        if page in {"health", "replays"}:
+            # These sections share a scenario installation and its ordered fixtures.
+            def capture(name: str) -> None:
+                if name.startswith(f"{page}-"):
+                    shot(name)
+
+            render_tools(window, selected, capture, settle)
+            return files
         if page == "sounds":
             from tools.studio_sounds_screenshots import render_sounds
 
@@ -172,10 +203,12 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
         card.options.settings.click()
         card.settings.toggles["save_report"].setChecked(True)
         shot("02-sync-settings")
-        card.settings.coverage.click()
+        card.settings.done.click()
+        settle(lambda: card.state == "options")
+        card.options.coverage.click()
         settle(lambda: card.state == "results")
         shot("03-coverage")
-        card.results.done.click()
+        card.results.back.click()
         card.options.start.click()
         settle(lambda: card.done == 78)
         shot("04-sync-progress")
@@ -184,7 +217,7 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
         shot("05-sync-summary")
         card.results.failures.click()
         shot("14-unavailable-artwork")
-        card.results.done.click()
+        card.results.back.click()
         ctx.set_installation(Installation())
         shot("06-no-installation")
         render_picker_states(window, shot, settle, root)
@@ -194,8 +227,10 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
             settle(lambda: window.picker.list.count() == 1)
             shot("07-installation-picker")
             window.picker.close_picker()
+        covered = {"cards", "settings"}
         if page is None:
             for number, key in enumerate(("skins", "sleeves", "sounds", "music", "decks"), 8):
+                covered.add(key)
                 if renderer := PAGE_RENDERERS.get(key):
                     renderer(window, selected, shot, settle, overview=f"{number:02}-{key}")
                     continue
@@ -223,23 +258,47 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
             settle(lambda: card.state == "results")
             shot(filename)
         card.results.done.click()
+        fake.outcome = "no_decks"
+        card.options.scope.select(1)
+        card.options.start.click()
+        settle(lambda: card.state == "results")
+        shot("45-no-decks")
+        card.results.back.click()
+        fake.outcome = "empty_decks"
+        card.options.start.click()
+        settle(lambda: card.state == "results")
+        shot("50-empty-deck-files")
+        card.results.back.click()
         ctx.set_installation(Installation(selected.path))
         shot("18-awaiting-databases")
         render_artwork_recovery(window, shot, settle, selected)
         if page is None:
             for i, key in enumerate(("mydecks", "replays", "backup", "health"), 21):
+                covered.add(key)
                 window.navigate(key)
                 settle(lambda: not ctx.tasks.jobs)
                 shot(f"{i}-{key}")
         if page != "cards":
             render_settings_states(window, shot, settle, root, selected)
         if page is None:
-            render_tools(window, selected, shot, settle)
+            for key in window.pages:
+                if key in covered:
+                    continue
+                window.navigate(key)
+                settle(lambda: not ctx.tasks.jobs)
+                shot(key)
+            # Health caches reports by installation, and other scenarios change this game's
+            # skin and sound files. Give its missing-skin scenario its own untouched game.
+            tool_cfg = create_demo(root / "tools-fixture")
+            render_tools(window, Installation.inspect(tool_cfg.edopro_path), shot, settle)
             capture_backup(window, root, shot, settle)
     finally:
         fake.release.set()
         settle(lambda: not ctx.tasks.jobs)
         window.close()
+        window.deleteLater()
+        ctx.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
     return files
 
@@ -276,9 +335,7 @@ def main_cli() -> None:
     parser.add_argument("--size", type=parse_size, action="append", help="WxH, repeatable")
     parser.add_argument(
         "--page",
-        choices=sorted(
-            {*PAGE_RENDERERS, *STANDALONE_RENDERERS, "sounds", "cards", "settings", "shell"}
-        ),
+        choices=sorted({"all", "shell", *(p.id for p in PAGES)}),
         help="Render the full set of states for one page",
     )
     args = parser.parse_args()
@@ -291,10 +348,28 @@ def main_cli() -> None:
             patch("music.settings._game_running", return_value=False),
         ):
             target, size, root = args.out / name, (width, height), Path(temporary)
-            if args.page in STANDALONE_RENDERERS:
-                files = standalone_renderer(args.page)(target, size, root)
-            else:
-                files = render(target, size, root, page=args.page)
+            files = render(target, size, root, page=args.page)
+        if args.page == "shell" and size == (1280, 800):
+            with (
+                tempfile.TemporaryDirectory(prefix=".studio-preview-", dir=ROOT) as temporary,
+                preview_deck_sections(),
+            ):
+                cfg = create_demo(Path(temporary))
+                ctx = AppContext(cfg, main.VERSION, DemoSync(), main._apply_gui_choices)
+                window = StudioWindow(ctx, startup=False)
+                ctx.set_installation(Installation.inspect(cfg.edopro_path))
+                window.resize(*size)
+                window.show()
+                window._update("v5.6.0")
+                settle(lambda ctx=ctx: not ctx.tasks.jobs)
+                target_file = target / "48-expanded-decks-sidebar.png"
+                if not grab_window(window).save(str(target_file)):
+                    raise OSError(f"Could not save {target_file}")
+                files.append(target_file)
+                window.close()
+                window.deleteLater()
+                ctx.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         print(f"Rendered {len(files)} views at {name} in {files[0].parent}")
 
 

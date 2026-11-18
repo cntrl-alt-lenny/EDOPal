@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPropertyAnimation, Qt, QTimer, QUrl, Slot
@@ -8,24 +9,24 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QGraphicsOpacityEffect,
     QHBoxLayout,
+    QLayout,
+    QLineEdit,
     QMainWindow,
-    QMessageBox,
-    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 import config
 from artwork_flow import compact_path
-from studio import geometry
 from studio import theme as t
 from studio.context import AppContext, Installation
 from studio.icons import icon
 from studio.installations import InstallationPicker
 from studio.pages.backup import BackupPage
-from studio.pages.base import Page
+from studio.pages.base import Page, PageRegistry
 from studio.pages.cards import CardsPage
 from studio.pages.decks import DecksPage
 from studio.pages.formats import FormatsPage
@@ -39,7 +40,10 @@ from studio.pages.skins import SkinsPage
 from studio.pages.sleeves import SleevesPage
 from studio.pages.sounds import SoundsPage
 from studio.tasks import WorkerContext
-from studio.widgets import Button, ElidedLabel, Hero, Notice, glyph, label, margins
+from studio.widgets import Button, ElidedLabel, Hero, Notice, ProgressBlock, glyph, label, margins
+from studio.widgets.controls import confirm_action
+from studio.widgets.sidebar import Sidebar
+from studio.widgets.window import WorkspaceScroll, restore_window, save_window
 
 PAGES = (
     CardsPage,
@@ -73,23 +77,34 @@ class StudioWindow(QMainWindow):
         self.ctx.update_requested.connect(self.check_updates)
         self.closing = False
         self.generation = 0
-        self.pages: dict[str, Page] = {}
-        self.nav: dict[str, Button] = {}
+        self.pages = PageRegistry(PAGES, self._build_page)
         self.central = QWidget()
         self.central.setObjectName("canvas")
         self.setCentralWidget(self.central)
         outer = QHBoxLayout(self.central)
         margins(outer, 0)
         outer.setSpacing(0)
-        self.rail = QWidget()
-        self.rail.setObjectName("rail")
-        self.rail.setFixedWidth(t.RAIL_WIDTH)
+        self.rail = Sidebar(PAGES, self.ctx.version, glyph("mark", t.BRAND_ICON + t.XS))
+        self.nav = self.rail.nav
+        self.rail_scroll = self.rail.rail_scroll
+        self.release = self.rail.release
+        self.rail.selected.connect(self.navigate)
+        self.release.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(RELEASES)))
         outer.addWidget(self.rail)
+        self.reveal_timer = QTimer(self)
+        self.reveal_timer.setSingleShot(True)
+        self.reveal_timer.timeout.connect(self._reveal_current)
+        self.rail_scroll.viewport().installEventFilter(self)
+        for button in self.nav.values():
+            button.installEventFilter(self)
         self.stack = QStackedWidget()
-        self._sidebar()
-        column = QVBoxLayout()
+        self.workspace_scroll = WorkspaceScroll()
+        self.workspace = self.workspace_scroll.widget()
+        outer.addWidget(self.workspace_scroll, 1)
+        column = QVBoxLayout(self.workspace)
+        margins(column, 0)
+        column.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         column.setSpacing(0)
-        outer.addLayout(column, 1)
         column.addWidget(self._install_bar())
         self.notice = Notice()
         column.addWidget(self.notice)
@@ -103,12 +118,9 @@ class StudioWindow(QMainWindow):
         self.picker = InstallationPicker(context)
         self.picker.dismissed.connect(self._end_picker)
         self.content.addWidget(self.picker)
-        for page_type in PAGES:
-            page = page_type(context)
-            self.pages[page.id] = page
-            self.stack.addWidget(page)
-            self.ctx.installation_changed.connect(page.installation_changed)
+        self.stack.setCurrentWidget(self.pages["cards"])
         self.ctx.installation_changed.connect(self._display_folder)
+        self.ctx.folder_unavailable.connect(self._unavailable_folder)
         self.ctx.busy_changed.connect(self._busy)
         self.ctx.tasks.idle.connect(self._idle)
         self.effect = QGraphicsOpacityEffect(self.stack)
@@ -122,73 +134,32 @@ class StudioWindow(QMainWindow):
         self.animation.finished.connect(lambda: self.effect.setEnabled(False))
         self._select(self.current)
         self.current.shown()
+        QApplication.instance().focusChanged.connect(self.workspace_scroll.reveal_focus)
         self._display_folder(context.installation)
-        geometry.restore(self, self.settings)
+        restore_window(self, self.settings)
         from main import _parse_version
 
         saved = self.settings.value("updates/latest", "", type=str)
         if _parse_version(saved) > _parse_version(self.ctx.version):
-            self._update(saved)
+            self.ctx.latest = saved
+            self._release_status(cached=True)
         if startup:
             self._startup()
+
+    def _build_page(self, page_type: type[Page]) -> Page:
+        was_active = self.isActiveWindow()
+        page = page_type(self.ctx)
+        self.stack.addWidget(page)
+        page.installation_changed(self.ctx.installation)
+        self.ctx.installation_changed.connect(page.installation_changed)
+        if was_active:
+            # Transient, unparented controls created by a page can briefly take focus.
+            self.activateWindow()
+        return page
 
     @property
     def current(self) -> Page:
         return self.stack.currentWidget()
-
-    def _sidebar(self) -> None:
-        layout = QVBoxLayout(self.rail)
-        layout.setContentsMargins(t.MD, t.XL, t.MD, t.LG)
-        layout.setSpacing(t.XS)
-        brand = QHBoxLayout()
-        brand.setContentsMargins(t.SM, 0, 0, t.MD)
-        brand.setSpacing(t.MD)
-        brand.addWidget(glyph("mark", t.BRAND_ICON + t.XS))
-        wordmark = QVBoxLayout()
-        wordmark.setSpacing(0)
-        wordmark.addWidget(label(config.APP_NAME, "brand"))
-        wordmark.addWidget(label("Unofficial EDOPro companion", "muted", True))
-        brand.addLayout(wordmark, 1)
-        layout.addLayout(brand)
-        self.rail_scroll = QScrollArea()
-        self.rail_scroll.setObjectName("railScroll")
-        self.rail_scroll.setWidgetResizable(True)
-        self.rail_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        items = QWidget()
-        items.setObjectName("railItems")
-        entries = QVBoxLayout(items)
-        margins(entries, 0)
-        entries.setSpacing(t.XS)
-        entries.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.rail_scroll.setWidget(items)
-        self.rail_scroll.viewport().installEventFilter(self)
-        layout.addWidget(self.rail_scroll, 1)
-        headings = {"cards": "CUSTOMISE", "decks": "DECKS", "replays": "TOOLS"}
-        for page in PAGES:
-            if page.id in headings:
-                heading = label(headings[page.id], "kicker")
-                heading.setContentsMargins(t.MD, t.SM, 0, t.XS)
-                entries.addWidget(heading)
-            if page.id == "settings":
-                self.release = Button("", "secondary", "link")
-                self.release.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(RELEASES)))
-                self.release.hide()
-                layout.addWidget(self.release)
-            # Page titles can already contain a Qt literal ampersand.
-            title = page.title.replace("&&", "&")
-            item = Button(title.replace("&", "&&"), "nav", page.icon)
-            item.setAccessibleName(title)
-            item.setToolTip(title)
-            item.setMinimumHeight(t.NAV_H)
-            item.setCheckable(True)
-            item.clicked.connect(lambda _checked=False, key=page.id: self.navigate(key))
-            item.installEventFilter(self)
-            self.nav[page.id] = item
-            (layout if page.id == "settings" else entries).addWidget(item)
-        version = label(f"Version {self.ctx.version}", "muted")
-        version.setContentsMargins(t.MD, t.SM, 0, 0)
-        layout.addWidget(version)
 
     def _install_bar(self) -> QWidget:
         bar = QWidget()
@@ -199,7 +170,7 @@ class StudioWindow(QMainWindow):
         row.addWidget(glyph("folder", t.ICON_BIG))
         copy = QVBoxLayout()
         copy.setSpacing(t.XS)
-        copy.addWidget(label("GAME INSTALLATION", "kicker"))
+        copy.addWidget(label("EDOPro folder", "kicker"))
         info = QHBoxLayout()
         info.setSpacing(t.MD)
         self.status_dot = QWidget()
@@ -254,6 +225,7 @@ class StudioWindow(QMainWindow):
         if self.ctx.checking_update:
             return
         self.ctx.checking_update = True
+        self.ctx.update_offline = False
         self.ctx.update_status = "Checking GitHub Releases…"
         self.ctx.update_changed.emit()
 
@@ -268,21 +240,53 @@ class StudioWindow(QMainWindow):
         job.error.connect(self._update_error)
 
     def _update_error(self, _exc: Exception) -> None:
+        self.ctx.update_offline = True
         self.ctx.checking_update = False
         self.ctx.update_status = (
             "Could not reach GitHub Releases. Check your connection and try again."
         )
-        self.ctx.update_changed.emit()
+        self._release_status(cached=True)
 
     @Slot(object)
     def _update(self, latest: str | None) -> None:
+        self.ctx.update_offline = False
         self.ctx.checking_update = False
         self.ctx.latest = latest or ""
         self.ctx.update_status = (
             f"Version {latest} is available." if latest else "You have the latest release."
         )
         self.settings.setValue("updates/latest", self.ctx.latest)
-        self.release.setText(f"Get {latest}")
+        self.settings.setValue(
+            "updates/lastCheck", datetime.now().astimezone().isoformat(timespec="seconds")
+        )
+        self._release_status(cached=False)
+
+    def _release_status(self, *, cached: bool) -> None:
+        latest = self.ctx.latest
+        label = f"Last known update {latest}" if cached else f"Download version {latest}"
+        self.ctx.cached_release = cached
+        self.ctx.release_label = label
+        if cached:
+            stamp = self.settings.value("updates/lastCheck", "", type=str)
+            try:
+                when = datetime.fromisoformat(stamp).astimezone().strftime("%d %b %Y at %H:%M")
+            except ValueError:
+                when = ""
+            if when or latest:
+                self.ctx.update_status = " ".join(
+                    filter(
+                        None,
+                        (
+                            self.ctx.update_status,
+                            f"Last successful check {when}."
+                            if when
+                            else "Date of last check unavailable.",
+                        ),
+                    )
+                )
+        self.release.setAccessibleName(label)
+        self.release.setToolTip(self.release.accessibleName())
+        self._rail_mode()
         self.release.setVisible(bool(latest))
         self.ctx.update_changed.emit()
 
@@ -290,8 +294,9 @@ class StudioWindow(QMainWindow):
         for key, button in self.nav.items():
             chosen = key == page.id
             button.setChecked(chosen)
-            button.setIcon(icon(self.pages[key].icon, t.GOLD if chosen else t.MUTED))
+            button.setIcon(icon(self.pages.types[key].icon, t.GOLD if chosen else t.MUTED))
 
+        self._fit_nav_width()
         if page.id != "settings":
             self.rail_scroll.ensureWidgetVisible(self.nav[page.id], 0, t.XS)
 
@@ -318,7 +323,7 @@ class StudioWindow(QMainWindow):
 
     def _display_folder(self, installation: Installation) -> None:
         self.generation += 1
-        name = Path(installation.path).name if installation.path else "No installation selected"
+        name = Path(installation.path).name if installation.path else "No EDOPro folder selected"
         self.folder_name.setText(
             self.folder_name.fontMetrics().elidedText(
                 name, Qt.TextElideMode.ElideMiddle, t.RAIL_WIDTH
@@ -331,8 +336,16 @@ class StudioWindow(QMainWindow):
         self.status_dot.setStyleSheet(f"background: {colour}; border-radius: {t.XS}px;")
         self.change.setText("Change folder" if installation.path else "Choose folder")
 
+    @Slot(str)
+    def _unavailable_folder(self, path: str) -> None:
+        if path == self.ctx.installation.path:
+            self.status_dot.setStyleSheet(f"background: {t.GOLD}; border-radius: {t.XS}px;")
+            self.folder_name.setText("Folder unavailable")
+            self.folder_name.setToolTip(path)
+
     def _busy(self, busy: bool) -> None:
         self.change.setEnabled(not busy)
+        self.change.setToolTip("You can change folders when this finishes." if busy else "")
 
     def _notice(self, message: str) -> None:
         self.notice.show_message(message)
@@ -346,41 +359,39 @@ class StudioWindow(QMainWindow):
             return
         if self.content.currentWidget() is self.picker:
             return
+        self.picker_opener = self.focusWidget() or self.change
+        self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.content.setCurrentWidget(self.picker)
+        self.workspace_scroll.fit(self.size(), page_visible=False)
         self.change.setEnabled(False)
         self.picker.open_picker(path)
 
     def _end_picker(self) -> None:
+        self.stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.content.setCurrentWidget(self.stack)
+        self.workspace_scroll.fit(self.size(), page_visible=True)
         self.change.setEnabled(not self.ctx.busy)
-        self.change.setFocus()
         self.current.shown()
+        opener = self.picker_opener
+        (
+            opener if isValid(opener) and opener.isVisible() and opener.isEnabled() else self.change
+        ).setFocus()
 
     def sync_deck_files(self, game: Path, paths: tuple[Path, ...]) -> bool:
         return self.pages["cards"].sync_deck_files(game, paths)
 
     def choose_folder(self, initial: str) -> str | None:
-        return (
-            QFileDialog.getExistingDirectory(self, "Select your EDOPro game folder", initial)
-            or None
-        )
+        return QFileDialog.getExistingDirectory(self, "Choose your EDOPro folder", initial) or None
 
-    def confirm(self, title: str, message: str) -> bool:
-        return (
-            QMessageBox.question(
-                self,
-                title,
-                message,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            == QMessageBox.StandardButton.Yes
-        )
+    def confirm(self, title: str, message: str, affirmative: str | None = None) -> bool:
+        return confirm_action(self, title, message, affirmative)
 
     def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Resize and obj is self.rail_scroll.viewport():
+            self._fit_nav_width()
             # The update link and scrollbar can resize the rail independently of the window.
-            QTimer.singleShot(0, self, self._reveal_current)
+            if not self.closing:
+                self.reveal_timer.start(0)
         if (
             event.type() == QEvent.Type.FocusIn
             and obj in self.nav.values()
@@ -399,8 +410,8 @@ class StudioWindow(QMainWindow):
         if event.key() == Qt.Key.Key_Escape:
             if self.content.currentWidget() is self.picker:
                 self.picker.close_picker()
-            elif not self.current.escape():
-                self.close()
+            else:
+                self._page_escape()
             event.accept()
         elif (
             event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
@@ -412,6 +423,34 @@ class StudioWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    def _page_escape(self) -> None:
+        page = self.current
+        if self.ctx.busy or (
+            self.ctx.tasks.jobs and any(p.isVisible() for p in page.findChildren(ProgressBlock))
+        ):
+            return
+        # Sound previews have a dedicated Stop action. Leaving an active clip editor
+        # would also cancel its worker through the legacy page handler.
+        if page.id == "sounds" and (
+            (
+                page.state == "overview"
+                and page.audio.preview is not None
+                and not page.closed.isVisible()
+            )
+            or (page.state == "event" and page.events.clip_job is not None)
+        ):
+            return
+        if not page.escape():
+            for field in page.findChildren(QLineEdit):
+                if (
+                    field.isVisible()
+                    and field.text()
+                    and "search" in field.placeholderText().lower()
+                ):
+                    field.clear()
+                    field.setFocus()
+                    break
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         short = event.size().height() <= t.COMPACT_HERO_HEIGHT
@@ -419,20 +458,31 @@ class StudioWindow(QMainWindow):
             self.setProperty("compactHeroes", short)
             for hero in self.findChildren(Hero):
                 hero.set_compact(short)
-        compact = self.width() < t.COMPACT_WIDTH
-        self.rail.setFixedWidth(t.RAIL_COMPACT if compact else t.RAIL_WIDTH)
-        inset = t.SM if compact else t.MD
-        self.rail.layout().setContentsMargins(inset, t.XL, inset, t.LG)
+        self._rail_mode()
+
+    def _rail_mode(self) -> None:
+        self.path.setVisible(not self.rail.fit(self.size()))
+        self.workspace_scroll.fit(
+            self.size(), page_visible=self.content.currentWidget() is self.stack
+        )
+
+    def _fit_nav_width(self) -> None:
+        # A scrollbar can appear during keyboard navigation, before the next layout pass.
+        self.rail_scroll.widget().setFixedWidth(self.rail_scroll.viewport().width())
+        self.rail.entries.activate()
 
     def _reveal_current(self) -> None:
         if self.current.id != "settings":
             self.rail_scroll.ensureWidgetVisible(self.nav[self.current.id], 0, t.XS)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if not self.current.request_close():
+        ordered = [self.current, *(p for p in self.pages.built.values() if p is not self.current)]
+        if not self.closing and not all(page.request_close() for page in ordered):
             event.ignore()
             return
-        geometry.save(self, self.settings)
+        self.reveal_timer.stop()
+        self.animation.stop()
+        save_window(self, self.settings)
         if self.ctx.tasks.jobs:
             self.closing = True
             self.central.setEnabled(False)
@@ -443,4 +493,4 @@ class StudioWindow(QMainWindow):
 
     def _idle(self) -> None:
         if self.closing:
-            QTimer.singleShot(0, self, self.close)
+            self.close()

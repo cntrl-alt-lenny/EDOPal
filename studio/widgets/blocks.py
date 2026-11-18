@@ -2,7 +2,7 @@ from html import escape
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QVBoxLayout, QWidget
 
 from studio import theme as t
 from studio.widgets.art import ArchiveArt
@@ -32,7 +32,8 @@ class Hero(ArchiveArt):
         rule.setFixedSize(t.XL, t.HAIR)
         rule.setStyleSheet(f"background: {t.GOLD};")
         overline.addWidget(rule)
-        overline.addWidget(label(category.upper(), "goldKicker"))
+        self.category = label(category.upper(), "goldKicker")
+        overline.addWidget(self.category)
         overline.addStretch()
         copy.addLayout(overline)
         self.headline = label(title, "heroTitle", True)
@@ -80,12 +81,20 @@ class Hero(ArchiveArt):
         else:
             low, high = self._normal_heights
             self._normal_heights = None
+            self.headline.setMinimumHeight(0)
+            self.description.setMinimumHeight(0)
             super().setMinimumHeight(low)
             super().setMaximumHeight(high)
         self.updateGeometry()
 
     def _fit_compact(self) -> None:
         # Keep long titles and error descriptions readable after wrapping.
+        # Qt can give surplus space to the two stretches before satisfying a
+        # wrapped label's height-for-width. Reserve the actual lines first.
+        for item in (self.headline, self.description):
+            needed = max(0, item.heightForWidth(item.width()))
+            if needed != item.minimumHeight():
+                item.setMinimumHeight(needed)
         height = max(t.TILE_H + t.LG, self.layout().totalHeightForWidth(self.width()))
         if self.minimumHeight() != height or self.maximumHeight() != height:
             super().setFixedHeight(height)
@@ -121,8 +130,9 @@ class EmptyState(QWidget):
         body = QVBoxLayout(self)
         margins(body, t.XXL)
         self.hero = Hero(category, title, description, symbol)
-        self.hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.hero.setMinimumHeight(t.TILE_LARGE)
         body.addWidget(self.hero)
+        body.addStretch()
 
 
 class Notice(Panel):
@@ -172,7 +182,7 @@ class ProgressBlock(Panel):
         self.detail = label("", "body", True)
         self.body.addWidget(self.detail)
         self.cancel = Button("Cancel")
-        self.body.addWidget(self.cancel, 0, Qt.AlignmentFlag.AlignLeft)
+        self.body.addWidget(self.cancel, 0, Qt.AlignmentFlag.AlignRight)
 
     def begin(self, phase: str) -> None:
         self.phase.setText(phase)

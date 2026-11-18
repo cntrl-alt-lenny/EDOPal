@@ -21,6 +21,9 @@ class LibrarySnapshot:
 
 
 def inspect_library(cfg: Config, cancel: Event) -> LibrarySnapshot | None:
+    # An unplugged drive must not look like a healthy installation with zero art.
+    with scandir(cfg.edopro_path):
+        pass
     count = size = 0
     for folder in (Path(cfg.pics_path), Path(cfg.pics_path) / "field"):
         if not folder.is_dir():

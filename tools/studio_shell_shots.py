@@ -1,15 +1,36 @@
 """Additional shell and preferences states for the offline gallery."""
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import main
+from config import APP_NAME
 from content.cache import PackCache
 from studio.context import Installation
 from studio.pages.settings_shortcuts import Shortcut
 from studio.shell import StudioWindow
+
+
+@contextmanager
+def preview_deck_sections() -> Iterator[None]:
+    """Reserve two pending Decks rows only in the sidebar proof."""
+    from studio import shell
+    from studio.pages.base import Page
+
+    class FormatsPage(Page):
+        id, title, icon = "formats", "Formats", "library"
+
+    class PracticePage(Page):
+        id, title, icon = "practice", "Practice", "deck"
+
+    types = list(shell.PAGES)
+    after = types.index(shell.MyDecksPage) + 1
+    extra = [p for p in (FormatsPage, PracticePage) if p.id not in {t.id for t in types}]
+    with patch.object(shell, "PAGES", (*types[:after], *extra, *types[after:])):
+        yield
 
 
 def render_picker_states(
@@ -21,7 +42,7 @@ def render_picker_states(
     picker = window.picker
     with patch("config.find_edopro_folders", return_value=[]):
         window.change.click()
-        settle(lambda: "No installations" in picker.hint.text())
+        settle(lambda: "No EDOPro folders" in picker.hint.text())
         shot("42-picker-empty")
         with patch.object(window.ctx, "choose_folder", return_value=str(root)):
             picker.browse.click()
@@ -46,13 +67,22 @@ def render_artwork_recovery(
         shot("19-close-game")
     card.back.click()
     settle(lambda: card.options.undo.isVisible())
+    card.views["options"].ensureWidgetVisible(card.options.undo)
     shot("20-last-sync")
+    refused = main.DownloadStats()
+    refused.storage_error = "Access denied"
+    with patch.object(ctx, "run_coro", AsyncMock(return_value=refused)):
+        card.options.start.click()
+        settle(lambda: card.state == "results" and card.results.undo.isVisible())
+        shot("51-write-refused-previous-undo")
+        card.results.back.click()
     with patch.object(ctx, "confirm", return_value=True):
         picture = Path(ctx.cfg.pics_path) / "1100.jpg"
         downloaded = picture.read_bytes()
         picture.write_bytes(b"Edited after the sync")
         card.options.undo.click()
         settle(lambda: card.state == "results")
+        settle(lambda: card.results.undo.isVisible())
         shot("39-edited-artwork-kept")
         picture.write_bytes(downloaded)
         card.results.undo.click()
@@ -66,6 +96,19 @@ def render_artwork_recovery(
         card.options.start.click()
         settle(lambda: card.state == "results")
         shot("40-network-retry")
+        card.results.back.click()
+    refused.ok_hd = 3
+    with patch.object(ctx, "run_coro", AsyncMock(return_value=refused)):
+        card.options.start.click()
+        settle(lambda: card.state == "results")
+        shot("47-storage-error")
+        card.results.back.click()
+    success = main.DownloadStats()
+    success.ok_hd = 2
+    with patch.object(ctx, "run_coro", AsyncMock(return_value=success)):
+        card.options.start.click()
+        settle(lambda: card.state == "results" and not ctx.tasks.jobs)
+        shot("49-sync-complete")
         card.results.done.click()
 
 
@@ -88,7 +131,9 @@ def render_settings_states(
     page.open_section("games")
     shot("25-game-folders")
     page.open_section("defaults")
+    page.defaults.toggles["force"].click()
     shot("26-card-defaults")
+    page.defaults.toggles["force"].click()
     # Other gallery pages can populate their own pack cache before Settings opens.
     page.cache = PackCache(root / "settings-gallery" / "packs")
     page.open_section("storage")
@@ -99,6 +144,8 @@ def render_settings_states(
     (pack / "1.0.0.zip").write_bytes(bytes(24576))
     page.open_section("storage")
     settle(lambda: page.message.text() == "" and "midnight-circuit" in page.remove_buttons)
+    page.clear_packs.setFocus()
+    page.detail.widget().layout().activate()
     page.detail.ensureWidgetVisible(page.clear_packs)
     shot("28-downloaded-packs")
     with (
@@ -121,6 +168,10 @@ def render_settings_states(
         page.check.click()
         settle(lambda: not ctx.checking_update)
     shot("30-update-available")
+    window.navigate("health")
+    settle(lambda: not ctx.tasks.jobs)
+    shot("46-release-and-navigation")
+    window.navigate("settings")
     with patch("main.check_for_update", new=AsyncMock(side_effect=OSError)):
         page.check.click()
         settle(lambda: not ctx.checking_update)
@@ -128,7 +179,7 @@ def render_settings_states(
     page.open_section("shortcuts")
     shot("32-source-shortcuts")
     windows = sys.platform == "win32"
-    filename = "EDOPal.lnk" if windows else "edopal.desktop"
+    filename = f"{APP_NAME}.lnk" if windows else "edopro-studio.desktop"
     menu = "Start menu" if windows else "Applications menu"
     links = tuple(Shortcut(name, root / name / filename, windows) for name in ("Desktop", menu))
     with patch("studio.pages.settings.shortcut_locations", return_value=links):

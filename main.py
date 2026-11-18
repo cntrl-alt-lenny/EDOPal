@@ -1977,6 +1977,11 @@ async def _run_sync(cfg: Config, stats: DownloadStats) -> DownloadStats | None:
         recover_publication(cfg)
 
     era_suffixes = tuple(cfg.suffixes)
+    # A receipt retry keeps its original deck scope and only revisits interrupted assets.
+    retry_artwork = getattr(cfg, "retry_artwork", None)
+    if retry_artwork:
+        retry_ids = retry_artwork[0] | retry_artwork[1]
+        deck_filter = retry_ids if deck_filter is None else deck_filter & retry_ids
     scoped_index = bool(deck_filter) and len(deck_filter) <= SMALL_DECK_INDEX_LIMIT
     if scoped_index:
         index = scan_databases(dbs, unreadable=unreadable, only_ids=deck_filter)
@@ -2152,6 +2157,9 @@ async def _run_sync(cfg: Config, stats: DownloadStats) -> DownloadStats | None:
                 f"(re-check with --recheck-missing)[/dim]"
             )
 
+    if retry_artwork:
+        missing_ids = [cid for cid in missing_ids if cid in retry_artwork[0]]
+
     # Field Spell playmat art (pics/field/) — same incremental + cache logic.
     field_cache_path = _field_failure_cache_path(cfg)
     checked_donors: dict[int, str | int] = {}
@@ -2163,6 +2171,8 @@ async def _run_sync(cfg: Config, stats: DownloadStats) -> DownloadStats | None:
     missing_fields: list[int] = []
     if cfg.field_art:
         candidate_fields = sorted(cid for cid in field_ids if cid in id_to_name)
+        if retry_artwork:
+            candidate_fields = [cid for cid in candidate_fields if cid in retry_artwork[1]]
         broken_fields: set[int] = set()
         if cfg.repair:
             broken_fields = set(find_broken_field_images(field_art_dir(cfg), set(candidate_fields)))

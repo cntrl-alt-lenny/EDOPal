@@ -86,7 +86,7 @@ def test_search_and_keyboard_swatch(qtbot: QtBot, monkeypatch: pytest.MonkeyPatc
 
 
 def test_keyboard_scope_toggle_and_settings_return(
-    make_window: Callable[..., StudioWindow], qtbot: QtBot
+    make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
     card = window.current
@@ -99,6 +99,7 @@ def test_keyboard_scope_toggle_and_settings_return(
     before = switch.isChecked()
     qtbot.keyClick(switch, Qt.Key.Key_Space)
     assert switch.isChecked() != before
+    monkeypatch.setattr(window.ctx, "confirm", lambda *_: True)
     qtbot.keyClick(window, Qt.Key.Key_Escape)
     assert card.state == "options"
 
@@ -109,7 +110,15 @@ def test_compact_hero_restores_page_sizes_and_respects_hidden_subviews(
     window = make_window()
     window.resize(1600, 1000)
     window.navigate("music")
-    qtbot.waitUntil(lambda: window.current.state == "home")
+    # Music replaces the loading widget, then Qt posts the layout/show events
+    # for its new children. Measure the normal banner after those have arrived.
+    qtbot.waitUntil(
+        lambda: (
+            window.current.state == "home"
+            and window.current.hero.headline.isVisible()
+            and window.current.hero.height() == window.current.hero.minimumHeight()
+        )
+    )
     hero = window.current.hero
     qtbot.waitUntil(hero.isVisible)
     normal = hero.minimumHeight(), hero.maximumHeight()
@@ -129,3 +138,18 @@ def test_compact_hero_restores_page_sizes_and_respects_hidden_subviews(
     window.resize(1600, 1000)
     assert new.isHidden() and new.minimumHeight() == new.maximumHeight() == 260
     assert (hero.minimumHeight(), hero.maximumHeight()) == normal
+
+
+def test_compact_receipt_reserves_all_wrapped_title_lines(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot
+) -> None:
+    from artwork_flow import Summary
+
+    window = make_window()
+    window.resize(960, 600)
+    card = window.current
+    card.results.show_result(Summary("No artwork to download for this selection"), scope="My decks")
+    card.open_view("results")
+    headline = card.results.outcome.headline
+    qtbot.waitUntil(lambda: headline.height() >= headline.heightForWidth(headline.width()))
+    assert not card.results.outcome.description.isVisible()

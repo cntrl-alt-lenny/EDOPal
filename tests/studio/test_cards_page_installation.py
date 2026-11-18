@@ -55,7 +55,7 @@ def test_check_failure_blocks_write_and_coverage_is_read_only(
     cards = window.current
     cards.options.start.click()
     qtbot.waitUntil(lambda: cards.state == "blocked")
-    assert "Could not check" in cards.guard.detail.text()
+    assert "couldn’t check" in cards.guard.detail.text()
     qtbot.keyClick(window, Qt.Key.Key_Escape)
     assert cards.state == "options"
     cards.options.coverage.click()
@@ -80,15 +80,17 @@ def test_summary_transient_field_and_card_failures_and_last_run(
     cards.options.start.click()
     qtbot.waitUntil(lambda: cards.state == "results")
     assert "14 days" not in cards.summary.note
-    assert ("Network errors (will retry)", "2") in cards.summary.rows
-    assert ("Queued downloads skipped (file already present)", "2") in cards.summary.rows
-    cards.results.done.click()
-    assert "Sync complete" in cards.options.last.text()
+    assert ("Downloads interrupted by a connection error", "2") in cards.summary.rows
+    assert ("Images already present", "2") in cards.summary.rows
+    assert cards.results.retry.text() == "Retry 2 downloads" and cards.results.retry.isVisible()
+    assert "ID 123" in cards.summary.failures[0]
+    cards.results.back.click()
+    assert "2 downloads need another try" in cards.options.last.text()
     game = window.ctx.installation
     window.ctx.set_installation(Installation())
     assert not cards.options.snapshot.isVisible()
     window.ctx.set_installation(game)
-    assert "Sync complete" in cards.options.last.text()
+    assert "2 downloads need another try" in cards.options.last.text()
 
 
 def test_large_library_summary_skips_per_image_reads(
@@ -124,3 +126,99 @@ def test_selected_rail_item_is_reachable_after_resize(
     assert window.nav["cards"].hasFocus()
     qtbot.keyClick(window.nav["cards"], Qt.Key.Key_Return)
     assert window.current.id == "cards"
+
+
+@pytest.mark.parametrize("empty_file,theme", [(False, False), (True, False), (True, True)])
+def test_empty_my_decks_stops_real_engine_before_download_or_extras(
+    make_window: Callable,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    empty_file: bool,
+    theme: bool,
+) -> None:
+    window = make_window(main.run)
+    cards = window.current
+    game = Path(window.ctx.installation.path)
+    deck = game / "deck/Spellcasters.ydk"
+    if empty_file:
+        deck.write_text("#main\n#extra\n", encoding="utf-8")
+    else:
+        deck.unlink()
+    session = Mock(side_effect=AssertionError("Empty selection started HTTP"))
+    install = Mock(side_effect=AssertionError("Empty selection installed a theme"))
+    monkeypatch.setattr(main, "_create_http_session", session)
+    monkeypatch.setattr(main.extras, "install", install)
+    cards.options.scope.select(1)
+    cards.settings.toggles["theme"].setChecked(theme)
+    cards.start_sync()
+    qtbot.waitUntil(lambda: cards.state == "results")
+    assert cards.summary.title == (
+        "No cards found in your decks — nothing to sync"
+        if empty_file
+        else "No decks found — nothing to sync"
+    )
+    assert cards.options.scope.group.checkedId() == 1
+    assert not cards.results.undo.isVisible() and not cards.results.done.isVisible()
+    assert cards.results.decks.isVisible() and cards.results.full_library.isVisible()
+    assert not cards.ctx.state.contains(cards._history_key())
+    assert not window.notice.isVisible()
+    assert cards.run_config.my_decks and cards.ctx.exit_code == 0
+    install.assert_not_called()
+    session.assert_not_called()
+    if empty_file:
+        cards.results.decks.click()
+        assert window.current.id == "decks"
+        assert window.navigate("cards") and cards.state == "results"
+
+    scopes = []
+
+    async def capture(cfg: Config) -> None:
+        scopes.append(cfg.my_decks)
+
+    monkeypatch.setattr(window.ctx, "run_coro", capture)
+    cards.results.full_library.click()
+    qtbot.waitUntil(lambda: cards.state == "results" and bool(scopes))
+    assert scopes == [False] and cards.summary.title == "No artwork to download for this selection"
+
+
+def test_leave_coverage_read_and_switch_folders_without_adopting_old_result(
+    make_window: Callable, qtbot: QtBot, tmp_path: Path
+) -> None:
+    entered, release = threading.Event(), threading.Event()
+
+    async def read(cfg: Config) -> None:
+        assert cfg.stats
+        entered.set()
+        assert release.wait(5)
+
+    window = make_window(read)
+    cards = window.current
+    cards.options.coverage.click()
+    try:
+        qtbot.waitUntil(entered.is_set)
+        assert window.change.isEnabled() and window.navigate("settings")
+        assert window.navigate("cards") and cards.state == "progress"
+        newer = Installation(str(tmp_path / "Other"))
+        window.ctx.set_installation(newer)
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: cards.job is None)
+    assert window.ctx.installation == newer and cards.state == "options"
+
+
+def test_saving_new_defaults_retires_blocked_retry(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    cards = window.current
+    monkeypatch.setattr("music.settings._game_running", lambda _: True)
+    cards.options.start.click()
+    qtbot.waitUntil(lambda: cards.state == "blocked")
+    window.navigate("settings")
+    editor = window.current
+    editor.tiles["defaults"].click()
+    editor.defaults.toggles["force"].click()
+    editor.defaults.done.click()
+    qtbot.waitUntil(lambda: editor.section == "home")
+    assert window.navigate("cards") and cards.state == "options"
+    assert cards.settings.toggles["force"].isChecked() and not cards.guard.retry.isVisible()
