@@ -160,10 +160,20 @@ def _save(path: Path, manifest: str, headers: Mapping[str, str]) -> None:
             staged.unlink(missing_ok=True)
 
 
-def _fallback(saved: _Saved | None, detail: str) -> Catalogue:
+def _fallback(saved: _Saved | None, detail: str | None = None) -> Catalogue:
     if saved is not None:
         return Catalogue(saved.manifest, CatalogueSource.CACHED, detail)
     return Catalogue(bundled_manifest(), CatalogueSource.BUNDLED, detail)
+
+
+def _catalogue_key(url: str) -> str:
+    return "manifest-" + hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+def local_catalogue(cache: PackCache, *, config_url: str = "") -> Catalogue:
+    """Read the last verified list so cached packs are usable before a refresh."""
+    key = _catalogue_key(resolve_manifest_url(config_url))
+    return _fallback(_read_saved(cache.root / key / "catalogue.json"))
 
 
 async def fetch_catalogue(
@@ -171,7 +181,7 @@ async def fetch_catalogue(
 ) -> Catalogue:
     """Refresh the catalogue, retaining the last valid response for this URL."""
     url = resolve_manifest_url(config_url)
-    key = "manifest-" + hashlib.sha256(url.encode("utf-8")).hexdigest()
+    key = _catalogue_key(url)
     record = cache.root / key / "catalogue.json"
     try:
         with cache._work(key):

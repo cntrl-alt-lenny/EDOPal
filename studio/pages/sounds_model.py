@@ -1,0 +1,237 @@
+"""Worker operations and in-memory choices for the Sounds page."""
+
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, replace
+from pathlib import Path
+from threading import Event
+
+import config
+import sounds
+from content.cache import PackCache
+from content.catalogue import Catalogue, CatalogueSource, PackState, PackStatus
+from content.download import Progress, download_pack
+from content.manifest import Pack
+from music.settings import _game_running
+from sounds.archive import SavedSet
+from sounds.sets import InstalledCue
+from sounds.settings import SoundSettings
+
+EVENT_KEYS = tuple(event.stem for event in sounds.EVENTS)
+EVENT_COUNT = len(EVENT_KEYS)
+NEW_MIX = "Custom mix"
+
+
+@dataclass(frozen=True)
+class Source:
+    key: str
+    sound_set: sounds.SoundSet
+    category: str
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    rows: tuple[InstalledCue, ...]
+    sound_set: sounds.SoundSet
+    settings: SoundSettings
+    undo: bool
+    restore: bool
+    files: dict[str, tuple[tuple[Path, int, int, int], ...]]
+
+
+@dataclass(frozen=True)
+class Downloadable:
+    status: PackStatus
+    sound_set: sounds.SoundSet | None = None
+    error: str = ""
+
+    @property
+    def pack(self) -> Pack:
+        return self.status.pack
+
+
+@dataclass(frozen=True)
+class OnlineSets:
+    catalogue: Catalogue
+    packs: tuple[Downloadable, ...]
+
+
+class GameRunning(Exception):
+    """The player can retry the same action once the game has closed."""
+
+
+class FilesChanged(Exception):
+    """The player needs a fresh look at the files before applying a choice."""
+
+
+def library_for(config_path: str, explicit: bool) -> sounds.SoundLibrary:
+    return sounds.SoundLibrary(Path(config_path).resolve().parent / "sounds" if explicit else None)
+
+
+def scan(game: Path, config_path: str) -> Snapshot:
+    rows = sounds.scan_installation(game)
+    files = {row.key: file_stamps(row.paths) for row in rows if row.paths}
+    return Snapshot(
+        rows,
+        sounds.installed_set(rows),
+        sounds.sound_settings(game),
+        sounds.can_undo(game, config_path),
+        sounds.can_restore(game, config_path),
+        files,
+    )
+
+
+def file_stamps(paths: Iterable[Path]) -> tuple[tuple[Path, int, int, int], ...]:
+    stamps = []
+    for path in paths:
+        info = path.stat()
+        stamps.append((path, info.st_size, info.st_mtime_ns, info.st_ctime_ns))
+    return tuple(stamps)
+
+
+def write_game(
+    game: Path,
+    config_path: str,
+    action: str,
+    draft: sounds.SoundSet,
+    snapshot: Snapshot,
+) -> None:
+    if _game_running(game):
+        raise GameRunning
+    if action == "apply":
+        current = {row.key: row for row in sounds.scan_installation(game)}
+        for key in draft.assignments:
+            row = current.get(key)
+            clip = row.clip if row else None
+            prior = snapshot.sound_set.assignments.get(key)
+            if file_stamps(row.paths if row else ()) != snapshot.files.get(key, ()) or (
+                clip and clip.sha256
+            ) != (prior and prior.sha256):
+                raise FilesChanged
+        # The game may have been opened during the scan.
+        if _game_running(game):
+            raise GameRunning
+        sounds.apply_set(game, config_path, draft)
+    elif action == "undo":
+        sounds.undo(game, config_path)
+    elif action == "restore":
+        sounds.restore(game, config_path)
+    else:
+        sounds.set_sound_enabled(game, action == "enable")
+
+
+def coverage(sound_set: sounds.SoundSet) -> tuple[int, int]:
+    playable = sum(sound_set.assignments.get(key) is not None for key in EVENT_KEYS)
+    silent = sum(key in sound_set.assignments for key in EVENT_KEYS) - playable
+    return playable, silent
+
+
+def installed_name(snapshot: Snapshot, sources: Iterable[Source]) -> str:
+    installed = {row.key: row.clip.sha256 if row.clip else "" for row in snapshot.rows if row.paths}
+    if not installed:
+        return "No sounds installed"
+    for source in sources:
+        if source.category == "Installed":
+            continue
+        expected = {key: clip.sha256 for key, clip in source.sound_set.assignments.items() if clip}
+        if installed == expected:
+            return source.sound_set.name
+    return "Installed mix"
+
+
+def choice_for(
+    key: str, draft: sounds.SoundSet, snapshot: Snapshot | None, names: dict[str, str]
+) -> tuple[str, float | None, sounds.Clip | None]:
+    if key in draft.assignments:
+        clip = draft.assignments[key]
+        return (names.get(key, draft.name), clip.duration, clip) if clip else ("Silent", None, None)
+    if snapshot is not None:
+        clip = snapshot.sound_set.assignments.get(key)
+        if clip:
+            return "Keep installed sound", clip.duration, clip
+        if key in snapshot.files:
+            return "Keep unreadable sound", None, None
+        return "No sound installed", None, None
+    return "Keep game sound", None, None
+
+
+def chants_for(draft: sounds.SoundSet, sources: Iterable[Source]) -> tuple[str, ...]:
+    keys = set(draft.assignments)
+    for source in sources:
+        keys.update(source.sound_set.assignments)
+    return tuple(sorted(keys - set(EVENT_KEYS)))
+
+
+def display_text(value: str) -> str:
+    return " ".join(value.split())
+
+
+def pack_audio(cache: PackCache, pack: Pack, *, exact: bool = True) -> sounds.SoundSet:
+    with cache.use_pack(pack.id, exact=pack if exact else None) as path:
+        if path is None:
+            raise ValueError("The downloaded copy could not be verified. Download it again.")
+        sound_set = sounds.load_pack(path, kind=pack.kind)
+    if not exact:
+        return sound_set
+    credits = sound_set.credits
+    return replace(
+        sound_set,
+        name=pack.title,
+        credits=sounds.Credits(
+            credits.author or pack.author,
+            credits.license or pack.license,
+            credits.attribution or pack.attribution,
+        ),
+    )
+
+
+def online_sets(cache: PackCache, version: str, catalogue: Catalogue) -> OnlineSets:
+    packs = []
+    for status in catalogue.list_packs(cache, app_version=version, kind="sound-effects"):
+        sound_set = None
+        error = ""
+        if status.state in (PackState.DOWNLOADED, PackState.UPDATE_AVAILABLE):
+            try:
+                sound_set = pack_audio(
+                    cache, status.pack, exact=status.state is PackState.DOWNLOADED
+                )
+            except (OSError, ValueError):
+                if status.state is PackState.DOWNLOADED:
+                    error = "This download could not be opened. Try downloading it again."
+        packs.append(Downloadable(status, sound_set, error))
+    return OnlineSets(catalogue, tuple(packs))
+
+
+async def get_pack(
+    cache: PackCache, pack: Pack, version: str, report: Callable[[Progress], None], cancel: Event
+) -> Downloadable:
+    await download_pack(cache, pack, app_version=version, progress=report, cancel=cancel)
+    # Download verifies the exact archive. Open it under the cache's use lock.
+    return Downloadable(PackStatus(pack, PackState.DOWNLOADED, None), pack_audio(cache, pack))
+
+
+def catalogue_message(online: OnlineSets) -> str:
+    if online.catalogue.source is CatalogueSource.LIVE:
+        return "" if online.packs else "There are no downloadable sound sets in the catalogue yet."
+    if online.packs:
+        return "The catalogue is offline. Showing the last available list."
+    return "The catalogue is offline. Built-in and saved sounds are still available."
+
+
+def saved_sources(rows: tuple[SavedSet, ...]) -> tuple[Source, ...]:
+    return tuple(Source(row.id, row.sound_set, "Saved") for row in rows if row.sound_set)
+
+
+def import_message(exc: BaseException, *, clip: bool) -> str:
+    if clip:
+        if isinstance(exc, OSError):
+            return "Could not read that audio file. Check that it still exists and try again."
+        return f"Could not import that sound. {exc}"
+    if isinstance(exc, OSError):
+        return (
+            "Could not open or save that set. Check the file and your available space, then retry."
+        )
+    return (
+        "This file isn’t a supported sound set. Ask for a fresh export from "
+        + config.APP_NAME
+        + "."
+    )

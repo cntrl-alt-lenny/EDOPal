@@ -100,7 +100,7 @@ def settle(predicate: Callable[[], bool], timeout: float = 6) -> None:
         time.sleep(0.01)
 
 
-def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
+def render(out: Path, size: tuple[int, int], root: Path, *, sounds_only: bool = False) -> list[Path]:
     app = QApplication.instance() or QApplication(["EDOPro Studio"])
     theme.apply(app)
     cfg = create_demo(root)
@@ -127,6 +127,11 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     window.show()
     window.setFocus(Qt.FocusReason.OtherFocusReason)
     try:
+        if sounds_only:
+            from tools.studio_sounds_screenshots import render_sounds
+
+            render_sounds(window, root, selected, shot, settle)
+            return files
         shot("01-hd-cards")
         card.options.settings.click()
         card.settings.toggles["save_report"].setChecked(True)
@@ -156,6 +161,8 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
             ("skins", "sleeves", "sounds", "music", "decks", "settings"), 8
         ):
             window.navigate(key)
+            if key == "sounds":
+                settle(lambda: not ctx.tasks.jobs)
             shot(f"{number:02}-{key}")
         window.navigate("cards")
         fake.release.clear()
@@ -195,13 +202,14 @@ def main_cli() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--size", type=parse_size, action="append", help="WxH, repeatable")
+    parser.add_argument("--sounds-only", action="store_true", help="Render the Sounds page scenarios")
     args = parser.parse_args()
     app = QApplication.instance() or QApplication(["EDOPro Studio"])
     app.setQuitOnLastWindowClosed(False)
     for width, height in args.size or [(1280, 800), (1600, 1000)]:
         name = f"{width}x{height}"
         with tempfile.TemporaryDirectory(prefix=".studio-preview-", dir=ROOT) as temporary:
-            files = render(args.out / name, (width, height), Path(temporary))
+            files = render(args.out / name, (width, height), Path(temporary), sounds_only=args.sounds_only)
         print(f"Rendered {len(files)} views at {name} in {files[0].parent}")
 
 
