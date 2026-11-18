@@ -11,7 +11,7 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -252,17 +252,19 @@ class FormatLibrary:
         return data
 
 
-def read_ydk(source: str) -> tuple[tuple[str, ...], ...]:
+def read_ydk(source: str, *, allow_empty_main: bool = False) -> tuple[tuple[str, ...], ...]:
     """Validate card passcodes without imposing modern deck sizes on historical formats."""
     sections: list[list[str]] = [[], [], []]
     current = -1
-    for raw in source.lstrip("\ufeff").splitlines():
+    for number, raw in enumerate(source.lstrip("\ufeff").splitlines(), 1):
         line = raw.strip()
         if not line:
             continue
         lower = line.lower()
         if lower in SECTIONS:
             index = SECTIONS.index(lower)
+            if current == -1 and index != 0:
+                raise DeckError("This decklist is missing its #main section.")
             if index <= current:
                 raise DeckError("This decklist has duplicate or out-of-order sections.")
             current = index
@@ -271,10 +273,10 @@ def read_ydk(source: str) -> tuple[tuple[str, ...], ...]:
         elif current >= 0 and re.fullmatch(r"[0-9]{1,10}", line) and 0 < int(line) <= 0xFFFFFFFF:
             sections[current].append(line)
         else:
-            raise DeckError(
-                "Format Library didn’t return a valid YDK decklist. Open the source to check its availability."
-            )
-    if not sections[0]:
+            raise DeckError(f"Invalid YDK section or passcode on line {number}.")
+    if current == -1:
+        raise DeckError("This decklist is missing its #main section.")
+    if not allow_empty_main and not sections[0]:
         raise DeckError("This decklist has no main-deck cards.")
     return tuple(tuple(cards) for cards in sections)
 
@@ -337,6 +339,28 @@ def save_deck(
     goat_versions: bool = False,
 ) -> tuple[Path, bool]:
     """Publish a complete YDK, preserving personal edits and deduplicating repeat imports."""
+    title = _filename(event, deck)
+    if goat_versions:
+        title += " (GOAT versions)"
+    header = f"#created by {_text(deck.builder)} · Format Library {deck.url}"
+    lines = [header]
+    for marker, entries in zip(SECTIONS, cards, strict=True):
+        lines.extend((marker, *entries))
+    return publish_ydk(game_path, title, ("\n".join(lines) + "\n").encode(), reuse_identical=True)
+
+
+def publish_ydk(
+    game_path: str | Path, title: str, content: bytes, *, reuse_identical: bool = False
+) -> tuple[Path, bool]:
+    """Publish a complete copy under a portable filename using exclusive creation."""
+    if (
+        not title.strip(". ")
+        or title != title.rstrip(". ")
+        or any(c in '<>:"/\\|?*' or unicodedata.category(c)[0] == "C" for c in title)
+        or PureWindowsPath(title + ".ydk").is_reserved()
+        or len(title.encode("utf-8")) > 230
+    ):
+        raise DeckError("Choose a short deck name without reserved characters or folder paths.")
     if not game_path:
         raise DeckError("Choose an EDOPro installation before importing decks.")
     base = Path(game_path).resolve()
@@ -346,13 +370,6 @@ def save_deck(
     if not folder.is_relative_to(base):
         raise DeckError("The deck folder points outside the selected EDOPro installation.")
     folder.mkdir(exist_ok=True)
-    title = _filename(event, deck)
-    if goat_versions:
-        title += " (GOAT versions)"
-    lines = [f"#created by {_text(deck.builder)} · Format Library {deck.url}"]
-    for marker, entries in zip(SECTIONS, cards, strict=True):
-        lines.extend((marker, *entries))
-    content = ("\n".join(lines) + "\n").encode("utf-8")
     temp = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -383,7 +400,7 @@ def save_deck(
                             raise
                 return target, True
             except FileExistsError:
-                if target.is_file() and not target.is_symlink():
+                if reuse_identical and target.is_file() and not target.is_symlink():
                     with contextlib.suppress(OSError), target.open("rb") as original:
                         if original.read(len(content) + 1) == content:
                             return target, False
