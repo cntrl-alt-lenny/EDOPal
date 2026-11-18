@@ -126,6 +126,37 @@ def test_picker_switch_validates_persists_and_broadcasts(
     assert window.pages["cards"].options.scope.group.checkedId() == 0
 
 
+def test_browse_bundle_saves_only_its_validated_data_root(
+    make_window: Callable[..., StudioWindow],
+    qtbot: QtBot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = make_window()
+    settings = Path(window.ctx.cfg.config_path)
+    before = settings.read_bytes() if settings.exists() else None
+    original = window.ctx.installation.path
+    bundle = tmp_path / "Applications/EDOPro.app"
+    data = bundle / "Contents/Resources/ProjectIgnis"
+    data.mkdir(parents=True)
+    (bundle / "Contents/Info.plist").touch()
+    monkeypatch.setattr(config.sys, "platform", "darwin")
+    monkeypatch.setattr(config, "find_edopro_folders", lambda _: [original])
+    monkeypatch.setattr(window.ctx, "choose_folder", lambda _: str(bundle))
+    window.change.click()
+    qtbot.waitUntil(lambda: window.picker.list.count() == 1)
+    window.picker.browse.click()
+    qtbot.waitUntil(lambda: "containing EDOPro" in window.picker.hint.text())
+    assert window.ctx.installation.path == original
+    assert (settings.read_bytes() if settings.exists() else None) == before
+
+    (data / "cards.cdb").touch()
+    window.picker.browse.click()
+    qtbot.waitUntil(lambda: window.ctx.installation.path == str(data))
+    assert window.ctx.installation.ready
+    assert config._load_config_file(str(settings))["edopro_path"] == str(data)
+
+
 def test_many_picker_results_leave_room_for_the_action_row(
     make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:

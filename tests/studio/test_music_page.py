@@ -154,16 +154,29 @@ def test_selection_reload_and_corrupt_playlist(
     assert p.state == "unavailable" and button(p, "Choose folder").isEnabled()
     p.ctx.set_installation(Installation(str(game)))
     assert p.state == "unavailable" and p.data is None
-    folder = game / "sound/.edopro-hd-sync/win"
-    folder.mkdir(parents=True)
-    (folder / "selection.json").write_text("{")
+    original = game / "sound/BGM/win/Original.wav"
+    original_bytes = original.read_bytes()
+    engine.use_track(
+        game,
+        engine.Track("tf5", "Opening hand", p.root / "tf5/deck/Opening hand.wav", "win"),
+        root=p.root,
+    )
+    journal = game / "sound/.edopro-hd-sync/win/selection.json"
+    intact = journal.read_bytes()
+    journal.write_bytes(b"{")
     p.ctx.set_installation(Installation(str(game), True))
     wait(qtbot, p, "home")
     p.scene_buttons["win"].click()
     assert p.albums.restore.isEnabled() and p.albums.list.rowCount() == 1
     p.albums.restore.click()
+    wait(qtbot, p, "error")
+    assert journal.read_bytes() == b"{"
+    assert (journal.parent / "saved/win/Original.wav").read_bytes() == original_bytes
+    journal.write_bytes(intact)
+    button(p, "Retry").click()
     wait(qtbot, p, "playlist")
     assert not p.albums.restore.isEnabled()
+    assert original.read_bytes() == original_bytes
     p.escape()
     recording(p.root / "tf2/deck/After refresh.wav", 9)
     button(p, "Reload").click()

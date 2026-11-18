@@ -10,6 +10,7 @@ from typing import Generic, TypeVar
 
 from music.audio import _scene
 from music.catalogue import LOCAL, SCENES, Game, catalog, library_root, normalized
+from music.digest_cache import browsing_digests
 from music.discovery import Track, scan_scene
 
 T = TypeVar("T")
@@ -59,13 +60,16 @@ class LibraryView:
     def refresh(self, *, checkpoint: Callable[[], None] | None = None) -> None:
         games = catalog(root=self.root)
         groups: dict[tuple[str, str], list[Track]] = {}
-        for scene in SCENES:
-            if checkpoint:
-                checkpoint()
-            for row in scan_scene(self.installation, scene, self.root, games):
-                if row.game not in games:
-                    games[row.game] = Game(row.game, row.game)
-                groups.setdefault((scene, row.game), []).append(row)
+        with browsing_digests(self.root, checkpoint) as digest:
+            for scene in SCENES:
+                if checkpoint:
+                    checkpoint()
+                for row in scan_scene(
+                    self.installation, scene, self.root, games, digest_file=digest
+                ):
+                    if row.game not in games:
+                        games[row.game] = Game(row.game, row.game)
+                    groups.setdefault((scene, row.game), []).append(row)
         # Preserve playlist order. Available recordings follow in title order.
         rows = {
             key: tuple(

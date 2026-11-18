@@ -3,6 +3,7 @@
 import os
 import sqlite3
 import stat
+import time
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from pathlib import Path
@@ -76,59 +77,73 @@ def field_donor(
 
 
 def iter_db_files(
-    edopro_path: str, *, unreadable: list[str] | None = None, confined: bool = False
+    edopro_path: str,
+    *,
+    unreadable: list[str] | None = None,
+    confined: bool = False,
+    deadline: float | None = None,
 ) -> Iterator[str]:
-    """Find card DBs in the EDOPro root, expansions/, and repository delta folders."""
+    """Yield playable databases. The startup probe can stop between directory entries."""
+
+    def expired() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
+
+    def record_error(exc: OSError) -> None:
+        if unreadable is not None and not isinstance(exc, FileNotFoundError):
+            unreadable.append(exc.filename or edopro_path)
 
     def local_path(path: str) -> bool:
         if not confined:
             return True
         try:
             info = os.lstat(path)
-        except FileNotFoundError:
+        except OSError as exc:
+            record_error(exc)
             return False
-        except OSError:
-            if unreadable is not None:
-                unreadable.append(path)
-            return False
-        # Windows junctions can lead outside the selected game or form directory cycles.
         return not (
             stat.S_ISLNK(info.st_mode)
             or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
         )
 
     root_db = os.path.join(edopro_path, "cards.cdb")
-    if local_path(root_db) and os.path.isfile(root_db):
+    if not expired() and local_path(root_db) and os.path.isfile(root_db):
         yield root_db
 
-    exp_path = os.path.join(edopro_path, "expansions")
-    if local_path(exp_path) and os.path.isdir(exp_path):
-        for filename in sorted(os.listdir(exp_path)):
-            if filename.endswith(".cdb"):
-                path = os.path.join(exp_path, filename)
-                if local_path(path) and os.path.isfile(path):
-                    yield path
-
-    repo_path = os.path.join(edopro_path, "repositories")
-    if local_path(repo_path) and os.path.isdir(repo_path):
-
-        def record_error(exc: OSError) -> None:
-            if unreadable is not None:
-                unreadable.append(exc.filename or repo_path)
-
-        for current_root, dirnames, filenames in os.walk(repo_path, onerror=record_error):
-            dirnames.sort()
-            if confined:
-                dirnames[:] = [d for d in dirnames if local_path(os.path.join(current_root, d))]
-            for filename in sorted(filenames):
-                if filename.endswith(".delta.cdb") or (
-                    current_root == os.path.join(repo_path, "delta-bagooska")
-                    and filename.startswith(("prerelease-", "release-"))
-                    and filename.endswith(".cdb")
-                ):
-                    path = os.path.join(current_root, filename)
-                    if local_path(path):
-                        yield path
+    expansions = os.path.join(edopro_path, "expansions")
+    repositories = os.path.join(edopro_path, "repositories")
+    update = os.path.join(repositories, "delta-bagooska")
+    directories = [repositories, expansions]
+    while directories and not expired():
+        current = directories.pop()
+        if not local_path(current):
+            continue
+        children = []
+        try:
+            with os.scandir(current) as scan:
+                entries = sorted(scan, key=lambda entry: entry.name) if deadline is None else scan
+                for entry in entries:
+                    if expired():
+                        return
+                    if current != expansions and entry.is_dir(follow_symlinks=False):
+                        if local_path(entry.path):
+                            children.append(entry.path)
+                    elif (
+                        entry.name.endswith(".cdb")
+                        and (
+                            current == expansions
+                            or entry.name.endswith(".delta.cdb")
+                            or (
+                                current == update
+                                and entry.name.startswith(("release-", "prerelease-"))
+                            )
+                        )
+                        and local_path(entry.path)
+                        and entry.is_file()
+                    ):
+                        yield entry.path
+        except OSError as exc:
+            record_error(exc)
+        directories.extend(reversed(children))
 
 
 def get_db_files(

@@ -204,7 +204,7 @@ def save_edopro_path(path: str, edopro_path: str) -> bool:
     return save_setting(path, "edopro_path", edopro_path)
 
 
-def folder_has_card_databases(path: str) -> bool:
+def folder_has_card_databases(path: str, *, deadline: float | None = None) -> bool:
     """Return True when a folder holds card databases the sync can actually read.
 
     This mirrors main.get_db_files() exactly. Keep the two in step: if
@@ -214,7 +214,7 @@ def folder_has_card_databases(path: str) -> bool:
     if not path or not os.path.isdir(path):
         return False
     with contextlib.suppress(OSError):
-        return next(iter_db_files(path), None) is not None
+        return next(iter_db_files(path, deadline=deadline), None) is not None
     return False
 
 
@@ -231,9 +231,27 @@ def looks_like_edopro_folder(path: str) -> bool:
 
 
 def _has_game_executable(path: str) -> bool:
+    if any(os.path.isfile(os.path.join(path, name)) for name in ("EDOPro.exe", "EDOPro")):
+        # Finder bundles can keep the executable and writable game data apart.
+        bundle_binaries = (
+            os.path.abspath(path).replace(os.sep, "/").lower().endswith(".app/contents/macos")
+        )
+        return not bundle_binaries or os.path.isfile(os.path.join(path, "config", "system.conf"))
+    if sys.platform != "darwin" or not os.path.isfile(os.path.join(path, "config", "system.conf")):
+        return False
+    from pathlib import Path
+
+    root = Path(path)
+    resources = root.parent if root.name == "ProjectIgnis" else root
+    if resources.name == "Resources" and resources.parent.name == "Contents":
+        return (
+            resources.parent.parent.suffix.lower() == ".app"
+            and (resources.parent / "MacOS/EDOPro").is_file()
+            and (resources.parent / "Info.plist").is_file()
+        )
     return any(
-        os.path.isfile(os.path.join(path, name))
-        for name in ("EDOPro.exe", "EDOPro", os.path.join("EDOPro.app", "Contents", "Info.plist"))
+        (root / name / "Contents/Info.plist").is_file()
+        for name in ("EDOPro.app", "ProjectIgnis.app")
     )
 
 
@@ -306,14 +324,112 @@ def _search_parents() -> list[str]:
                 parents.extend((value, os.path.join(value, "Programs")))
     elif sys.platform == "darwin":
         parents.extend(("/Applications", os.path.join(home, "Library", "Application Support")))
+        for applications in ("/Applications", os.path.join(home, "Applications")):
+            for name in ("EDOPro.app", "ProjectIgnis.app"):
+                contents = os.path.join(applications, name, "Contents")
+                if os.path.isfile(os.path.join(contents, "Info.plist")):
+                    parents.extend((contents, os.path.join(contents, "Resources")))
     else:
-        parents.extend(
-            (
-                os.path.join(home, ".local", "share"),
-                os.path.join(home, ".steam", "steam", "steamapps", "common"),
-                "/opt",
-            )
-        )
+        import re
+        from itertools import islice
+        from pathlib import Path
+
+        # Leave most of the existing search budget for scoring installations.
+        deadline = time.monotonic() + _SEARCH_TIME_BUDGET_SECONDS / 3
+        extra: dict[Path, None] = {}
+        checked_apps: dict[Path, None] = {}
+
+        def add(path: Path) -> None:
+            if time.monotonic() < deadline and len(extra) < 192:
+                with contextlib.suppress(OSError):
+                    if path.is_dir():
+                        extra[path] = None
+
+        def children(path: Path, limit: int) -> Iterator[Path]:
+            if time.monotonic() < deadline:
+                with contextlib.suppress(OSError), os.scandir(path) as entries:
+                    for entry in islice(entries, limit):
+                        if time.monotonic() >= deadline:
+                            return
+                        if entry.is_dir():
+                            yield Path(entry.path)
+
+        def prefix(path: Path) -> None:
+            drive = path / "drive_c"
+            for folder in ("", "Program Files", "Program Files (x86)", "Games"):
+                add(drive / folder)
+
+        def steam_apps(path: Path) -> None:
+            if time.monotonic() >= deadline or len(checked_apps) >= 64:
+                return
+            with contextlib.suppress(OSError, RuntimeError):
+                if path.is_dir():
+                    key = path.resolve()
+                    if key not in checked_apps:
+                        checked_apps[key] = None
+                        add(path / "common")
+
+        user = Path(home)
+        data = Path(os.environ.get("XDG_DATA_HOME") or user / ".local/share")
+        if not data.is_absolute():
+            data = user / ".local/share"
+        flatpak = user / ".var/app"
+        parents.extend((str(data), str(user / ".local/share"), "/opt"))
+        prefix(Path(os.environ.get("WINEPREFIX") or user / ".wine"))
+        for steam in (
+            data / "Steam",
+            user / ".steam/steam",
+            user / ".steam/root",
+            flatpak / "com.valvesoftware.Steam/.local/share/Steam",
+            flatpak / "com.valvesoftware.Steam/data/Steam",
+        ):
+            steam_apps(steam / "steamapps")
+            for name in ("steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"):
+                if time.monotonic() >= deadline:
+                    break
+                try:
+                    manifest_path = steam / name
+                    if not manifest_path.is_file():
+                        continue
+                    with manifest_path.open("rb") as manifest:
+                        raw = manifest.read(256 * 1024 + 1)
+                except OSError:
+                    continue
+                if len(raw) > 256 * 1024:
+                    continue
+                # Modern manifests use "path"; older ones pair a numeric library ID with its path.
+                values = re.finditer(
+                    r'"(?:path|\d+)"\s*"((?:\\.|[^"\\])*)"', os.fsdecode(raw), re.I
+                )
+                for match in values:
+                    if time.monotonic() >= deadline:
+                        break
+                    library = Path(re.sub(r'\\(["\\])', r"\1", match[1]))
+                    if library.is_absolute() and "\x00" not in str(library):
+                        steam_apps(library / "steamapps")
+
+        for app in children(flatpak, 256):
+            if any(name in app.name.lower() for name in ("edopro", "ygopro", "projectignis")):
+                for folder in ("", "data", "config", ".local/share"):
+                    add(app / folder)
+        for parent in (
+            Path("/run/media") / user.name,
+            Path("/run/media"),
+            Path("/media") / user.name,
+            Path("/mnt"),
+        ):
+            add(parent)
+            for volume in children(parent, 32):
+                add(volume)
+                add(volume / "Games")
+                steam_apps(volume / "steamapps")
+                steam_apps(volume / "SteamLibrary/steamapps")
+        # Locate native games on every library before spending the remaining
+        # scan budget on potentially hundreds of unrelated Proton prefixes.
+        for apps in checked_apps:
+            for app in children(apps / "compatdata", 256):
+                prefix(app / "pfx")
+        parents.extend(map(str, extra))
 
     seen: set[str] = set()
     unique: list[str] = []
@@ -377,14 +493,58 @@ def _found_installations(first_guesses: list[str] | None) -> Iterator[tuple[int,
                 yield score, path
 
 
+def installation_roots(path: str) -> tuple[str, ...]:
+    """Candidate game-data roots belonging to a single selection, in preference order."""
+    if sys.platform != "darwin" or not path.lower().endswith(".app"):
+        return (path,)
+    contents = os.path.join(path, "Contents")
+    if not os.path.isfile(os.path.join(contents, "Info.plist")):
+        return ()
+    resources = os.path.join(contents, "Resources")
+    return (
+        resources,
+        os.path.join(resources, "ProjectIgnis"),
+        os.path.join(contents, "MacOS"),
+        os.path.dirname(path),
+    )
+
+
 def find_edopro_folder(first_guesses: list[str] | None = None) -> str | None:
     """Stop at the first ready installation to keep normal startup fast."""
+    deadline = time.monotonic() + _SEARCH_TIME_BUDGET_SECONDS
+
+    def candidates() -> Iterator[str]:
+        yield from (path for path in first_guesses or () if path)
+        parents = _search_parents()
+        for parent in parents:
+            for name in EDOPRO_FOLDER_NAMES:
+                yield os.path.join(parent, name)
+        # Startup only needs one ready installation. Stream large directories
+        # so constructing a sorted picker list cannot consume the whole budget.
+        for parent in parents:
+            if time.monotonic() >= deadline:
+                return
+            with contextlib.suppress(OSError), os.scandir(parent) as entries:
+                for entry in entries:
+                    if time.monotonic() >= deadline:
+                        return
+                    if entry.is_dir():
+                        yield entry.path
+
     fallback = None
-    for score, path in _found_installations(first_guesses):
-        if score == 2:
-            return path
-        if fallback is None:
-            fallback = path
+    seen = set()
+    for candidate in candidates():
+        if time.monotonic() >= deadline:
+            break
+        for root in installation_roots(os.path.abspath(candidate)):
+            key = os.path.normcase(root)
+            if key in seen:
+                continue
+            seen.add(key)
+            if folder_has_card_databases(root, deadline=deadline):
+                return root
+            if fallback is None and _has_game_executable(root):
+                fallback = root
     return fallback
 
 

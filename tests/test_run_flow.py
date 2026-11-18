@@ -237,17 +237,19 @@ class RunFlowTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
         self.assertFalse(os.path.exists(os.path.join(self.pics, "111.jpg")))
 
-    def test_my_decks_with_empty_decks_falls_back_to_full_sync(self):
-        """The window/quick-start path keeps the friendly fallback."""
+    def test_my_decks_with_empty_decks_reports_nothing_to_sync(self) -> None:
         deck_dir = os.path.join(self.root, "deck")
         os.makedirs(deck_dir, exist_ok=True)
         with open(os.path.join(deck_dir, "empty.ydk"), "w", encoding="utf-8") as f:
             f.write("#main\n")
 
         cards = {111: "Only Card"}
-        self._run(self._cfg("--my-decks"), cards, {111: main.FetchResult.OK})
+        cfg = self._cfg("--my-decks")
+        downloads = self._run(cfg, cards, {111: main.FetchResult.OK})
 
-        self.assertTrue(os.path.exists(os.path.join(self.pics, "111.jpg")))
+        downloads.assert_not_awaited()
+        self.assertEqual(cfg.idle_summary[0], "No cards found in your decks — nothing to sync")
+        self.assertFalse(os.path.exists(os.path.join(self.pics, "111.jpg")))
 
     def test_repair_preview_preserves_card_and_field_and_reports_both(self):
         card = Path(self.pics, "111.jpg")

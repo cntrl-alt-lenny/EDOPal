@@ -138,7 +138,14 @@ class InstallationPicker(QWidget):
         settings = self.ctx.cfg.config_path
 
         def inspect(_: WorkerContext) -> tuple[Installation, bool]:
-            installation = Installation.inspect(path)
+            installation = Installation()
+            for root in config.installation_roots(path):
+                candidate = Installation.inspect(root)
+                if candidate.ready:
+                    installation = candidate
+                    break
+                if not installation.path:
+                    installation = candidate
             saved = bool(installation.path) and config.save_edopro_path(settings, installation.path)
             return installation, saved
 
