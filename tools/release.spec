@@ -48,7 +48,7 @@ exclude += [
     if mod.name.startswith("Qt") and mod.name not in QT_MODULES
 ]
 datas = [(str(root / "VERSION"), "."), (str(stage / "app-icon.png"), "assets")]
-for tree in ("extras", "music", "window"):
+for tree in ("extras", "music", "window", "formats"):
     datas.append((str(root / "assets" / tree), "assets/" + tree))
 for file in ("shared.zip", "Inter-OFL.txt", "README.md"):
     datas.append((str(root / "assets/appearance" / file), "assets/appearance"))

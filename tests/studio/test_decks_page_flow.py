@@ -1,4 +1,6 @@
+import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from threading import Event as CancelEvent
 
@@ -49,7 +51,7 @@ def test_import_partial_error_and_undo_protects_personal_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(flow, "_game_running", lambda _: False)
-    monkeypatch.setattr(flow, "installed_card_names", lambda _: {1000: "Normal", 1040: "Extra"})
+    monkeypatch.setattr(flow, "local_deck_printings", lambda _: {1000: "Normal", 1040: "Extra"})
     existing = flow.publish_deck(tmp_path, GOAT, DECKS[0], CARDS)
     existing.path.write_text("My earlier edits", encoding="utf-8")
     calls = []
@@ -117,7 +119,7 @@ def test_import_receipt_counts_verified_printing_matches(
 ) -> None:
     monkeypatch.setattr(flow, "_game_running", lambda _: False)
     monkeypatch.setattr(
-        flow, "installed_card_names", lambda _: {1000: "Normal", 1114: "Local Card", 1040: "Extra"}
+        flow, "local_deck_printings", lambda _: {1000: "Normal", 1114: "Local Card", 1040: "Extra"}
     )
     client = library(monkeypatch, lambda _: CARDS)
     preview = DeckPreview(
@@ -132,6 +134,37 @@ def test_import_receipt_counts_verified_printing_matches(
     assert receipt.matched == 1
     assert not receipt.unresolved
     assert "\n1114\n" in receipt.paths[0].read_text(encoding="utf-8")
+
+
+def test_import_corrects_nibiru_token_even_when_every_downloaded_id_is_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(flow, "_game_running", lambda _: False)
+    with closing(sqlite3.connect(tmp_path / "cards.cdb")) as db, db:
+        db.executescript(
+            "CREATE TABLE datas(id INTEGER PRIMARY KEY, type INTEGER);"
+            "CREATE TABLE texts(id INTEGER PRIMARY KEY, name TEXT);"
+            "INSERT INTO datas VALUES (27204311, 33), (27204312, 16401);"
+            "INSERT INTO texts VALUES (27204311, 'Nibiru, the Primal Being'),"
+            "(27204312, 'Primal Being Token');"
+        )
+    cards = (("27204312", "27204312"), (), ("27204312",))
+    nibiru = (27204311, "Nibiru, the Primal Being")
+    client = library(monkeypatch, lambda _: cards)
+    details = DeckPreview((), ((nibiru, nibiru), (), (nibiru,)), cards)
+    monkeypatch.setattr(client, "preview", lambda _: details)
+    receipt = flow.import_decks(
+        flow.ImportBatch(tmp_path, GOAT, DECKS[:1]), client, CancelEvent(), lambda _: None
+    )
+    assert receipt.matched == 3 and not receipt.unresolved
+    assert receipt.paths[0].read_text(encoding="utf-8").splitlines()[1:] == [
+        "#main",
+        "27204311",
+        "27204311",
+        "#extra",
+        "!side",
+        "27204311",
+    ]
 
 
 def test_game_reopens_between_downloads_and_retry_preserves_undo(

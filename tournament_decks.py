@@ -10,6 +10,7 @@ import re
 import tempfile
 import unicodedata
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path, PureWindowsPath
@@ -17,6 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from card_databases import iter_installed_printings
 from network_tls import create_ssl_context
 
 SITE = "https://formatlibrary.com"
@@ -295,10 +297,25 @@ def _filename(event: Event, deck: Deck) -> str:
     return f"{title} [FL{deck.id}]"
 
 
+def deck_printing_names(rows: Iterable[tuple[int, str, int | None]]) -> dict[int, str]:
+    """Index playing-deck printings. A later token or script record overrides an earlier card."""
+    names = {}
+    for code, name, kind in rows:
+        if isinstance(kind, int) and (kind & 0x4000 or not kind & 7):
+            names.pop(code, None)
+        else:
+            names[code] = name
+    return names
+
+
+def local_deck_printings(game: Path) -> dict[int, str]:
+    return deck_printing_names(iter_installed_printings(game))
+
+
 def match_local_printings(
     cards: tuple[tuple[str, ...], ...], local: dict[int, str], preview: DeckPreview
 ) -> tuple[tuple[tuple[str, ...], ...], int]:
-    """Keep known passcodes. Resolve absent artwork variants with source and local evidence."""
+    """Keep local deck printings. Confirm replacements for missing or non-deckable export IDs."""
     if preview.original != cards or len(preview.printings) != len(cards):
         return cards, 0
     sections = []
@@ -308,7 +325,9 @@ def match_local_printings(
         # Remove identical passcodes by multiplicity before matching its alt-art IDs.
         original = Counter(int(code) for code in section)
         published = Counter(code for code, _ in printings)
-        names = dict(printings)
+        names: dict[int, set[str]] = {}
+        for code, name in printings:
+            names.setdefault(code, set()).add(name.casefold())
         replacements = {}
         if len(section) == len(printings) and 0 not in published:
             remaining = published - original
@@ -321,8 +340,11 @@ def match_local_printings(
                 remaining[base] -= copies
                 if (
                     variant not in local
+                    # A single export ID can describe both an exact card and a variant.
+                    # Section order cannot tell us which identical copies to change.
+                    and variant not in published
                     and base in local
-                    and local[base].casefold() == names[base].casefold()
+                    and names[base] == {local[base].casefold()}
                 ):
                     replacements[variant] = str(base)
         revised = tuple(replacements.get(int(code), code) for code in section)

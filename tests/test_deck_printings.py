@@ -1,6 +1,6 @@
 import unittest
 
-from tournament_decks import DeckPreview, match_local_printings
+from tournament_decks import DeckPreview, deck_printing_names, match_local_printings
 
 
 class DeckPrintingTests(unittest.TestCase):
@@ -55,3 +55,34 @@ class DeckPrintingTests(unittest.TestCase):
             self.cards, self.local, DeckPreview((), self.printings, self.cards)
         )
         self.assertEqual(fixed[0][0], "76922030")
+
+
+def test_non_deckable_collision_requires_a_unique_playable_printing_and_matching_source() -> None:
+    rows = [
+        (100, "Example", 33),
+        (101, "Script-only record", 0),
+        (102, "Marker", 0x10004000),
+        (103, "Playable art", 33),
+        (104, "Legacy name without type", None),
+        (105, "Earlier card", 33),
+        (105, "Token override", 0x4001),
+    ]
+    local = deck_printing_names(rows)
+    assert local == {100: "Example", 103: "Playable art", 104: "Legacy name without type"}
+    cards = (("101", "102", "103"), (), ())
+    preview = DeckPreview((), (((100, "Example"),) * 3, (), ()), cards)
+    assert match_local_printings(cards, local, preview) == ((("100", "100", "103"), (), ()), 2)
+    for unconfirmed in (
+        DeckPreview((), (((105, "Token override"),) * 3, (), ()), cards),
+        DeckPreview((), (((100, "Different name"),) * 3, (), ()), cards),
+        DeckPreview((), (((100, "Example"),) * 2 + ((103, "Playable art"),), (), ()), ()),
+    ):
+        assert match_local_printings(cards, local, unconfirmed) == (cards, 0)
+
+    duplicates = (("105", "105"), (), ())
+    for disputed in (
+        ((100, "Example"), (105, "Token override")),
+        ((100, "Different card"), (100, "Example")),
+    ):
+        details = DeckPreview((), (disputed, (), ()), duplicates)
+        assert match_local_printings(duplicates, local, details) == (duplicates, 0)

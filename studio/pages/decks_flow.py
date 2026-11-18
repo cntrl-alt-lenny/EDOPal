@@ -8,7 +8,6 @@ from pathlib import Path
 from threading import Event as CancelEvent
 
 from artwork_flow import valid_decks
-from card_databases import installed_card_names
 from goat_versions import GoatVersions, installed_aliases, installed_whitelist
 from music.settings import _game_running
 from tournament_decks import (
@@ -18,6 +17,7 @@ from tournament_decks import (
     DeckPublication,
     Event,
     FormatLibrary,
+    local_deck_printings,
     match_local_printings,
     publish_deck,
 )
@@ -181,7 +181,7 @@ def import_decks(
     try:
         if not cancel.is_set():
             require_game_closed(game)
-            local = installed_card_names(game)
+            local = local_deck_printings(game)
             if historical:
                 limits = installed_whitelist(game)
                 if not limits or not local:

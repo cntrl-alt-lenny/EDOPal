@@ -21,12 +21,17 @@ class Banlist:
 
 
 def parse_lists(path: Path) -> Iterator[Banlist]:
+    yield from parse_list_text(bounded_text(path, 4 << 20), path)
+
+
+def parse_list_text(text: str, path: Path) -> Iterator[Banlist]:
+    """Parse list sections, retaining the source identity even for an archive member."""
     name = ""
     header = 0
     whitelist = False
     limits: dict[int, int] = {}
     issues: list[str] = []
-    for number, raw in enumerate(bounded_text(path, 4 << 20).splitlines(), 1):
+    for number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if line.startswith("!"):
             if header:
