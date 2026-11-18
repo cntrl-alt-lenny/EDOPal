@@ -17,6 +17,7 @@ from studio.pages.decks_flow import (
     resume_import,
     undo_import,
 )
+from studio.pages.decks_handoff import saved_deck_selection
 from studio.tasks import Job, Work, WorkerContext
 from tournament_decks import DeckError, DeckPublication
 
@@ -44,6 +45,7 @@ class DeckImports:
         host.results.undo.clicked.connect(self._confirm_undo)
         host.results.retry.clicked.connect(self._retry)
         host.results.artwork.clicked.connect(self._sync_artwork)
+        host.results.open_saved.clicked.connect(self._open_saved)
 
     def reset(self) -> None:
         self.receipt = self.batch = None
@@ -145,6 +147,8 @@ class DeckImports:
         )
         self.host.results.undo.setEnabled(True)
         self.host.results.artwork.setEnabled(True)
+        self.host.results.open_saved.setEnabled(True)
+        self.host.results.open_saved.setVisible(bool(self._remaining_paths()))
         self.host.results.artwork.setVisible(
             self.handoff_available
             and self.host.ctx.installation.ready
@@ -153,13 +157,24 @@ class DeckImports:
         if self.removed:
             self.host.results.mark_removed(self.removed)
         self.retry_action = None
-        if receipt.blocked and self.batch is not None and not self.removed:
+        if receipt.skipped and not receipt.stopped and self.batch is not None and not self.removed:
             batch = self.batch
             self.retry_action = lambda: self._run_import(batch, receipt)
         if self.undo_notice:
             self.host.results.notice.show_message(self.undo_notice)
         self.host.results.retry.setVisible(self.retry_action is not None)
         self.host._show(self.host.results, self.host.results.back)
+
+    def _remaining_paths(self) -> tuple[Path, ...]:
+        return tuple(path for path in self.receipt.paths if path not in self.removed)
+
+    def _open_saved(self) -> None:
+        if self.receipt is None or self.job or self.host.ctx.busy:
+            return
+        selection = saved_deck_selection(self.host.ctx)
+        selection.paths = self._remaining_paths()
+        if not self.host.ctx.navigate("mydecks"):
+            selection.paths = ()
 
     def _open_review(self) -> None:
         if self.receipt:
@@ -193,6 +208,7 @@ class DeckImports:
         self.host.results.undo.setEnabled(False)
         self.host.results.retry.hide()
         self.host.results.artwork.setEnabled(False)
+        self.host.results.open_saved.setEnabled(False)
         self.host.results.notice.show_message(
             "Removing unchanged copies. You can change folders when it’s done."
         )

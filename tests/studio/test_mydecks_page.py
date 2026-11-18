@@ -10,12 +10,15 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
+from artwork_flow import valid_decks
 from config import Config
 from decks import DeckIndexer, Library, Sections, encode_ydke
+from decks.sharing import MAX_CODE
 from studio.context import Installation
+from studio.pages import mydecks_copies
 from studio.pages import mydecks_files as copies
 from studio.pages.mydecks import MyDecksPage
-from studio.pages.mydecks_checks import FormatCheck
+from studio.pages.mydecks_checks import STATUS, FormatCheck
 from studio.pages.mydecks_library import Collection
 from studio.pages.mydecks_logic import change_lines, library_rows
 from studio.pages.mydecks_widgets import Screen
@@ -84,7 +87,8 @@ def test_deck_contents_clipboard_artwork_and_file_reveal(
     open_row(p.view, "Empty Jar - Athens", qtbot)
     d = next(d for d in p.lib.decks if d.name == "Empty Jar - Athens")
     view = p.view
-    view.contents.sections.button(2).click()
+    view.contents.sections.buttons[2].click()
+    assert view.contents.types.text() == "3 monsters"
     assert [t.title for t in view.contents.grid.tiles.items] == [
         "1 × Buster Blader",
         "1 × Jinzo",
@@ -167,15 +171,18 @@ def test_import_busy_retry_no_clobber_and_undo(
     review = p.view
     review.code.setText("broken")
     review.preview_btn.click()
+    qtbot.waitUntil(lambda: "could not be read" in review.message.text())
     assert not review.save_btn.isEnabled() and "could not be read" in review.message.text()
     code = encode_ydke(Sections((1001, 1002), (), (1000,)))
     review.code.setText(code)
     review.preview_btn.click()
+    qtbot.waitUntil(lambda: review.contents is not None)
     assert len(review.contents.grid.tiles.items) == 2
     review.code.setText(code + "!")
     assert not review.save_btn.isEnabled() and review.contents is None
     review.code.setText(code)
     review.preview_btn.click()
+    qtbot.waitUntil(review.save_btn.isEnabled)
     review.name.setText("Spellcasters")
     gate = threading.Event()
 
@@ -339,6 +346,7 @@ def test_failed_save_does_not_publish_stale_preview(
     review = p.view
     review.code.setText(encode_ydke(Sections((1000,), (), ())))
     review.preview_btn.click()
+    qtbot.waitUntil(review.save_btn.isEnabled)
     monkeypatch.setattr(copies, "_game_running", lambda _: True)
     review.save_btn.click()
     qtbot.waitUntil(lambda: p.retry.isVisible())
@@ -356,13 +364,126 @@ def test_selected_deck_reaches_real_artwork_handoff(
         synced.extend(cfg.deck_paths)
 
     window = make_window(offline)
+    game = Path(window.ctx.installation.path)
+    deck_folder = game / "deck"
+    nested = deck_folder / "Goat"
+    nested.mkdir()
+    (deck_folder / "Spellcasters.ydk").rename(nested / "Spellcasters.ydk")
     window.nav["mydecks"].click()
     page = window.current
     qtbot.waitUntil(lambda: isinstance(page.view, Collection))
     deck = page.lib.decks[0]
+    assert deck.folder == Path("Goat")
+    outside = game / "outside.ydk"
+    outside.write_bytes(deck.path.read_bytes())
+    assert not valid_decks(str(game), game, (outside,))
     open_row(page.view, deck.name, qtbot)
     monkeypatch.setattr(copies, "_game_running", lambda _: False)
     control(page.view, "Get HD artwork").click()
     cards = window.pages["cards"]
     qtbot.waitUntil(lambda: cards.state == "results")
     assert window.current is cards and synced == [str(deck.path)]
+
+
+def test_oversized_and_repeated_codes_keep_existing_files(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, p = saved
+    monkeypatch.setattr(copies, "_game_running", lambda _: False)
+    clip = QApplication.clipboard()
+    p.view.import_btn.click()
+    review = p.view
+    clip.setText("x" * (2 * MAX_CODE))
+    review.code.paste()
+    review.preview_btn.click()
+    assert "too large" in review.message.text()
+    assert review.contents is None and not review.save_btn.isEnabled()
+
+    original = p.lib.game / "deck/Spellcasters.ydk"
+    before = original.read_bytes()
+    code = encode_ydke(Sections((1001, 1002)))
+    for i in (2, 3):
+        review.code.setText(code)
+        review.preview_btn.click()
+        qtbot.waitUntil(review.save_btn.isEnabled)
+        review.name.setText(original.stem)
+        assert "numbered filename" in review.note.text()
+        if i == 3:
+            assert "already saved in Spellcasters (2)" in review.note.text()
+        review.save_btn.click()
+        qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+        view = p.view
+        selected = view.rows.currentIndex()
+        assert view.model.rows[selected.row()].deck.name == f"Spellcasters ({i})"
+        assert original.read_bytes() == before
+        view.import_btn.click()
+        review = p.view
+
+
+def test_format_overview_scrolls_and_labels_each_verdict(saved: tuple, qtbot: QtBot) -> None:
+    win, p = saved
+    win.resize(1280, 800)
+    file = p.lib.game / "deck/Archive/Damaged copy.ydk"
+    for i in range(50):
+        file.with_name(f"Weekend {i:02d}.ydk").write_bytes(file.read_bytes())
+    p.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+    p.view.check.click()
+    check = p.view
+    qtbot.waitUntil(lambda: check.results.count() >= 60)
+    assert check.results.verticalScrollBar().maximum() > 0
+    for status, (_, colour) in STATUS.items():
+        assert status in check.counts[status].text()
+        assert colour in check.counts[status].styleSheet()
+    check.filter.setCurrentText("Could not verify")
+    last = next(
+        check.results.item(i)
+        for i in reversed(range(check.results.count()))
+        if not check.results.item(i).isHidden()
+    )
+    assert "Weekend" in last.text()
+    check.results.setCurrentItem(last)
+    check.results.scrollToItem(last)
+    qtbot.keyClick(check.results, Qt.Key.Key_Return)
+    qtbot.waitUntil(lambda: p.view is not check and bool(p.view.verdicts))
+    assert p.view.summary.text() == "Could not verify"
+    assert STATUS["could not verify"][1] in p.view.summary.styleSheet()
+    assert "card number" in p.view.details.toPlainText()
+
+
+def test_decode_can_finish_off_page_but_escape_discards_it(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window, page = saved
+    entered, release = threading.Event(), threading.Event()
+    decode = mydecks_copies.preview_ydke
+
+    def held(code, catalog):
+        entered.set()
+        release.wait(5)
+        return decode(code, catalog)
+
+    monkeypatch.setattr(mydecks_copies, "preview_ydke", held)
+    library = page.view
+    library.import_btn.click()
+    review = page.view
+    review.code.setText(encode_ydke(Sections((1001,))))
+    review.preview_btn.click()
+    try:
+        qtbot.waitUntil(entered.is_set)
+        assert window.navigate("settings")
+        assert window.navigate("mydecks") and page.view is review
+    finally:
+        release.set()
+    qtbot.waitUntil(review.save_btn.isEnabled)
+    entered.clear()
+    release.clear()
+    review.preview_btn.click()
+    try:
+        qtbot.waitUntil(entered.is_set)
+        qtbot.keyClick(window, Qt.Key.Key_Escape)
+        assert page.view is library
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+    assert isinstance(page.view, Collection)

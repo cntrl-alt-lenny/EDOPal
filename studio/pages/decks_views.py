@@ -3,24 +3,23 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QResizeEvent
+from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QVBoxLayout, QWidget
 
 from studio import theme as t
 from studio.pages.decks_browser import ListMessage, Rows
+from studio.pages.decks_contents import DeckContents
 from studio.pages.decks_flow import GOAT_ROOM_SETTINGS, ImportReceipt
-from studio.pages.decks_preview_data import GROUPS, PreviewSection
+from studio.pages.decks_handoff import HD_ARTWORK
+from studio.pages.decks_preview_data import PreviewSection
 from studio.tasks import TaskRunner
 from studio.widgets import (
     Button,
     ElidedLabel,
     Hero,
-    ImageTileGrid,
     Notice,
     Panel,
     ProgressBlock,
-    SegmentedControl,
-    Tile,
     ToggleSwitch,
     glyph,
     label,
@@ -55,93 +54,39 @@ class PreviewView(Detail):
         self.title, self.meta = self.heading("", "")
         self.message = ListMessage()
         self.body.addWidget(self.message, 1)
-        self.sections = SegmentedControl(
-            [
-                (name, "0 cards", symbol)
-                for name, symbol in zip(GROUPS, ("deck", "cards", "sleeves"), strict=True)
-            ]
-        )
-        self.body.addWidget(self.sections)
+        self.contents = DeckContents(tasks)
+        self.body.addWidget(self.contents, 1)
 
-        self.content = Panel(t.LG)
-        self.types = label("", "body", True)
-        self.content.body.addWidget(self.types)
-        collection = QHBoxLayout()
-        collection.setSpacing(t.LG)
-        self.gallery = ImageTileGrid(tasks)
-        self.gallery.setAccessibleName("Cards with artwork on disk")
-        self.gallery.setMinimumHeight(t.TILE_SIZE[1] + t.LG)
-        self.gallery.viewport().setStyleSheet(f"background: {t.RAIL};")
-        collection.addWidget(self.gallery, 3)
-        self.names = Rows(("Card", "Copies"))
-        self.names.setAccessibleName("Cards without local artwork")
-        self.names.fixed_column(1, t.HUGE + t.MD)
-        collection.addWidget(self.names, 2)
-        self.content.body.addLayout(collection, 1)
-        self.empty = label("There are no cards in this section.", "muted")
-        self.content.body.addWidget(self.empty)
-        self.body.addWidget(self.content, 1)
-
-        footer = Panel(t.LG)
+        footer = Panel(t.MD)
         row = QHBoxLayout()
         self.source = Button("Source decklist", "quiet", "link")
         self.save = Button("Add to EDOPro", "primary", "download")
         row.addWidget(self.source)
         row.addStretch()
-        row.addWidget(self.save)
         self.goat = ToggleSwitch(
-            "Use installed GOAT card versions",
+            "Use GOAT card versions",
             "Save a separate historical copy.",
             False,
         )
-        footer.body.addWidget(self.goat)
+        self.goat.setMinimumWidth(t.TILE_LARGE * 2 + t.LG)
+        row.addWidget(self.goat)
+        row.addWidget(self.save)
         footer.body.addLayout(row)
         self.body.addWidget(footer)
-        self.sections.changed.connect(self.show_section)
-        self.data: tuple[PreviewSection, ...] = ()
 
     def start(self, event: Event, deck: Deck) -> None:
         self.title.set_value(deck.name)
         placement = f"  ·  Place {deck.place}" if deck.place else ""
         self.meta.set_value(f"{deck.builder}  ·  {event.name}{placement}")
-        self.data = ()
-        self.gallery.set_tiles(())
-        self.sections.hide()
-        self.content.hide()
-        self.message.set_copy("Loading deck preview…", "Reading the published list.", False)
+        self.contents.grid.show_cards(())
+        self.contents.hide()
+        self.message.set_copy("Loading deck preview?", "Reading the published list.", False)
         self.message.show()
 
     def loaded(self, sections: tuple[PreviewSection, ...]) -> None:
-        self.data = sections
-        for button, section in zip(self.sections.buttons, sections, strict=True):
-            count = f"{section.count} {'card' if section.count == 1 else 'cards'}"
-            button.hint.setText(count)
-            button.setAccessibleDescription(count)
-        self.sections.select(0)
-        self.show_section(0)
-        self.sections.show()
-        self.content.show()
+        self.contents.set_sections(sections)
+        self.contents.show()
         self.message.hide()
-
-    def show_section(self, section: int) -> None:
-        cards = self.data[section]
-        self.types.setText(
-            "   ·   ".join(f"{count} {kind.lower()}" for kind, count in cards.type_counts)
-        )
-        self.types.setVisible(bool(cards.cards))
-        images = [
-            Tile(f"{card.name} ×{card.copies}", card.artwork)
-            for card in cards.cards
-            if card.artwork is not None
-        ]
-        self.gallery.set_tiles(images)
-        self.gallery.setVisible(bool(images))
-        self.names.clear()
-        for card in cards.cards:
-            if card.artwork is None:
-                self.names.row((card.name, str(card.copies)))
-        self.names.setVisible(self.names.topLevelItemCount() > 0)
-        self.empty.setVisible(not cards.cards)
 
 
 class ImportView(QWidget):
@@ -210,21 +155,36 @@ class ReceiptView(Detail):
         )
         self.body.addWidget(self.undo_note)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(t.SM)
+        self.actions = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.actions.setSpacing(t.SM)
+        maintenance = QHBoxLayout()
+        next_steps = QHBoxLayout()
         self.undo = Button("Undo this import")
-        self.retry = Button("Retry", "primary")
+        self.retry = Button("Retry")
         self.review = Button("Review GOAT matches")
-        self.artwork = Button("Get HD artwork for these decks", "primary", "download")
-        actions.addWidget(self.undo)
-        actions.addWidget(self.review)
-        actions.addStretch()
-        actions.addWidget(self.retry)
-        actions.addWidget(self.artwork)
-        self.body.addLayout(actions)
+        self.artwork = Button(HD_ARTWORK, "secondary", "download")
+        self.open_saved = Button("Open in My decks", "primary", "arrow")
+        maintenance.addWidget(self.undo)
+        maintenance.addWidget(self.review)
+        maintenance.addStretch()
+        next_steps.addStretch()
+        next_steps.addWidget(self.retry)
+        next_steps.addWidget(self.artwork)
+        next_steps.addWidget(self.open_saved)
+        self.actions.addLayout(maintenance)
+        self.actions.addLayout(next_steps, 1)
+        self.body.addLayout(self.actions)
         self.rows.currentItemChanged.connect(self._show_entry)
         self.receipt: ImportReceipt | None = None
         self.removed: set[Path] = set()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.actions.setDirection(
+            QBoxLayout.Direction.LeftToRight
+            if self.width() >= t.HERO_MAX + 2 * t.TILE_LARGE
+            else QBoxLayout.Direction.TopToBottom
+        )
 
     def _show_entry(self) -> None:
         current = self.rows.currentIndex().row()

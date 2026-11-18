@@ -11,6 +11,7 @@ from config import Config
 from studio.context import Installation
 from studio.pages import decks_flow
 from studio.pages.decks import DecksPage
+from studio.pages.mydecks_library import Collection
 from studio.shell import StudioWindow
 from tools.studio_decks_screenshots import Archive, _install_preview_cards
 from tournament_decks import DeckError
@@ -135,13 +136,16 @@ def test_keyboard_preview_and_historical_artwork_handoff(
     qtbot.keyClick(b.standings, Qt.Key.Key_Space)
     qtbot.keyClick(b.standings, Qt.Key.Key_Up)
     qtbot.keyClick(b.standings, Qt.Key.Key_Return)
-    qtbot.waitUntil(lambda: page.preview.sections.isVisible())
-    assert page.preview.names.topLevelItemCount() > 0
-    assert page.preview.gallery.tiles.rowCount() == 3
-    assert "monsters" in page.preview.types.text()
-    page.preview.sections.buttons[2].click()
-    assert page.preview.gallery.isHidden()
-    assert page.preview.names.topLevelItemCount() == 4
+    preview = page.preview.contents
+    qtbot.waitUntil(preview.isVisible)
+    assert preview.sections.buttons[0].hint.text() == "40 cards"
+    assert preview.grid.tiles.rowCount() == 17
+    assert sum(card.artwork is not None for card in preview.grid.cards) == 3
+    assert "monsters" in preview.types.text()
+    preview.sections.buttons[2].click()
+    assert preview.grid.isVisible()
+    assert preview.grid.tiles.rowCount() == 4
+    assert all(card.artwork is None for card in preview.grid.cards)
     qtbot.keyClick(page.preview.back, Qt.Key.Key_Escape)
     assert page.view is b and b.preview.hasFocus()
 
@@ -242,10 +246,96 @@ def test_failed_preview_retry_and_moved_deck_refuses_handoff(
     qtbot.waitUntil(lambda: page.preview.message.retry.isVisible())
     fail = False
     page.preview.message.retry.click()
-    qtbot.waitUntil(lambda: page.preview.sections.isVisible())
+    qtbot.waitUntil(page.preview.contents.isVisible)
     page.preview.save.click()
     qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
     page.imports.receipt.paths[0].unlink()
     page.results.artwork.click()
     qtbot.waitUntil(lambda: "have moved" in page.results.notice.message.text())
     assert window.current is page and page.view is page.results
+
+
+def test_last_save_keeps_artwork_and_selects_the_saved_batch(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    page, _ = open_browser(window, monkeypatch)
+    browser = page.browser
+    qtbot.waitUntil(browser.preview.isEnabled)
+    browser.standings.topLevelItem(1).setSelected(True)
+    browser.save.click()
+    qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
+    paths = set(page.imports.receipt.paths)
+    assert len(paths) == 2
+    page.results.back.click()
+    browser.events.setCurrentItem(browser.events.topLevelItem(1))
+    qtbot.waitUntil(lambda: not page.reads)
+    browser.recent.click()
+    assert page.results.artwork.isVisible()
+
+    page.results.open_saved.click()
+    mine = window.current
+    assert mine.id == "mydecks"
+    qtbot.waitUntil(lambda: isinstance(mine.view, Collection))
+    view = mine.view
+    assert {view.model.rows[i.row()].deck.path for i in view.rows.selectedIndexes()} == paths
+    qtbot.keyClick(view.rows, Qt.Key.Key_Return)
+    assert mine.view.contents.sections.buttons[0].hint.text() == "40 cards"
+    assert mine.view.contents.grid.tiles.rowCount() == 17
+    assert window.navigate("decks") and page.view is page.results
+
+
+def test_steam_deck_lists_leave_room_for_standings_and_actions(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    window.resize(1280, 800)
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+    _install_preview_cards(Path(window.ctx.installation.path))
+    page, _ = open_browser(window, monkeypatch)
+    browser = page.browser
+    qtbot.waitUntil(lambda: browser.preview.isEnabled() and page.goat_available)
+    for rows in (browser.events, browser.standings):
+        qtbot.waitUntil(
+            lambda rows=rows: (
+                rows.viewport().rect().contains(rows.visualItemRect(rows.topLevelItem(5)))
+            )
+        )
+    assert page.scrolls[browser].verticalScrollBar().maximum() == 0
+
+
+def test_preview_can_finish_off_page_and_retry_skips_completed_saves(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    page, archive = open_browser(window, monkeypatch)
+    qtbot.waitUntil(page.browser.preview.isEnabled)
+    entered, release = Event(), Event()
+    load = page.library.preview
+
+    def held(deck):
+        entered.set()
+        release.wait(5)
+        return load(deck)
+
+    monkeypatch.setattr(page.library, "preview", held)
+    page.browser.preview.click()
+    try:
+        qtbot.waitUntil(entered.is_set)
+        assert window.navigate("settings")
+        assert window.navigate("decks") and page.view is page.preview
+    finally:
+        release.set()
+    qtbot.waitUntil(page.preview.contents.isVisible)
+    page.preview.back.click()
+    page.browser.standings.topLevelItem(1).setSelected(True)
+    archive.fail = 2
+    page.browser.save.click()
+    qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
+    assert page.results.retry.isVisible() and len(page.imports.receipt.paths) == 1
+    first = page.imports.receipt.paths[0]
+    modified = first.stat().st_mtime_ns
+    archive.fail = None
+    page.results.retry.click()
+    qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
+    assert len(page.imports.receipt.paths) == 2 and first.stat().st_mtime_ns == modified

@@ -6,6 +6,7 @@ from PySide6.QtCore import QItemSelectionModel, QModelIndex, QSignalBlocker, QSi
 from PySide6.QtGui import QColor, QInputEvent, QKeyEvent, QPainter, QPaintEvent, QPen, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QBoxLayout,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -25,9 +26,12 @@ from tournament_decks import Deck, Event
 
 
 class Rows(QTreeWidget):
-    def __init__(self, columns: tuple[str, ...], *, multiple: bool = False) -> None:
+    def __init__(
+        self, columns: tuple[str, ...], *, multiple: bool = False, dense: bool = False
+    ) -> None:
         super().__init__()
         self.multiple = multiple
+        self.row_height = t.XXL if dense else t.BUTTON_H
         self.setHeaderLabels(columns)
         self.setAccessibleName("Standings" if multiple else "Tournament events")
         self.setRootIsDecorated(False)
@@ -39,6 +43,8 @@ class Rows(QTreeWidget):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMinimumHeight(t.TILE_H + t.XXL)
         self.header().setStretchLastSection(False)
+        if dense:
+            self.header().setFixedHeight(t.XXL)
         self.header().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.header().setDefaultAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -67,7 +73,7 @@ class Rows(QTreeWidget):
 
     def row(self, values: tuple[str, ...]) -> QTreeWidgetItem:
         item = QTreeWidgetItem(values)
-        item.setSizeHint(0, QSize(0, t.BUTTON_H))
+        item.setSizeHint(0, QSize(0, self.row_height))
         for column, value in enumerate(values):
             item.setToolTip(column, value)
         self.addTopLevelItem(item)
@@ -199,7 +205,7 @@ class Browser(QWidget):
         events_panel.body.addWidget(label("Events", "heading"))
         self.event_context = label("", "muted", True)
         events_panel.body.addWidget(self.event_context)
-        self.events = Rows(("Tournament", "Date"))
+        self.events = Rows(("Tournament", "Date"), dense=True)
         self.events.fixed_column(1, t.TILE_H + t.XL)
         self.event_message = ListMessage()
         self.event_views = QStackedWidget()
@@ -226,7 +232,7 @@ class Browser(QWidget):
         standings_panel.body.addWidget(self.standings_title)
         self.event_meta = label("Public decklists", "muted", True)
         standings_panel.body.addWidget(self.event_meta)
-        self.standings = Rows(("Place", "Player", "Deck"), multiple=True)
+        self.standings = Rows(("Place", "Player", "Deck"), multiple=True, dense=True)
         self.standings.fixed_column(0, t.HUGE + t.SM)
         self.standings_message = ListMessage()
         self.standings_views = QStackedWidget()
@@ -258,15 +264,19 @@ class Browser(QWidget):
         self.unavailable.body.addStretch()
         body.addWidget(self.unavailable, 1)
 
-        footer = Panel(t.LG)
+        footer = Panel(t.MD)
         footer.body.setSpacing(t.SM)
         self.footer = footer
         self.goat = ToggleSwitch(
-            "Use installed GOAT card versions",
-            "Save a separate historical copy. Review the matched cards after saving.",
+            "Use GOAT card versions",
+            "Save a separate historical copy.",
             False,
         )
-        footer.body.addWidget(self.goat)
+        self.goat.setMinimumWidth(t.TILE_LARGE * 2 + t.LG)
+        self.footer_row = QBoxLayout(QBoxLayout.Direction.TopToBottom)
+        self.footer_row.setSpacing(t.SM)
+        footer.body.addLayout(self.footer_row)
+        self.footer_row.addWidget(self.goat)
         actions = QHBoxLayout()
         actions.setSpacing(t.SM)
         details = QVBoxLayout()
@@ -276,13 +286,14 @@ class Browser(QWidget):
         details.addWidget(self.selection_count)
         details.addWidget(self.destination)
         actions.addLayout(details, 1)
+        actions.setAlignment(details, Qt.AlignmentFlag.AlignVCenter)
         self.preview = Button("Preview deck")
         self.recent = Button("Last save", "quiet")
         self.save = Button("Add to EDOPro", "primary", "download")
         actions.addWidget(self.recent)
         actions.addWidget(self.preview)
         actions.addWidget(self.save)
-        footer.body.addLayout(actions)
+        self.footer_row.addLayout(actions, 1)
         self.readiness = label(
             "Open EDOPro once to download its cards before playing or getting artwork.",
             "small",
@@ -293,6 +304,11 @@ class Browser(QWidget):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        self.footer_row.setDirection(
+            QBoxLayout.Direction.LeftToRight
+            if self.width() >= t.HERO_MAX + t.TILE_LARGE * 2
+            else QBoxLayout.Direction.TopToBottom
+        )
         compact = event.size().width() + t.RAIL_COMPACT < t.COMPACT_WIDTH
         if compact != self.compact:
             self.compact = compact

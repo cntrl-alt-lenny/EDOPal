@@ -15,6 +15,7 @@ from PIL import Image
 from studio import theme
 from studio.context import Installation
 from studio.pages.decks import DecksPage
+from studio.pages.mydecks_library import Collection
 from studio.shell import StudioWindow
 from tournament_decks import DeckError, publish_deck
 
@@ -46,8 +47,8 @@ CATALOG = (
     ("Dark Magician", 1, 3),
     ("Blue-Eyes White Dragon", 1, 3),
     ("Dark Magician Girl", 1, 2),
-    ("Magician of Faith", 1, 2),
-    ("Tsukuyomi", 1, 2),
+    ("Magician of Faith", 1, 3),
+    ("Tsukuyomi", 1, 3),
     ("Sangan", 1, 1),
     ("Mystic Tomato", 1, 3),
     ("Skilled Dark Magician", 1, 3),
@@ -55,7 +56,7 @@ CATALOG = (
     ("Metamorphosis", 2, 3),
     ("Mystical Space Typhoon", 2, 1),
     ("Scapegoat", 2, 3),
-    ("Nobleman of Crossout", 2, 2),
+    ("Nobleman of Crossout", 2, 3),
     ("Sakuretsu Armor", 4, 3),
     ("Call of the Haunted", 4, 1),
     ("Torrential Tribute", 4, 1),
@@ -222,12 +223,13 @@ def render_decks(
         settle(lambda: "events" not in page.reads and "standings" not in page.reads)
 
     def thumbnails_ready() -> bool:
-        gallery = page.preview.gallery
+        gallery = page.preview.contents.grid
         tiles = gallery.tiles
         visible = [
             tile.path
             for row, tile in enumerate(tiles.items)
-            if gallery.viewport().rect().intersects(gallery.visualRect(tiles.index(row, 0)))
+            if gallery.cards[row].artwork
+            and gallery.viewport().rect().intersects(gallery.visualRect(tiles.index(row, 0)))
         ]
         return bool(visible) and all(path in tiles.cache for path in visible)
 
@@ -240,6 +242,7 @@ def render_decks(
             settle(lambda: not window.ctx.tasks.jobs)
             shot(overview)
             return
+        settle(lambda: not window.ctx.tasks.jobs)
         _install_preview_cards(game)
         window.ctx.set_installation(Installation())
         window.navigate("decks")
@@ -261,9 +264,9 @@ def render_decks(
         page.preview.message.retry.click()
         settle(thumbnails_ready)
         capture("04-preview")
-        page.preview.sections.buttons[1].click()
+        page.preview.contents.sections.buttons[1].click()
         capture("05-extra")
-        page.preview.sections.buttons[2].click()
+        page.preview.contents.sections.buttons[2].click()
         capture("17-side")
         page.preview.back.click()
 
@@ -308,6 +311,12 @@ def render_decks(
         browser.save.click()
         settle(lambda: page.view is page.results and not window.ctx.busy)
         capture("14-saved")
+        page.results.open_saved.click()
+        mydecks = window.pages["mydecks"]
+        settle(lambda: isinstance(mydecks.view, Collection))
+        window.animation.setCurrentTime(theme.MOTION_MS)
+        shot("decks-20-selected-in-my-decks")
+        window.navigate("decks")
         with patch.object(window.ctx, "confirm", return_value=True):
             page.results.undo.click()
             settle(lambda: page.results.title.value == "Import undone")

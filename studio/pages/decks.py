@@ -213,7 +213,6 @@ class DecksPage(Page):
         if page is None or not self.ctx.installation.path or self.imports.job:
             return
         self.page = page
-        self.imports.handoff_available = False
         self.has_loaded = True
         self._clear_events()
         self.browser.event_context.setText(f"{page.format or 'All formats'} · Latest first")
@@ -257,8 +256,6 @@ class DecksPage(Page):
 
     def load_standings(self, event: Event | None) -> None:
         self._discard("standings", "goat", "preview")
-        if event != self.selection.event:
-            self.imports.handoff_available = False
         self.preview_target = None
         self.selection.open(event)
         self.goat_available = False
@@ -323,15 +320,12 @@ class DecksPage(Page):
             message.retry.setFocus()
 
     def _decks_selected(self) -> None:
-        previous = self.selection.selected
         self.selection.select(
             {
                 item.data(0, Qt.ItemDataRole.UserRole)
                 for item in self.browser.standings.selectedItems()
             }
         )
-        if previous != self.selection.selected:
-            self.imports.handoff_available = False
         self._update_actions()
 
     def _update_actions(self) -> None:
