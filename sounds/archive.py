@@ -238,6 +238,10 @@ class SoundLibrary:
     def import_set(self, path: Path) -> str:
         return self.save(read_set(path))
 
+    def delete(self, set_id: str) -> None:
+        """Remove a saved set through the same path checks used for reading it."""
+        self._path(set_id).unlink()
+
     def list(self) -> tuple[SavedSet, ...]:
         rows = []
         for path in sorted(self.directory.glob("*" + SET_SUFFIX)):

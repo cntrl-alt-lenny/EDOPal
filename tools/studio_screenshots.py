@@ -143,6 +143,11 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
     window.show()
     window.setFocus(Qt.FocusReason.OtherFocusReason)
     try:
+        if page == "sounds":
+            from tools.studio_sounds_screenshots import render_sounds
+
+            render_sounds(window, root, selected, shot, settle)
+            return files
         if page:
             PAGE_RENDERERS[page](window, selected, shot, settle)
             return files
@@ -185,6 +190,8 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
                 settle(lambda: window.current.state == "home")
             if key in PAGE_PROOFS:
                 import_module(PAGE_PROOFS[key]).prepare_overview(window)
+            if key == "sounds":
+                settle(lambda: not ctx.tasks.jobs)
             shot(f"{number:02}-{key}")
         window.navigate("cards")
         fake.release.clear()
@@ -242,7 +249,7 @@ def main_cli() -> None:
     parser.add_argument("--size", type=parse_size, action="append", help="WxH, repeatable")
     parser.add_argument(
         "--page",
-        choices=sorted({*PAGE_RENDERERS, *STANDALONE_RENDERERS}),
+        choices=sorted({*PAGE_RENDERERS, *STANDALONE_RENDERERS, "sounds"}),
         help="Render the full set of states for one page",
     )
     args = parser.parse_args()

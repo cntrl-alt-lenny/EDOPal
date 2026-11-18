@@ -171,7 +171,7 @@ def _save(path: Path, manifest: str, headers: Mapping[str, str]) -> None:
             staged.unlink(missing_ok=True)
 
 
-def _fallback(saved: _Saved | None, detail: str) -> Catalogue:
+def _fallback(saved: _Saved | None, detail: str | None = None) -> Catalogue:
     if saved is not None:
         return Catalogue(saved.manifest, CatalogueSource.CACHED, detail)
     return Catalogue(bundled_manifest(), CatalogueSource.BUNDLED, detail)
@@ -188,6 +188,11 @@ def offline_catalogue(cache: PackCache, *, config_url: str = "") -> Catalogue:
     if saved:
         return Catalogue(saved.manifest, CatalogueSource.CACHED)
     return Catalogue(bundled_manifest(), CatalogueSource.BUNDLED)
+
+
+def local_catalogue(cache: PackCache, *, config_url: str = "") -> Catalogue:
+    """Read the last verified list so cached packs are usable before a refresh."""
+    return offline_catalogue(cache, config_url=config_url)
 
 
 async def fetch_catalogue(
