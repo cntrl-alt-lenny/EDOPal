@@ -179,6 +179,8 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
             window.navigate(key)
             if key == "skins":
                 render_skins(window, shot, settle)
+            if key == "music":
+                settle(lambda: window.current.state == "home")
             shot(f"{number:02}-{key}")
         window.navigate("cards")
         fake.release.clear()
@@ -219,8 +221,14 @@ def parse_size(raw: str) -> tuple[int, int]:
 # exposing render(out, size, root). Pages in PAGE_RENDERERS above draw inside
 # the shared demo window instead. Add new pages to one of the two.
 STANDALONE_RENDERERS = {
-    "mydecks": "tools.studio_screenshots_mydecks",
+    "mydecks": ("tools.studio_screenshots_mydecks", "render"),
+    "music": ("tools.music_screenshots", "render_music"),
 }
+
+
+def standalone_renderer(page: str) -> Callable[[Path, tuple[int, int], Path], list[Path]]:
+    module, function = STANDALONE_RENDERERS[page]
+    return getattr(import_module(module), function)
 
 
 def main_cli() -> None:
@@ -243,7 +251,7 @@ def main_cli() -> None:
         ):
             target, size, root = args.out / name, (width, height), Path(temporary)
             if args.page in STANDALONE_RENDERERS:
-                files = import_module(STANDALONE_RENDERERS[args.page]).render(target, size, root)
+                files = standalone_renderer(args.page)(target, size, root)
             else:
                 files = render(target, size, root, page=args.page)
         print(f"Rendered {len(files)} views at {name} in {files[0].parent}")

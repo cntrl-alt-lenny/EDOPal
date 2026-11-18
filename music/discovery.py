@@ -109,7 +109,7 @@ def records(state: Path, filename: str = "selection.json") -> list[dict]:
     if not data:
         return []
     values = validate_records(data.get("tracks", [data]))
-    if not values:
+    if not values and data.get("cleared") is not True:
         raise ValueError("Empty soundtrack selection.")
     return values
 

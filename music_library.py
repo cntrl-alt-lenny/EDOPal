@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 
@@ -201,10 +201,14 @@ def _history(game: Path, scene: str) -> Path:
     return _sound_path(game, ".edopro-hd-sync", scene, "undo")
 
 
-def _remember(game: Path, scene: str, rows: Iterable[Track]) -> list[dict]:
+def _remember(
+    game: Path, scene: str, rows: Iterable[Track], checkpoint: Callable[[], None] | None = None
+) -> list[dict]:
     history = _history(game, scene)
     result = []
     for row in rows:
+        if checkpoint:
+            checkpoint()
         digest = _digest(row.path)
         record = describe(row, digest)
         copy = history / record["name"]
@@ -225,7 +229,15 @@ def _prune_history(game: Path, scene: str, previous: list[dict]) -> None:
 
 
 def _publish(
-    game: Path, scene: str, chosen: Iterable[Track], games: dict[str, Game], *, undo: bool = False
+    game: Path,
+    scene: str,
+    chosen: Iterable[Track],
+    games: dict[str, Game],
+    *,
+    undo: bool = False,
+    clear: bool = False,
+    expected: Sequence[str] | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> None:
     state = _state(game, scene)
     main = _sound_path(game, "BGM", scene)
@@ -237,15 +249,26 @@ def _publish(
     except ValueError as exc:
         raise ValueError("The saved selection is unreadable. Restore the playlist first.") from exc
     current = active_tracks(game, scene, games)
+    if expected is not None and list(expected) != [row.digest for row in current]:
+        raise ValueError(
+            "The playlist changed since it was opened. Reload the library before editing it."
+        )
     desired: list[dict] = []
     seen = set()
     changes: list[tuple[Path, Path]] = []
     with tempfile.TemporaryDirectory(dir=state, prefix=".prepared-") as temporary:
-        for track in chosen:
+        tracks_to_copy = list(chosen)
+        for index, track in enumerate(tracks_to_copy):
+            if progress:
+                progress(index, len(tracks_to_copy))
             if track.game not in games:
                 raise ValueError("Choose a game from the library.")
             _valid_audio(track.path)
             digest = _digest(track.path)
+            if expected is not None and track.digest and track.digest != digest:
+                raise ValueError(
+                    "A recording changed since it was opened. Reload the library before editing it."
+                )
             if digest in seen:
                 continue
             seen.add(digest)
@@ -255,11 +278,16 @@ def _publish(
             if _digest(staged) != digest:
                 raise OSError("The source changed during copying. Please try again.")
             desired.append(row)
-        if not desired:
+        if not desired and not clear:
             raise ValueError("Keep at least one track or restore the original playlist.")
-        if old == desired and [row["digest"] for row in old] == [t.digest for t in current]:
+        if (
+            (old or (state / "selection.json").exists())
+            and old == desired
+            and [row["digest"] for row in old] == [t.digest for t in current]
+        ):
             return
-        previous = _remember(game, scene, current) if old and not undo else []
+        managed = (state / "selection.json").exists()
+        previous = _remember(game, scene, current) if managed and not undo else []
         old_files = {(row["name"], row["digest"]) for row in old}
         # Recovery must distinguish a pre-existing identically named file from a published copy.
         originals = [
@@ -268,8 +296,14 @@ def _publish(
             if t.path.parent == main and (t.path.name, t.digest) not in old_files
         ]
         selection = {"tracks": desired, "original_names": originals}
+        if clear and not desired:
+            selection["cleared"] = True
         if not undo:
             selection["previous"] = previous  # Empty denotes the original EDOPro folders.
+            if managed and not current:
+                selection["previous_cleared"] = True
+        if progress:
+            progress(len(tracks_to_copy), len(tracks_to_copy))
         _write_pending(state, selection)
         try:
             for record in old:
@@ -293,11 +327,26 @@ def _publish(
 
 
 def set_playlist(
-    game: Path, scene: str, chosen: Iterable[Track], *, root: Path | None = None
+    game: Path,
+    scene: str,
+    chosen: Iterable[Track],
+    *,
+    root: Path | None = None,
+    clear: bool = False,
+    expected: Sequence[str] | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> None:
     """Replace this scene with an ordered set. Tracks can come from any scene."""
     with playlist_lock(game, scene):
-        _publish(game, scene, chosen, catalog(root=root))
+        _publish(
+            game,
+            scene,
+            chosen,
+            catalog(root=root),
+            clear=clear,
+            expected=expected,
+            progress=progress,
+        )
 
 
 def playlist(game: Path, scene: str, *, root: Path | None = None) -> list[Track]:
@@ -347,7 +396,9 @@ def use_game(
         _publish(game, scene, chosen, games)
 
 
-def _restore(game: Path, scene: str, *, remember: bool) -> None:
+def _restore(
+    game: Path, scene: str, *, remember: bool, checkpoint: Callable[[], None] | None = None
+) -> None:
     state = _state(game, scene)
     if not can_restore(game, scene):
         return
@@ -355,16 +406,24 @@ def _restore(game: Path, scene: str, *, remember: bool) -> None:
     restoring = state / "restoring.json"
     resumed = restoring.exists()
     saved = []
+    cleared = False
     try:
         if resumed:
             # All managed tracks have been retired. Some originals may already be live.
             try:
-                saved = validate_records(read_json(restoring).get("previous", []))
+                journal = read_json(restoring)
+                saved = validate_records(journal.get("previous", []))
+                cleared = journal.get("previous_cleared") is True
             except (OSError, ValueError):
                 saved = []
         else:
-            saved = _retire_selection(game, scene, changes, remember=remember)
-            atomic_json(restoring, {"previous": saved})
+            if remember and not (state / "pending.json").exists():
+                with contextlib.suppress(OSError, ValueError):
+                    cleared = read_json(state / "selection.json").get("cleared") is True
+            saved = _retire_selection(
+                game, scene, changes, remember=remember, checkpoint=checkpoint
+            )
+            atomic_json(restoring, {"previous": saved, "previous_cleared": cleared})
         for folder in _folders(game, scene):
             for path in list(_audio(backup_folder(game, scene, folder))):
                 _move(path, folder / path.name, changes)
@@ -374,8 +433,8 @@ def _restore(game: Path, scene: str, *, remember: bool) -> None:
             restoring.unlink(missing_ok=True)
         raise
     # From here on a retry only finishes metadata cleanup, never retires a restored original.
-    if saved:
-        atomic_json(state / "restored.json", {"previous": saved})
+    if saved or cleared:
+        atomic_json(state / "restored.json", {"previous": saved, "previous_cleared": cleared})
     else:
         (state / "restored.json").unlink(missing_ok=True)
     (state / "pending.json").unlink(missing_ok=True)
@@ -386,7 +445,12 @@ def _restore(game: Path, scene: str, *, remember: bool) -> None:
 
 
 def _retire_selection(
-    game: Path, scene: str, changes: list[tuple[Path, Path]], *, remember: bool
+    game: Path,
+    scene: str,
+    changes: list[tuple[Path, Path]],
+    *,
+    remember: bool,
+    checkpoint: Callable[[], None] | None = None,
 ) -> list[dict]:
     state = _state(game, scene)
     main = _sound_path(game, "BGM", scene)
@@ -411,10 +475,14 @@ def _retire_selection(
     previous = []
     if remember and not damaged and not (state / "pending.json").exists():
         for row in managed:
+            if checkpoint:
+                checkpoint()
             path = main / row["name"]
             if path.is_file() and _digest(path) == row["digest"]:
                 previous.append(record_track(row, path, scene))
-    saved = _remember(game, scene, previous)
+    saved = _remember(game, scene, previous, checkpoint)
+    if checkpoint:
+        checkpoint()
     for record in managed:
         _retire_current(main, state, record, changes)
     if damaged:
@@ -433,9 +501,11 @@ def _retire_selection(
     return saved
 
 
-def restore_playlist(game: Path, scene: str) -> None:
+def restore_playlist(
+    game: Path, scene: str, *, checkpoint: Callable[[], None] | None = None
+) -> None:
     with playlist_lock(game, scene):
-        _restore(game, scene, remember=True)
+        _restore(game, scene, remember=True, checkpoint=checkpoint)
 
 
 def _previous(state: Path) -> list[dict] | None:
@@ -460,20 +530,42 @@ def can_undo(game: Path, scene: str) -> bool:
         return False
 
 
-def undo_playlist(game: Path, scene: str, *, root: Path | None = None) -> None:
+def undo_playlist(
+    game: Path,
+    scene: str,
+    *,
+    root: Path | None = None,
+    checkpoint: Callable[[], None] | None = None,
+) -> None:
     """Revert the most recent edit or restore in this scene."""
     with playlist_lock(game, scene):
-        previous = _previous(_state(game, scene))
+        state = _state(game, scene)
+        previous = _previous(state)
         if previous is None:
             raise ValueError("There is no previous playlist to undo.")
         if not previous:
-            _restore(game, scene, remember=False)
+            record = state / "selection.json"
+            if not record.exists():
+                record = state / "restored.json"
+            if read_json(record).get("previous_cleared") is True:
+                _publish(game, scene, (), catalog(root=root), undo=True, clear=True)
+                return
+            _restore(game, scene, remember=False, checkpoint=checkpoint)
             return
         history = _history(game, scene)
         chosen = []
         for row in previous:
+            if checkpoint:
+                checkpoint()
             path = history / row["name"]
             if _digest(path) != row["digest"]:
                 raise OSError("The undo copy has changed. Restore the original playlist instead.")
             chosen.append(record_track(row, path, scene))
-        _publish(game, scene, chosen, catalog(root=root), undo=True)
+        _publish(
+            game,
+            scene,
+            chosen,
+            catalog(root=root),
+            undo=True,
+            progress=(lambda *_: checkpoint()) if checkpoint else None,
+        )
