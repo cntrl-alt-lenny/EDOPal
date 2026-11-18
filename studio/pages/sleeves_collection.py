@@ -55,7 +55,7 @@ def family_of(palette: str) -> str:
 
 def collection() -> list[Choice]:
     palettes = list(PALETTES)
-    order = dict.fromkeys((*FEATURED, *PATTERNS))
+    order = dict.fromkeys(key for key in (*FEATURED, *PATTERNS) if key in PATTERNS)
     result = []
     for offset in range(len(palettes)):
         for key in order:
@@ -107,9 +107,14 @@ def filtered(
             continue
         if colour != "All colors" and (item.family or measured.get(item.key)) != colour:
             continue
+        if not terms:
+            result.append(item)
+            continue
         fields = [item.name, item.detail, item.palette, item.family]
         if entry:
             fields.extend((*entry.tags, str(entry.passcode or "")))
+            if entry.origin:
+                fields.append(entry.origin.id)
         searchable = " ".join(fields).casefold()
         if all(term in searchable for term in terms):
             result.append(item)

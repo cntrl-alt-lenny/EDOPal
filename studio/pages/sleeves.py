@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QVBoxLa
 from sleeves import Entry, Layout, Library
 from studio import theme as t
 from studio.context import AppContext, GameOpenError, Installation
+from studio.icons import icon
 from studio.widgets import Button, label, margins
 
 from . import sleeves_work as work
@@ -70,7 +71,9 @@ class SleevesPage(AppearancePage):
             context, "sleeves", lambda title, message: self.confirm(title, message)
         )
         self.stack.addWidget(self.packs)
+        self.setup_block()
         self.packs.back.clicked.connect(self.close_packs)
+        self.packs.view_requested.connect(self.view_pack)
         self.gallery.more.clicked.connect(self.open_packs)
         self.gallery.opened.connect(self.open_editor)
         self.gallery.picked.connect(self.stage)
@@ -81,9 +84,6 @@ class SleevesPage(AppearancePage):
         self.controls = QHBoxLayout()
         footer_layout.addLayout(self.controls)
         self.setup_feedback()
-        self.dismiss = Button("Back", "quiet")
-        self.dismiss.clicked.connect(self.dismiss_error)
-        self.dismiss.hide()
         margins(self.controls, 0)
         self.controls.addWidget(self.status, 1)
         self.retry = Button("Retry")
@@ -92,12 +92,12 @@ class SleevesPage(AppearancePage):
         self.same.clicked.connect(self.copy_slot)
         self.reset = Button("Discard sleeve choices", "quiet")
         self.reset.clicked.connect(self.discard)
-        self.undo = Button("Undo last sleeve change")
+        self.undo = Button("Undo last change")
         self.undo.setToolTip("Restore the game’s sleeve files from before your last Apply.")
         self.undo.clicked.connect(self.confirm_undo)
         self.apply = Button("Apply sleeves", "primary", "check")
         self.apply.clicked.connect(self.apply_pressed)
-        for btn in (self.details, self.dismiss, self.retry):
+        for btn in (self.details, self.retry):
             self.controls.addWidget(btn)
         self.game_actions = QWidget()
         actions = QHBoxLayout(self.game_actions)
@@ -141,6 +141,7 @@ class SleevesPage(AppearancePage):
             return False
         if not self.guard_edits(include_slots=True):
             return False
+        self.leave_block()
         self.opened = False
         self.close_editor()
         self.slide.stop()
@@ -155,6 +156,7 @@ class SleevesPage(AppearancePage):
     def installation_changed(self, installation: Installation) -> None:
         if not self.built:
             return
+        self.leave_block()
         self.generation += 1
         if (
             self.opened
@@ -182,11 +184,19 @@ class SleevesPage(AppearancePage):
             self.update_controls()
 
     def open_packs(self) -> None:
+        if self.writing:
+            return
         self.stack.setCurrentWidget(self.packs)
         self.banner.hide()
         self.footer.hide()
         self.packs.load(online=True)
         self.packs.back.setFocus()
+
+    def view_pack(self, pack_id: str) -> None:
+        self.gallery.clear_filters()
+        self.gallery.source.setCurrentText("Pack sleeve")
+        self.gallery.search.setText(pack_id)
+        self.close_packs()
 
     def close_packs(self) -> None:
         if self.stack.currentWidget() is self.packs and not self.packs.job:
@@ -202,7 +212,6 @@ class SleevesPage(AppearancePage):
         generation = self.generation
         self.loading = True
         self.technical_error(None)
-        self.dismiss.hide()
         self.retry_action = None
         game = Path(self.install.path) if self.install.path else None
         lib, config = self.library, self.config
@@ -246,7 +255,7 @@ class SleevesPage(AppearancePage):
         changed = any(slot.status.matches is False for slot in slots.values())
         for key, btn in self.banner.slots.items():
             btn.setChecked(key == self.target)
-            btn.setEnabled(not (self.saving or self.writing))
+            btn.setEnabled(not self.saving)
             btn.show_choice(
                 slots.get(key),
                 self.pending.get(key),
@@ -263,7 +272,8 @@ class SleevesPage(AppearancePage):
         )
         self.reset.setVisible(bool(self.pending))
         self.reset.setEnabled(available)
-        self.stack.setEnabled(available)
+        self.stack.setEnabled(available or self.writing)
+        self.gallery.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, self.writing)
         self.gallery.actions["card"].setEnabled(self.install.ready)
         self.gallery.actions["card"].setToolTip(
             "Search this installation’s cards."
@@ -271,9 +281,19 @@ class SleevesPage(AppearancePage):
             else "Choose your EDOPro folder and let its card updates finish."
         )
         self.undo.setEnabled(available and self.install.ready and self.snapshot.can_undo)
+        assigned = any(slot.status.matches for slot in slots.values())
         self.apply.setText(
-            "Apply saved sleeves again" if changed and not self.pending else "Apply sleeves"
+            self.write_label
+            if self.writing
+            else "Apply staged pair"
+            if self.pending
+            else "Apply saved sleeves again"
+            if changed
+            else "Applied"
+            if assigned
+            else "Apply sleeves"
         )
+        self.apply.setIcon(icon("check" if self.apply.text() == "Applied" else "arrow", t.ON_GOLD))
         self.apply.setEnabled(
             available
             and self.install == self.ctx.installation
@@ -294,7 +314,11 @@ class SleevesPage(AppearancePage):
         elif not caption and self.editor:
             caption = ""
         elif not caption and self.pending:
-            caption = "Apply to use your picks next time you start EDOPro."
+            pair = []
+            for key, title in (("mine", "You"), ("opponent", "Opponent")):
+                item = self.pending.get(key) or (slots[key].choice if key in slots else None)
+                pair.append(f"{title} · {item.full_name if item else 'Current game sleeve'}")
+            caption = "     ".join(pair)
         elif not caption and changed:
             caption = "Game files changed. Reapply your saved sleeves to restore them."
         elif not caption:
@@ -304,6 +328,8 @@ class SleevesPage(AppearancePage):
                 else "Changes take effect next time you start EDOPro."
             )
         self.status.setText(caption)
+        if self.editor:
+            self.footer.setVisible(bool(self.message and not self.saving))
         self.retry.setVisible(
             not self.loading and (bool(self.retry_action) or not self.install.ready)
         )
@@ -315,13 +341,6 @@ class SleevesPage(AppearancePage):
             if self.install.path
             else "Choose folder"
         )
-
-    def dismiss_error(self) -> None:
-        self.message = ""
-        self.retry_action = None
-        self.technical_error(None)
-        self.dismiss.hide()
-        self.update_controls()
 
     def run_retry(self) -> None:
         if self.retry_action:
@@ -339,11 +358,15 @@ class SleevesPage(AppearancePage):
             self.ctx.installations_requested.emit()
 
     def select_slot(self, slot: str) -> None:
+        if self.writing:
+            return
         self.target = slot
         self.gallery.grid.clearSelection()
         self.update_controls()
 
     def stage(self, item: Choice) -> None:
+        if self.writing:
+            return
         self.pending[self.target] = item
         self.message = ""
         self.retry_action = None
@@ -409,7 +432,7 @@ class SleevesPage(AppearancePage):
             self.mutate(lambda: lib.add_image("Current game sleeve", path, Layout("fit")), both)
 
     def open_editor(self, mode: str) -> None:
-        if self.editor or not self.snapshot:
+        if self.writing or self.editor or not self.snapshot:
             return
         self.message = ""
         self.update_controls()
@@ -431,6 +454,8 @@ class SleevesPage(AppearancePage):
             game = Path(self.install.path) if mode == "card" and self.install.ready else None
             self.editor = ImageEditor(self.ctx.tasks, self.library, game)
         self.editor_opener = self.gallery.actions[mode]
+        self.banner.hide()
+        self.footer.hide()
         self.game_actions.hide()
         self.editor.back.connect(self.back_from_editor)
         self.editor.commit.connect(self.save_entry)
@@ -463,6 +488,8 @@ class SleevesPage(AppearancePage):
             self.stack.removeWidget(self.editor)
             self.editor.deleteLater()
             self.editor = None
+            self.banner.show()
+            self.footer.show()
             self.game_actions.show()
             if self.opened:
                 self.animate(-t.XL)
@@ -477,7 +504,7 @@ class SleevesPage(AppearancePage):
         self.slide.start()
 
     def escape(self) -> bool:
-        if self.saving or self.writing or self.packs.job:
+        if self.leave_block() or self.saving or self.writing or self.packs.job:
             return True
         if self.stack.currentWidget() is self.packs:
             self.close_packs()
@@ -552,7 +579,7 @@ class SleevesPage(AppearancePage):
         library, game, config = self.library, Path(self.install.path), self.config
         choices = self.pending.copy()
         self.technical_error(None)
-        self.dismiss.hide()
+        self.write_label = "Restoring sleeves…" if action == "undo" else "Applying sleeves…"
         self.writing = True
         self.retry_action = None
         self.ctx.set_busy(True)
@@ -573,15 +600,17 @@ class SleevesPage(AppearancePage):
 
         def failed(exc: Exception) -> None:
             release()
+            if isinstance(exc, GameOpenError):
+                self.message = ""
+                self.update_controls()
+                self.show_block(exc, lambda: self.change(action), self.banner, self.footer)
+                return
             self.message = (
-                self.game_warning(exc)
-                if isinstance(exc, GameOpenError)
-                else str(exc)
+                str(exc)
                 if isinstance(exc, ValueError)
                 else "Could not update the sleeves. Check that the game folder is writable, then choose Retry."
             )
             self.technical_error(exc)
-            self.dismiss.setVisible(isinstance(exc, GameOpenError))
             self.retry_action = lambda: self.change(action)
             self.update_controls()
 

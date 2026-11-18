@@ -46,6 +46,7 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     cfg = create_demo(root)
     game = Path(cfg.edopro_path)
     with closing(sqlite3.connect(game / "cards.cdb")) as db, db:
+        db.execute("UPDATE texts SET name = 'Sample card ' || id")
         db.executemany(
             "UPDATE texts SET name = ? WHERE id = ?",
             [("Moonlit Lake", 1000), ("Twilight Lookout", 1001), ("Kingfisher at Dusk", 1002)],
@@ -81,6 +82,9 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         window.animation.setCurrentTime(theme.MOTION_MS)
         page.slide.setCurrentTime(theme.MOTION_MS)
         app.processEvents()
+        if page.snapshot is not None and gallery.grid.isVisible():
+            # Focus and the fixed footer can change the viewport after the action settles.
+            prepare_overview(window)
         target = out / f"{name}.png"
         if not window.grab().save(str(target)):
             raise OSError(f"Could not save {target}")
@@ -99,7 +103,7 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         gallery.source.setCurrentText("Pack sleeve")
         loaded()
         shot("sleeves-downloaded-print")
-        gallery.source.setCurrentIndex(0)
+        gallery.clear_filters()
         loaded()
         pick(2)
         page.same.click()
@@ -223,7 +227,7 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
             settle(lambda: not page.writing)
             shot("18-close-game")
         with patch("music.settings._game_running", return_value=False):
-            page.retry.click()
+            page.block.retry.click()
             settle(lambda: not page.writing)
             loaded()
             shot("19-applied")

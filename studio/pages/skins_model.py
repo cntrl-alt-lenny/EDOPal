@@ -45,6 +45,9 @@ class Look:
     pack: PackStatus | None = None
     availability: str = ""
     active_pack: bool = False
+    partial: bool = False
+    needs_update: bool = False
+    previous_skin: str = ""
 
     @property
     def name(self) -> str:
@@ -60,6 +63,10 @@ class Look:
 
     @property
     def caption(self) -> str:
+        if self.needs_update:
+            return "Saved changes"
+        if self.partial and self.availability in ("Not downloaded", "Update available"):
+            return "Paused"
         if self.active_pack:
             return f"Applied · {self.availability}"
         if self.active:

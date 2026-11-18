@@ -55,7 +55,7 @@ def pick(page: SleevesPage, qtbot: QtBot, query: str, source: str = "All sleeves
 
 def test_complete_collection_filter_and_crop() -> None:
     prints = collection()
-    assert len({c.key for c in prints}) == len(PATTERNS) * len(PALETTES) == 384
+    assert len({c.key for c in prints}) == len(PATTERNS) * len(PALETTES)
     assert len(filtered(prints, "sol invictus", "Ready-made", "Green", {})) == 4
     assert not filtered(prints, "", "Saved sleeves", "All colors", {})
     for size in ((622, 622), (1920, 240), (240, 900), (1, 1)):
@@ -63,6 +63,24 @@ def test_complete_collection_filter_and_crop() -> None:
             x, y, w, h = crop_box(size, centre, 2)
             assert 0 <= x <= size[0] - w and 0 <= y <= size[1] - h
             assert w / h == pytest.approx(708 / 1016)
+
+
+def test_expanded_pattern_collection_search(desk: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import replace
+
+    from studio.pages import sleeves_gallery
+
+    gallery = desk[1].gallery
+    for number in range(64):
+        key = f"expanded-{number}"
+        monkeypatch.setitem(PATTERNS, key, replace(PATTERNS["sun"], name=f"Expanded {number}"))
+    prints = {item.key: item for item in collection()}
+    monkeypatch.setattr(sleeves_gallery, "prints", lambda: prints)
+    gallery.set_items([])
+    assert gallery.grid.model().rowCount() == len(PATTERNS) * len(PALETTES)
+    gallery.search.setText("expanded 63")
+    assert len(gallery.visible) == len(PALETTES)
+    assert len(gallery.grid.tiles.pending) <= 4
 
 
 def test_slots_apply_undo_recent_and_conflicts(
@@ -74,7 +92,7 @@ def test_slots_apply_undo_recent_and_conflicts(
     old = page.library.image_path(page.snapshot.items[0].entry.id).read_bytes()
     mine, opponent = textures / "cover.png", textures / "cover2.png"
     mine.write_bytes(old)
-    assert len(page.gallery.visible) == 386
+    assert len(page.gallery.visible) == len(page.snapshot.items) + len(PATTERNS) * len(PALETTES)
     pick(page, qtbot, "Orrery", "Ready-made")
     page.same.click()
     assert page.pending["opponent"] == page.pending["mine"]
@@ -124,18 +142,23 @@ def test_busy_close_game_and_retry(
         return True
 
     monkeypatch.setattr("music.settings._game_running", running)
+    assert page.apply.text() == "Apply staged pair" and "Vortex" in page.status.text()
     page.apply.click()
+    assert page.apply.text() == "Applying sleeves…" and not page.apply.isEnabled()
+    assert page.gallery.grid.isEnabled() and page.banner.slots["mine"].isEnabled()
     assert not window.navigate("music") and not window.change.isEnabled()
     assert not page.hidden() and not page.request_close()
     assert "change folders when this finishes" in page.status.text()
     gate.set()
     qtbot.waitUntil(lambda: not page.writing)
-    assert "Close EDOPro" in page.status.text() and page.retry.isVisible()
+    assert page.block.isVisible() and not page.apply.isVisible()
+    assert "mine" in page.pending
     assert not (Path(page.install.path) / "textures/cover.png").exists()
     monkeypatch.setattr("music.settings._game_running", lambda _: False)
-    page.retry.click()
+    page.block.retry.click()
     ready(qtbot, page)
     assert page.snapshot.slots["mine"].status.matches
+    assert page.apply.text() == "Applied" and not page.apply.isEnabled()
     assert window.change.isEnabled()
 
 
@@ -211,7 +234,11 @@ def test_card_fetch_is_explicit_missing_retry_and_crop(
     page.gallery.actions["card"].click()
     editor = page.editor
     qtbot.waitUntil(lambda: editor.index is not None)
-    editor.search.setText("Studio card 1")
+    editor.search.setText("No card by this name")
+    assert not editor.results.count() and "No matching cards" in editor.preview.caption
+    from PySide6.QtWidgets import QScrollArea
+
+    assert not editor.findChildren(QScrollArea)
     editor.search.setText("100")
     assert not calls
     editor.results.setCurrentRow(0)
@@ -230,6 +257,7 @@ def test_card_fetch_is_explicit_missing_retry_and_crop(
     qtbot.keyClick(editor.preview, Qt.Key.Key_Left)
     assert editor.layout_choice().crop != previous
     before_drag = editor.layout_choice().crop
+    qtbot.waitUntil(lambda: page.slide.currentTime() == page.slide.duration())
     point = editor.preview.rect().center()
     qtbot.mousePress(editor.preview, Qt.MouseButton.LeftButton, pos=point)
     qtbot.mouseMove(editor.preview, pos=point + QPoint(15, 4))
@@ -323,14 +351,11 @@ def test_slot_and_management_controls_fit(desk: tuple, qtbot: QtBot, size: tuple
     qtbot.waitUntil(lambda: editor.valid and page.slide.currentTime() == page.slide.duration())
     assert window.width() == size[0] and window.height() == size[1]
     assert not page.undo.isVisible() and not page.apply.isVisible()
-    for widget in (editor.group, editor.name, editor.save, *page.banner.slots.values()):
+    for widget in (editor.group, editor.name, editor.save):
         assert widget.isVisible() and window.rect().contains(
             QRect(widget.mapTo(window, QPoint()), widget.size())
         )
-    for button in page.banner.slots.values():
-        assert button.heading.width() >= button.heading.fontMetrics().horizontalAdvance(
-            button.heading.text()
-        )
+    assert not page.banner.isVisible()
 
 
 def test_leaving_card_fetch_ignores_late_result(
@@ -380,7 +405,7 @@ def test_fast_scroll_filter_and_surprise_paint_the_selected_print(
 
     monkeypatch.setattr(extras, "_atomic_write", readonly_print_cache)
     # Change generations while readers from the old viewport can still be running.
-    for row in (370, 6, 383):
+    for row in (grid.model().rowCount() - 15, 6, grid.model().rowCount() - 1):
         grid.scrollTo(grid.model().index(row))
     gallery.colour.setCurrentText("Purple")
     gallery.search.setText("fans")

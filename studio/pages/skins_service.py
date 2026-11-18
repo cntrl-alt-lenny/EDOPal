@@ -1,7 +1,8 @@
 """Blocking page operations. Call these on a Studio worker with captured arguments."""
 
 import asyncio
-from dataclasses import dataclass
+import hashlib
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QSize, Qt
@@ -19,7 +20,9 @@ from state_lock import appearance_lock
 from studio import theme as t
 from studio.context import AppContext, Installation
 from studio.tasks import WorkerContext
+from themes.install import _available
 from themes.library import ThemeIssue
+from themes.transaction import Store
 
 from .skins_model import EMPTY_STATE, PACK_PALETTES, Look, pack_availability, preset_id
 
@@ -37,6 +40,7 @@ class Collection:
     wallpapers: tuple[Media, ...]
     sleeve_summary: str
     issues: tuple[ThemeIssue, ...]
+    original_skin: str
 
 
 def sleeve_summary(library: sleeves.Library, game: Path | None) -> str:
@@ -70,6 +74,14 @@ def read_image(path: Path, width: int) -> QImage:
     return reader.read()
 
 
+def has_partial(cache: PackCache, pack: Pack) -> bool:
+    path = cache.root / f"pack-{pack.id}" / f"{pack.version}--{pack.sha256}.zip.part"
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 class SkinStore:
     def __init__(self, cfg: config.Config, version: str) -> None:
         self.config = Path(cfg.config_path)
@@ -78,6 +90,16 @@ class SkinStore:
         self.cache = PackCache.for_config(cfg)
         self.version = version
         self.url = cfg.content_manifest_url
+        self._rendered: tuple[themes.Theme, bool, dict[str, str]] | None = None
+
+    def _recipe_hashes(self, recipe: themes.Theme, scale: bool) -> dict[str, str]:
+        cached = self._rendered
+        if cached and (recipe, scale) == cached[:2]:
+            return cached[2]
+        files = themes.render_skin(recipe, image=self.library.image(recipe), scale_background=scale)
+        hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
+        self._rendered = recipe, scale, hashes
+        return hashes
 
     def collection(
         self, installation: Installation, source: catalogue.Catalogue | None, online: bool
@@ -109,8 +131,46 @@ class SkinStore:
             for key, value in self.library.removed_entries(issues, reserved=preset_ids).items():
                 if key not in saved and (state := themes.install_state(game, key)).folder:
                     looks.append(Look(key, value, "Installed", state))
+        names = {look.state.folder: look.name for look in looks if look.state.folder}
+        scale = themes.scale_background(game) if game else True
+        for index, look in enumerate(looks):
+            if not (game and look.state.folder):
+                continue
+            store = Store(game, look.key)
+            current = store.record()["current"]
+            if not current:
+                continue
+            previous = _available(store, "skin", current["previous"]["skin"])
+            needs_update = False
+            if look.active and look.group == "My themes":
+                try:
+                    needs_update = self._recipe_hashes(look.theme, scale) != current["files"]
+                except (ValueError, OSError):
+                    needs_update = True
+            looks[index] = replace(
+                look,
+                needs_update=needs_update,
+                previous_skin=names.get(previous, previous or "Game default"),
+            )
+        restore_pack = bool(game and extras.can_restore(str(game), str(self.config)))
+        original_skin = ""
+        if restore_pack:
+            backup = extras._backup_dir(game.resolve(), self.config)
+            try:
+                settings = extras._pack_record(backup, {"skin": extras.current_skin(str(game))})[
+                    "settings"
+                ]
+                previous = settings.get("skin", [None])[0]
+                original_skin = (
+                    names.get(previous, previous or "Game default")
+                    if "skin" in settings
+                    else "Pre-pack appearance"
+                )
+            except (KeyError, ValueError, OSError):
+                original_skin = "Pre-pack appearance"
         statuses = source.list_packs(self.cache, app_version=self.version)
         shared = next((s for s in statuses if s.pack.id == "shared"), None)
+        partial_fonts = bool(shared and has_partial(self.cache, shared.pack))
         active = extras.current_skin(str(game)) if game else ""
         for status in statuses:
             pack = status.pack
@@ -125,6 +185,7 @@ class SkinStore:
                     "Downloadable",
                     pack=status,
                     availability=pack_availability(status, shared),
+                    partial=partial_fonts or has_partial(self.cache, pack),
                     active_pack=active == "Monokai " + pack.title,
                 )
             )
@@ -133,12 +194,12 @@ class SkinStore:
             shared.pack if shared else None,
             source,
             any(look.state.recovery_pending for look in looks),
-            bool(game and extras.can_restore(str(game), str(self.config))),
+            restore_pack,
             {
                 name: bool(game and extras.turn_highlight_enabled(game, name))
                 for name in extras.SKINS
             },
-            themes.scale_background(game) if game else True,
+            scale,
             next(
                 (look.name for look in looks if look.active),
                 "Installed theme"
@@ -148,6 +209,7 @@ class SkinStore:
             self.library.wallpapers(),
             sleeve_summary(sleeves.Library(self.root / "sleeves"), game),
             tuple(issues),
+            original_skin,
         )
 
     def backdrop(self, game: Path | None, scene: str) -> QImage | None:

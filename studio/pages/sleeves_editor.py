@@ -17,7 +17,7 @@ class Editor(QWidget):
     back = Signal()
     commit = Signal(object)
 
-    def __init__(self, tasks: TaskRunner, title: str) -> None:
+    def __init__(self, tasks: TaskRunner, title: str, *, scroll_form: bool = True) -> None:
         super().__init__()
         self.tasks = tasks
         self.active = True
@@ -45,19 +45,22 @@ class Editor(QWidget):
         panel = self.panel = Panel(t.LG)
         panel.setMaximumWidth(t.TILE_SIZE[0] * 4)
         columns.addWidget(panel, 6)
-        self.scroll = scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(
-            f"QScrollArea, QScrollArea > QWidget > QWidget {{background:{t.PANEL};}}"
-        )
-        panel.body.addWidget(scroll, 1)
         form = QWidget()
         self.form = QVBoxLayout(form)
         self.form.setContentsMargins(0, 0, t.SM, 0)
         self.form.setSpacing(t.SM)
         self.form.setAlignment(Qt.AlignmentFlag.AlignTop)
-        scroll.setWidget(form)
+        if scroll_form:
+            self.scroll = QScrollArea()
+            self.scroll.setWidgetResizable(True)
+            self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.scroll.setStyleSheet(
+                f"QScrollArea, QScrollArea > QWidget > QWidget {{background:{t.PANEL};}}"
+            )
+            self.scroll.setWidget(form)
+            panel.body.addWidget(self.scroll, 1)
+        else:
+            panel.body.addWidget(form, 1)
         self.hint = label("", "body", True)
         panel.body.addWidget(self.hint)
         fields = QHBoxLayout()

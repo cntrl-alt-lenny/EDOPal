@@ -154,7 +154,7 @@ class Gallery(QWidget):
             "skins",
         )
         layout.addWidget(self.hero)
-        heading = QHBoxLayout()
+        heading = self.heading = QHBoxLayout()
         self.count = label("Skins and themes", "heading")
         heading.addWidget(self.count)
         heading.addStretch()
@@ -183,7 +183,6 @@ class Gallery(QWidget):
         self.grid.activated.connect(self._selected)
         layout.addWidget(self.grid, 1)
         self.empty_panel = Panel()
-        self.empty_panel.body.addStretch()
         self.empty_panel.body.addWidget(
             glyph("skins", t.BRAND_ICON), 0, Qt.AlignmentFlag.AlignCenter
         )
@@ -192,9 +191,13 @@ class Gallery(QWidget):
         self.empty = label("", "body", True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_panel.body.addWidget(self.empty)
-        browse = Button("Clear filters", "secondary", "library")
+        browse = self.browse = Button("Clear filters", "secondary", "library")
         browse.clicked.connect(self._browse)
-        self.empty_panel.body.addWidget(browse, 0, Qt.AlignmentFlag.AlignCenter)
+        self.empty_actions = QHBoxLayout()
+        self.empty_actions.addStretch()
+        self.empty_actions.addWidget(browse)
+        self.empty_actions.addStretch()
+        self.empty_panel.body.addLayout(self.empty_actions)
         self.empty_panel.body.addStretch()
         layout.addWidget(self.empty_panel, 1)
         footer = QHBoxLayout()
@@ -213,6 +216,7 @@ class Gallery(QWidget):
         self.data = data
         self.looks, self.game, self.scale = data.looks, game, data.scale
         self.restore.setVisible(data.restore_pack)
+        self.restore.setText(f"Restore original · {data.original_skin}")
         self.filter()
 
     def _browse(self) -> None:
@@ -221,6 +225,10 @@ class Gallery(QWidget):
 
     def filter(self) -> None:
         group = self.filters.value
+        query = self.search.text()
+        visible = filter_looks(self.looks, group, query)
+        no_packs = not visible and not query and group == "Downloadable"
+        offline = bool(self.data and self.data.catalogue.detail)
         if self.data:
             parts = [f"Current skin · {self.data.active_name}"] if self.game else []
             if self.data.sleeve_summary:
@@ -230,13 +238,12 @@ class Gallery(QWidget):
                 if self.data.catalogue.detail
                 else ""
             )
-            if self.data.catalogue.detail:
+            if offline and not no_packs:
                 parts.append("Offline catalog. Refresh packs to check for downloads.")
-            elif group == "Downloadable":
+            elif group == "Downloadable" and not no_packs:
                 count = sum(bool(look.pack) for look in self.looks)
                 parts.append(f"{count} downloadable skin{'s' if count != 1 else ''}")
             self.info.setText("    ·    ".join(parts))
-        visible = filter_looks(self.looks, group, self.search.text())
         self.delegate.looks = visible
         self.count.setText(f"{len(visible)} " + ("item" if len(visible) == 1 else "items"))
         self.grid.set_tiles(
@@ -251,20 +258,24 @@ class Gallery(QWidget):
             ]
         )
         self.grid.setVisible(bool(visible))
-        message = {
-            "My themes": "Your saved themes appear here. Choose Create theme to start.",
-            "Downloadable": "No skin packs are available here yet. The built-in themes are ready to use.",
-        }.get(group, "No skins or themes match your search.")
-        self.empty_title.setText(
-            "No matching skins or themes"
-            if self.search.text()
-            else "Your theme library"
-            if group == "My themes"
-            else "Downloadable skins"
-        )
-        self.empty.setText(
-            "Try another name or clear the filters." if self.search.text() else message
-        )
+        library = not query and group == "My themes" and not visible
+        if library and self.heading.indexOf(self.create) >= 0:
+            self.empty_actions.insertWidget(1, self.create)
+            self.create.show()
+        elif not library and self.empty_actions.indexOf(self.create) >= 0:
+            self.heading.addWidget(self.create)
+            self.create.show()
+        self.browse.setVisible(not library)
+        self.browse.setText("Browse collection" if no_packs else "Clear filters")
+        if library:
+            title, hint = "Your theme library", "Create a theme to start your collection."
+        elif no_packs:
+            title = "Catalog offline" if offline else "No downloadable skins yet"
+            hint = "You can still choose a built-in theme."
+        else:
+            title, hint = "No matching skins or themes", "Try another name or clear the filters."
+        self.empty_title.setText(title)
+        self.empty.setText(hint)
         self.empty_panel.setVisible(not visible)
 
     def _selected(self, index: QModelIndex) -> None:

@@ -16,6 +16,7 @@ import extras
 import themes
 from studio import theme as t
 from studio.context import AppContext
+from studio.icons import icon
 from studio.widgets import Button, ElidedLabel, Panel, ProgressBlock, ToggleSwitch, label, margins
 
 from .skins_editor import Maker
@@ -67,7 +68,7 @@ class Inspector(Panel):
         self.undo = Button("Undo last theme change")
         self.remove = Button("Remove theme from EDOPro")
         self.restore = Button("Restore appearance from before skin packs")
-        for item in (self.history, self.back, self.undo, self.remove, self.restore):
+        for item in (self.history, self.back, self.remove):
             self.body.addWidget(item)
         self.manage = QWidget()
         grid = QGridLayout(self.manage)
@@ -122,42 +123,76 @@ class Inspector(Panel):
             ):
                 value.setText(text)
             self.hint.setText(
-                "Applied to EDOPro."
+                "Your saved changes are ready to apply to EDOPro."
+                if look.needs_update
+                else "Applied to EDOPro."
                 if look.active
                 else "Save an editable theme or apply it to EDOPro."
             )
         self.source.setVisible(bool(pack))
         self.highlight.setVisible(bool(pack and look.name in extras.SKINS))
-        download = bool(pack and look.availability in ("Not downloaded", "Update available"))
-        self.apply.setText(
-            ("Download update" if look.availability == "Update available" else "Download skin")
-            if download
-            else "Apply skin"
-            if pack
-            else "Apply theme"
-        )
-        self.apply.setEnabled(
-            download or (ready and (not pack or look.availability == "Downloaded"))
-        )
         self.manage.setVisible(look.group == "My themes")
         self.back.setVisible(look.state.active)
         self.undo.setVisible(look.state.can_undo)
-        self.undo.setText(
-            "Undo last theme change"
-            if look.state.undo_removes_install
-            else "Undo last theme change"
-        )
         self.undo.setToolTip(
             "Put back the skin used before this theme was installed."
             if look.state.undo_removes_install
             else "Put back the last installed version of this theme."
         )
+        self.back.setText(f"Restore original · {look.previous_skin or 'Previous skin'}")
+        self.undo.setText("Undo last change")
         self.back.setToolTip("Restore the earlier skin and fonts. Keep this theme installed.")
+        if look.state.can_undo:
+            self.hint.setText(
+                self.hint.text()
+                + " Undo restores "
+                + (
+                    (look.previous_skin or "the previous skin")
+                    if look.state.undo_removes_install
+                    else f"the previous installed version of {look.name}"
+                )
+                + "."
+            )
         self.remove.setVisible(bool(look.state.folder))
         self.restore.setVisible(bool(pack and restore_pack))
-        self.history.setVisible(bool(look.state.folder or (pack and restore_pack)))
+        self.restore.setToolTip(
+            "Restore the original pack files and settings that are still in use."
+        )
+        self.history.setVisible(bool(look.state.folder))
         for control in (self.back, self.undo, self.remove, self.restore):
             control.setEnabled(ready)
+
+    def update_action(self, look: Look, ready: bool, paused: bool, highlight: bool) -> None:
+        download = bool(look.pack and look.availability in ("Not downloaded", "Update available"))
+        if download and paused:
+            self.hint.setText(f"Paused · Version {look.pack.pack.version}")
+        changed = (
+            look.active_pack
+            and look.name in extras.SKINS
+            and self.highlight.isChecked() != highlight
+        )
+        applied = look.active and not changed and not download and not look.needs_update
+        title = (
+            "Resume download"
+            if download and paused
+            else "Download update"
+            if download and look.availability == "Update available"
+            else "Download skin"
+            if download
+            else "Applied"
+            if applied
+            else "Apply skin"
+            if look.pack
+            else "Apply theme"
+        )
+        self.apply.setText(title)
+        self.apply.setIcon(
+            icon("download" if download else "check" if applied else "arrow", t.ON_GOLD)
+        )
+        self.apply.setEnabled(
+            download
+            or (ready and not applied and (not look.pack or look.availability == "Downloaded"))
+        )
 
 
 class Workspace(QWidget):
@@ -212,12 +247,21 @@ class Workspace(QWidget):
         self.scroll.setWidget(side)
         actions = QHBoxLayout()
         actions.addStretch()
-        actions.addWidget(self.inspector.apply)
+        actions.addWidget(self.maker.copy_btn)
+        actions.addWidget(self.maker.save_btn)
+        self.game_actions = QWidget()
+        game = QHBoxLayout(self.game_actions)
+        margins(game, 0)
+        for button in (self.inspector.undo, self.inspector.restore, self.inspector.apply):
+            game.addWidget(button)
+        actions.addWidget(self.game_actions)
         body.addLayout(actions)
         self.show_panel(self.inspector)
 
     def show_panel(self, panel: QWidget) -> None:
         for item in self.panels:
             item.setVisible(item is panel)
-        self.inspector.apply.setVisible(panel is self.inspector)
+        self.maker.copy_btn.setVisible(panel is self.maker_panel)
+        self.maker.save_btn.setVisible(panel is self.maker_panel)
+        self.game_actions.setVisible(panel is self.inspector)
         self.scroll.verticalScrollBar().setValue(0)

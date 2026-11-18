@@ -62,7 +62,7 @@ def test_model_filters_and_palette_only_surprise() -> None:
     looks = [Look(preset_id(p), p, "Preset") for p in themes.PRESETS]
     light = filter_looks(looks, "Light", "")
     dark = filter_looks(looks, "Dark", "")
-    assert light and dark and len(light) + len(dark) == 16
+    assert light and dark and len(light) + len(dark) == len(themes.PRESETS)
     assert filter_looks(light, "All", "  pOrCeLaIn ")[0].name == "Porcelain Blue"
     original = replace(themes.PRESETS[0], text="#123456", depth=99)
     changed = surprise(original)
@@ -70,6 +70,19 @@ def test_model_filters_and_palette_only_surprise() -> None:
     assert changed == replace(
         original, background=changed.background, surface=changed.surface, accent=changed.accent
     )
+
+
+def test_large_preset_gallery_search(page: SkinsPage) -> None:
+    looks = [
+        Look(f"preset-{i}", replace(themes.PRESETS[0], name=f"Palette {i}"), "Preset")
+        for i in range(150)
+    ]
+    gallery = page.gallery
+    gallery.set_collection(replace(page.data, looks=looks), page.game)
+    assert gallery.grid.model().rowCount() == len(looks)
+    gallery.search.setText("Palette 149")
+    assert gallery.grid.tiles.items[0].title == "Palette 149"
+    assert gallery.grid.model().rowCount() == 1 and len(gallery.grid.tiles.pending) <= 4
 
 
 def test_deleted_library_copy_keeps_history_in_another_game(
@@ -109,13 +122,20 @@ def test_invalid_catalogue_keeps_local_looks(
             and "Invalid catalog URL" in page.gallery.info.toolTip()
         )
     )
-    assert page.gallery.grid.model().rowCount() == 16
+    assert page.gallery.grid.model().rowCount() == len(themes.PRESETS)
+    page.gallery.filters.buttons["Downloadable"].click()
+    qtbot.waitUntil(lambda: page.gallery.empty_title.text() == "Catalog offline")
+    assert page.gallery.browse.text() == "Browse collection"
+    page.gallery.browse.click()
+    assert page.gallery.grid.model().rowCount() == len(themes.PRESETS)
 
 
 def test_gallery_keyboard_empty_and_game_changes(page: SkinsPage, qtbot: QtBot) -> None:
-    assert page.gallery.grid.model().rowCount() == 16
+    assert page.gallery.grid.model().rowCount() == len(themes.PRESETS)
     page.gallery.filters.buttons["My themes"].click()
     assert page.gallery.empty.isVisible()
+    assert page.gallery.empty_panel.isAncestorOf(page.gallery.create)
+    assert not page.gallery.browse.isVisible()
     page.gallery.filters.buttons["Light"].click()
     select(page, qtbot, "Porcelain Blue")
     page.view.preview.scenes.buttons["Duel field"].click()
@@ -228,7 +248,7 @@ def test_install_retry_sleeves_and_three_recoveries(
     assert not info.back.isVisible() and not info.remove.isVisible() and not info.undo.isVisible()
     monkeypatch.setattr(settings, "_game_running", lambda _: True)
     info.apply.click()
-    qtbot.waitUntil(lambda: "Close EDOPro to continue" in page.message.text() and page.job is None)
+    qtbot.waitUntil(lambda: page.block.isVisible() and page.job is None)
     assert extras.current_skin(str(game)) == "Old"
 
     main_thread = get_ident()
@@ -240,7 +260,8 @@ def test_install_retry_sleeves_and_three_recoveries(
         return False
 
     monkeypatch.setattr(settings, "_game_running", check)
-    page.retry_button.click()
+    assert not info.apply.isVisible()
+    page.block.retry.click()
     assert page.ctx.busy and not page.window().change.isEnabled()
     assert not page.ctx.navigate("music") and not page.request_close()
     release.set()
@@ -248,6 +269,8 @@ def test_install_retry_sleeves_and_three_recoveries(
     assert all(btn.isVisible() for btn in (info.back, info.remove, info.undo))
     assert sleeves.status(lib, game)["mine"].matches
     assert "sleeves carry over" in page.message.text()
+    assert info.apply.text() == "Applied" and not info.apply.isEnabled()
+    assert info.back.text() == "Restore original · Old"
     info.back.click()
     qtbot.waitUntil(lambda: not page.look.active)
     assert extras.current_skin(str(game)) == "Old"
@@ -274,10 +297,10 @@ def test_recover_on_entry(page: SkinsPage, qtbot: QtBot, monkeypatch: pytest.Mon
     assert themes.install_state(game, key).recovery_pending
     monkeypatch.setattr(settings, "_game_running", lambda _: True)
     assert page.ctx.navigate("skins")
-    qtbot.waitUntil(lambda: "Close EDOPro to continue" in page.message.text())
+    qtbot.waitUntil(lambda: page.block.isVisible())
     assert themes.install_state(game, key).recovery_pending
     monkeypatch.setattr(settings, "_game_running", lambda _: False)
-    page.retry_button.click()
+    page.block.retry.click()
     qtbot.waitUntil(lambda: "Finished installing" in page.message.text())
     assert (
         not themes.install_state(game, key).recovery_pending
@@ -304,7 +327,7 @@ def test_import_and_collection_errors_stay_recoverable(
         )
     page.retry_button.click()
     qtbot.waitUntil(lambda: page.gallery.refresh.isEnabled())
-    assert len(page.data.looks) == 16
+    assert len(page.data.looks) == len(themes.PRESETS)
 
 
 def test_pack_download_cancel_resume_apply_highlight_restore(
@@ -371,9 +394,9 @@ def test_pack_download_cancel_resume_apply_highlight_restore(
     qtbot.waitUntil(lambda: page.view.progress.percent.text() != "")
     assert extras.current_skin(str(page.game)) == ""
     page.view.progress.cancel.click()
-    qtbot.waitUntil(lambda: page.retry_button.text() == "Resume" and not page.job)
+    qtbot.waitUntil(lambda: info.apply.text() == "Resume download" and not page.job)
     hold = False
-    page.retry_button.click()
+    info.apply.click()
     qtbot.waitUntil(lambda: page.look.availability == "Downloaded")
     assert info.highlight.isChecked()
     info.apply.click()
@@ -471,6 +494,12 @@ def test_fine_tuning_fits_beside_preview(
         .rect()
         .contains(QRect(button.mapTo(view.scroll.viewport(), QPoint()), button.size()))
     )
+    save = page.maker.save_btn
+    fixed_position = save.mapTo(window, QPoint())
+    view.scroll.verticalScrollBar().setValue(view.scroll.verticalScrollBar().maximum())
+    assert save.isVisible() and not view.scroll.isAncestorOf(save)
+    assert save.mapTo(window, QPoint()) == fixed_position
+    assert window.rect().contains(QRect(fixed_position, save.size()))
     assert view.scroll.horizontalScrollBar().maximum() == 0
     assert not view.scroll.geometry().intersects(view.preview.geometry())
 
@@ -534,7 +563,7 @@ def test_missing_game_and_unreadable_sleeves_leave_the_gallery_usable(
     monkeypatch.setattr(sleeves, "status", Mock(side_effect=ValueError("Unreadable library")))
     page.reload()
     qtbot.waitUntil(lambda: "Could not read assigned sleeves" in page.gallery.info.text())
-    assert len(page.data.looks) == 16
+    assert len(page.data.looks) == len(themes.PRESETS)
     missing = tmp_path / "Disconnected game"
     page.ctx.set_installation(Installation(str(missing), True))
     qtbot.waitUntil(lambda: page.data is not None)
@@ -633,3 +662,23 @@ def test_stale_theme_editor_preserves_other_instance(page: SkinsPage, qtbot: QtB
     qtbot.waitUntil(lambda: not page.job)
     assert lib.load(key) == published
     assert page.mode == "maker" and page.maker.name.text() == "My draft"
+
+
+def test_saved_edits_to_applied_theme_can_be_applied_again(page: SkinsPage, qtbot: QtBot) -> None:
+    theme = replace(themes.PRESETS[0], name="Saved test theme", wallpaper="inherit")
+    key = page.store.library.save(theme)
+    themes.install_theme(page.game, key, theme)
+    page.reload()
+    qtbot.waitUntil(lambda: any(item.key == key for item in page.data.looks))
+    select(page, qtbot, theme.name)
+    info = page.view.inspector
+    assert info.apply.text() == "Applied" and not info.apply.isEnabled()
+    info.edit.click()
+    page.maker.ranges["depth"].setValue((theme.depth + 25) % 100)
+    page.maker.save_btn.click()
+    saved(page, qtbot, theme.name)
+    assert info.apply.isEnabled() and info.apply.text() == "Apply theme"
+    assert page.view.kicker.text() == "SAVED CHANGES"
+    info.apply.click()
+    qtbot.waitUntil(lambda: not page.job and info.apply.text() == "Applied")
+    assert not info.apply.isEnabled() and info.undo.isVisible()
