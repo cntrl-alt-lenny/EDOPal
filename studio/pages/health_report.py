@@ -6,6 +6,7 @@ from dataclasses import fields, is_dataclass
 from itertools import islice
 from pathlib import Path
 
+import config
 from doctor import Finding, ListConflict
 
 AREAS = {
@@ -27,7 +28,6 @@ AREAS = {
     "windbot": "Practice duels",
 }
 RANK = {"problem": 0, "warning": 1, "info": 2, "ok": 3}
-STATUS = {"problem": "Problem", "warning": "Warning", "info": "Information", "ok": "Passed"}
 PAGE_NAMES = {
     "music": "Music",
     "cards": "HD Cards",
@@ -35,6 +35,7 @@ PAGE_NAMES = {
     "skins": "Skins",
     "sleeves": "Sleeves",
     "mydecks": "My decks",
+    "backup": "Backup & transfer",
 }
 ROUTES = {
     "music.disabled": "music",
@@ -62,6 +63,8 @@ def route(item: Finding) -> str | None:
             "sleeves": "sleeves",
             "effects": "sounds",
             "music": "music",
+            "backup": "backup",
+            "skins": "skins",
         }.get(str(item.evidence.get("category")))
     if item.id == "artwork.coverage" and all(
         isinstance(have := item.evidence.get(f"{kind}_have"), int)
@@ -86,8 +89,9 @@ def heading(item: Finding) -> str:
     return {
         "windbot.list_conflicts": "Some practice decks exceed installed card limits",
         "repositories.config": "Game update sources checked",
+        "state.lock_idle": "No update is using this file",
         "process.closed": "EDOPro appears to be closed",
-    }.get(item.id, item.title)
+    }.get(item.id, item.title.replace("Studio", config.APP_NAME))
 
 
 def deck_heading(item: Finding, issue: str) -> str:

@@ -44,7 +44,7 @@ def test_archive_dates_and_legacy_manifest(tmp_path: Path) -> None:
     put.write_bytes(b"my own deck")
     conflict = restore_review(backup.plan_restore(legacy, install)).groups["conflict"][0]
     assert "Backup · 4 B, date unavailable" in conflict.detail
-    assert f"Here · 11 B, {date_text(int(put.stat().st_mtime))}" in conflict.detail
+    assert f"In this EDOPro folder · 11 B, {date_text(int(put.stat().st_mtime))}" in conflict.detail
 
 
 def test_save_verifies_before_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

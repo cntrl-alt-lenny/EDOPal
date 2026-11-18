@@ -99,7 +99,7 @@ class ReplayRow(QStyledItemDelegate):
             t.TEXT,
         )
         draw(
-            tags or ("Rolling replay" if entry.is_last else "Saved replay"),
+            tags or ("Last duel recording" if entry.is_last else "Saved replay"),
             left,
             rect.top() + t.XXL + t.ICON,
             width,

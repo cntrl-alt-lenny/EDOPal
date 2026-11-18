@@ -1,15 +1,18 @@
 """Back up, compare, and restore the selected EDOPro installation."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import TypeVar
+from weakref import ref
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QResizeEvent
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QFileDialog, QScrollArea, QVBoxLayout
 
 import backup
+import desktop_helpers
 from backup.core import Progress
 from music.settings import _game_running
 from studio import theme as t
@@ -23,12 +26,11 @@ from studio.pages.backup_jobs import (
     run_write,
 )
 from studio.pages.backup_results import BusyScreen, ErrorScreen, RestoredScreen, SavedScreen
+from studio.pages.backup_review import CompareScreen, PreviewScreen
 from studio.pages.backup_screens import (
     UNDO_DESCRIPTION,
     ArchiveScreen,
-    CompareScreen,
     HomeScreen,
-    PreviewScreen,
     SaveScreen,
     Screen,
 )
@@ -69,6 +71,10 @@ class BackupPage(Page):
         if self.writing:
             return False
         self._discard_read()
+        self.archive = self.manifest = self.plan = None
+        if screen := self.scroll.takeWidget():
+            screen.deleteLater()
+        self.screen = self.back = None
         return True
 
     def installation_changed(self, installation: Installation) -> None:
@@ -83,7 +89,7 @@ class BackupPage(Page):
 
     def escape(self) -> bool:
         if self.writing:
-            self._cancel()
+            self.progress.cancel.setFocus()
         elif (
             isinstance(self.screen, (PreviewScreen, CompareScreen))
             and self.screen.grouped.close_details()
@@ -104,8 +110,11 @@ class BackupPage(Page):
         if self.screen:
             tool_margins(self.screen.body, self.width())
             self.screen.body.setSpacing(t.MD if compact else t.LG)
-        if isinstance(self.screen, (PreviewScreen, CompareScreen)):
-            self.screen.grouped.compact(compact)
+        if isinstance(self.screen, (SaveScreen, PreviewScreen, CompareScreen)):
+            self.screen.compact(compact)
+        if isinstance(self.screen, (SaveScreen, PreviewScreen)) and compact:
+            self.screen.body.setContentsMargins(t.LG, t.MD, t.LG, t.MD)
+            self.screen.body.setSpacing(t.SM)
         if isinstance(self.screen, HomeScreen):
             ratio = 0.47 if self.screen.has_installation else 0.65
             height = t.HERO_MIN if self.screen.pending else int(self.height() * ratio)
@@ -150,9 +159,10 @@ class BackupPage(Page):
             self.ctx.set_busy(True)
         job = self.ctx.tasks.start(work)
         self.job = job
+        pending = ref(job)
 
         def deliver(callback: Callable, value: object) -> None:
-            if self.job is job:
+            if self.job is not None and self.job is pending():
                 self.job = None
                 if write:
                     self.writing = False
@@ -182,7 +192,7 @@ class BackupPage(Page):
             install = self._install()
 
             def ready(records: tuple[backup.Transaction, ...]) -> None:
-                screen.set_history(records, "", self.show_home)
+                screen.set_history(records, "", self.show_home, self._preview_undo)
                 self._size_screen()
                 if screen.compare.hasFocus() and screen.save.isEnabled():
                     screen.save.setFocus()
@@ -194,6 +204,7 @@ class BackupPage(Page):
                     (),
                     "Couldn’t read restore history. Check that the folder is available.",
                     self.show_home,
+                    self._preview_undo,
                 ),
             )
 
@@ -246,8 +257,10 @@ class BackupPage(Page):
         )
 
     def _reveal(self, path: Path) -> None:
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent))):
-            self.ctx.notify("Couldn’t open the backup folder. Its location is shown above.")
+        message = "Couldn’t open the backup folder. Its location is shown above."
+        job = self.ctx.tasks.start(lambda _: desktop_helpers.open_link(path.parent))
+        job.result.connect(lambda opened: None if opened else self.ctx.notify(message))
+        job.error.connect(lambda _: self.ctx.notify(message))
 
     def choose_backup(self, compare: bool) -> None:
         title = "Choose a backup to compare" if compare else "Choose the backup to restore"
@@ -359,11 +372,11 @@ class BackupPage(Page):
         if not plan or self.ctx.busy:
             return
         count = sum(item.action != "skip" for item in plan.items)
-        change = "1 reviewed change" if count == 1 else f"{count:,} reviewed changes"
+        change = "1 change" if count == 1 else f"{count:,} changes"
         if count and self.ctx.confirm(
-            "Restore to this installation?",
-            f"Nothing has been changed yet. Apply {change} to {plan.install.game.name}? "
-            "You can undo this restore when it finishes.",
+            f"Apply {change}?",
+            f"Review the proposed changes before restoring to {plan.install.game.name}. "
+            "Nothing has been changed yet.",
         ):
             self.run_restore(plan)
 
@@ -376,7 +389,7 @@ class BackupPage(Page):
 
         self._write(
             "Restoring your backup",
-            "Keep EDOPro closed. The selected installation is locked until this ends.",
+            "Keep EDOPro closed until this finishes.",
             restore,
             self._restored,
             "Couldn’t finish restoring",
@@ -415,7 +428,7 @@ class BackupPage(Page):
 
         self._write(
             "Finishing the restore" if mode == "finish" else "Putting back your previous files",
-            "Keep EDOPro closed. The selected installation is locked until this ends.",
+            "Keep EDOPro closed until this finishes.",
             recover,
             self._restored,
             "Couldn’t finish this change",
@@ -430,13 +443,37 @@ class BackupPage(Page):
             raise backup.GameRunning()
 
     def _restored(self, transaction: backup.Transaction) -> None:
-        self._show(
-            RestoredScreen(
-                transaction,
-                self.show_home,
-                partial(self.confirm_recovery, transaction, "rollback"),
-            ),
+        self.plan = self.manifest = self.archive = None
+        screen = RestoredScreen(
+            transaction,
             self.show_home,
+            partial(self.confirm_recovery, transaction, "rollback"),
+        )
+        self._show(screen, self.show_home)
+        if transaction.status == "complete":
+            self._preview_undo(transaction, screen.show_undo)
+
+    def _preview_undo(
+        self, transaction: backup.Transaction, ready: Callable[[backup.UndoPreview], None]
+    ) -> None:
+        install = self._install()
+
+        def check(worker: WorkerContext) -> backup.UndoPreview:
+            current = install()
+            preview = backup.preview_undo(
+                current, transaction.id, cancel=worker.cancel.is_set, require_closed=True
+            )
+            if preview.target:
+                try:
+                    return replace(preview, target=str(current.target(preview.target)))
+                except (OSError, ValueError):
+                    return preview
+            return preview
+
+        self._start(
+            check,
+            ready,
+            lambda error: ready(backup.UndoPreview(False, str(error))),
         )
 
     def _write(
@@ -500,7 +537,7 @@ class BackupPage(Page):
         if self.job and self.writing:
             self.job.cancel()
             self.progress.cancel.setEnabled(False)
-            self.progress.detail.setText("Stopping safely…")
+            self.progress.detail.setText("Canceling at the next safe point…")
 
     def _error(
         self,

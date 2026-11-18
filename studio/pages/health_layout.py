@@ -2,9 +2,10 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from weakref import ref
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QResizeEvent
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLayout,
@@ -15,6 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import config
+import desktop_helpers
 from studio import theme as t
 from studio.context import AppContext, Installation
 from studio.pages.base import Page
@@ -31,6 +34,18 @@ def row() -> QHBoxLayout:
 def tool_margins(body: QLayout, width: int) -> None:
     inset = max(t.XL, (width - t.CONTENT_MAX) // 2)
     body.setContentsMargins(inset, t.XL, inset, t.XL)
+
+
+def technical_details(body: QVBoxLayout, text: str) -> None:
+    if text:
+        button = Button("Technical details", "quiet")
+        button.setCheckable(True)
+        body.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
+        detail = label(text, "muted", True)
+        detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        body.addWidget(detail)
+        detail.hide()
+        button.toggled.connect(detail.setVisible)
 
 
 def editor(name: str, *, readonly: bool = False) -> QPlainTextEdit:
@@ -106,6 +121,7 @@ class ToolPage(Page):
         callback: Callable[[], None] | None = None,
         *,
         back: Callable[[], None] | None = None,
+        technical: str = "",
     ) -> None:
         self.surface(state)
         if back:
@@ -120,6 +136,7 @@ class ToolPage(Page):
         copy.addWidget(label(message, "body", True))
         line.addLayout(copy, 1)
         panel.body.addLayout(line)
+        technical_details(panel.body, technical)
         if action and callback:
             button = Button(action, "primary")
             button.clicked.connect(callback)
@@ -131,7 +148,7 @@ class ToolPage(Page):
     def no_game(self) -> None:
         self.state_view(
             "no_game",
-            "Choose your installation",
+            "Choose your EDOPro folder",
             "Select the folder where you open EDOPro to get started.",
             "Choose folder",
             self.ctx.installations_requested.emit,
@@ -146,9 +163,10 @@ class ToolPage(Page):
         self.stop_read()
         job = self.ctx.tasks.start(work)
         self.read_job = job
+        pending = ref(job)
 
         def deliver(callback: Callable, value: object) -> None:
-            if self.read_job is job:
+            if self.read_job is not None and self.read_job is pending():
                 self.read_job = None
                 callback(value)
 
@@ -172,8 +190,16 @@ class ToolPage(Page):
             self.refresh()
 
     def open_folder(self, path: Path) -> None:
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
-            self.ctx.notify("The folder could not be opened in your file manager.")
+        self.open_in_desktop(path, desktop_helpers.open_link, "The folder could not be opened.")
+
+    def open_in_desktop(self, path: Path, launch: Callable[[Path], bool], message: str) -> None:
+        job = self.ctx.tasks.start(lambda _: launch(path))
+        job.result.connect(lambda opened: None if opened else self.ctx.notify(message))
+        job.error.connect(lambda _: self.ctx.notify(message))
+
+    @staticmethod
+    def folder_read_error() -> str:
+        return f"{config.APP_NAME} couldn’t read the EDOPro folder. Reconnect the drive or choose another folder."
 
     def back_button(self, callback: Callable[[], None]) -> Button:
         button = Button("Back", "quiet", "back")
