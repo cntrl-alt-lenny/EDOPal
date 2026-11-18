@@ -1642,10 +1642,10 @@ def run_health_check(cfg: Config) -> bool:
     )
 
     from content.catalogue import bundled_manifest
-    from music_library import ART, LOCAL, catalog
+    from music_library import ART, catalog
 
     try:
-        games = [game for game in catalog() if game != LOCAL]
+        games = [game.id for game in catalog().values() if game.cover_page]
         music_present = bool(games) and all(
             (ART / size / f"{game}.png").is_file()
             for game in games

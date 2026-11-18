@@ -32,6 +32,8 @@ class Soundtracks(unittest.TestCase):
 
     def test_all_covers_have_launchbox_provenance_and_native_sizes(self):
         items = json.loads((music.ART / "catalog.json").read_text(encoding="utf-8"))
+        items = [row for row in items if "cover_source" in row]
+        self.assertEqual({row["id"] for row in items}, {p.stem for p in music.ART.glob("*.png")})
         self.assertGreaterEqual(len(items), 25)
         for row in items:
             with self.subTest(row["id"]):

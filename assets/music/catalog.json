@@ -5,7 +5,9 @@
     "platform": "PlayStation",
     "year": 2002,
     "aliases": [
-      "Forbidden Memories"
+      "Forbidden Memories",
+      "Shin Duel Monsters",
+      "封印されし記憶"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/9490-yu-gi-oh-forbidden-memories",
     "cover_source": "https://images.launchbox-app.com/r2_52fbcfee-4ae4-4f9f-96bf-9889e615ca90.png",
@@ -14,7 +16,10 @@
       1500,
       1500
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 1999,
+    "first_region": "Japan",
+    "series": "Console"
   },
   {
     "id": "eternal",
@@ -22,7 +27,11 @@
     "platform": "Game Boy Advance",
     "year": 2002,
     "aliases": [
-      "Eternal Duelist Soul"
+      "Eternal Duelist Soul",
+      "Duel Monsters 5 Expert 1",
+      "DM5 Expert 1",
+      "Duel Monsters 5",
+      "Expert 1 GBA"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/3930-yu-gi-oh-the-eternal-duelist-soul",
     "cover_source": "https://images.launchbox-app.com/20715622-511b-441e-a10c-71d8bfff10ae.jpg",
@@ -31,7 +40,10 @@
       1530,
       1370
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2001,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy"
   },
   {
     "id": "sacred",
@@ -40,7 +52,11 @@
     "year": 2003,
     "aliases": [
       "The Sacred Cards",
-      "Sacred Cards"
+      "Sacred Cards",
+      "Duel Monsters 7 The Duelcity Legend",
+      "Duel Monsters 7",
+      "Double Pack The Sacred Cards",
+      "Sacred Cards Double Pack"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/23746-yu-gi-oh-the-sacred-cards",
     "cover_source": "https://images.launchbox-app.com/e68ce591-a415-4ac1-9c25-aa545e4815f5.jpg",
@@ -49,7 +65,10 @@
       500,
       500
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2002,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy"
   },
   {
     "id": "worldwide",
@@ -58,7 +77,8 @@
     "year": 2003,
     "aliases": [
       "Stairway to the Destined Duel",
-      "Worldwide Edition"
+      "Worldwide Edition",
+      "Duel Monsters International"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/2233-yu-gi-oh-worldwide-edition-stairway-to-the-destined-duel",
     "cover_source": "https://images.launchbox-app.com/8c7b12b3-1865-4710-8dd1-55bbfc98cf8f.jpg",
@@ -67,7 +87,10 @@
       640,
       640
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2003,
+    "first_region": "North America",
+    "series": "Early Days / Game Boy"
   },
   {
     "id": "pocyugi",
@@ -75,7 +98,8 @@
     "platform": "Windows",
     "year": 2003,
     "aliases": [
-      "Yugi the Destiny"
+      "Yugi the Destiny",
+      "Power of Chaos Yugi the Destiny"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/16757-yu-gi-oh-power-of-chaos-yugi-the-destiny",
     "cover_source": "https://images.launchbox-app.com/cd27932a-3651-4098-b7ff-213c76b8e87f.jpg",
@@ -84,7 +108,10 @@
       434,
       617
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2003,
+    "first_region": "North America (reported)",
+    "series": "Power of Chaos"
   },
   {
     "id": "pocjoey",
@@ -92,7 +119,8 @@
     "platform": "Windows",
     "year": 2004,
     "aliases": [
-      "Joey the Passion"
+      "Joey the Passion",
+      "Power of Chaos Joey the Passion"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/16759-yu-gi-oh-power-of-chaos-joey-the-passion",
     "cover_source": "https://images.launchbox-app.com/a69a3502-5576-4844-b651-83cb23707610.jpg",
@@ -101,7 +129,10 @@
       640,
       909
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2004,
+    "first_region": "North America",
+    "series": "Power of Chaos"
   },
   {
     "id": "pockaiba",
@@ -109,7 +140,8 @@
     "platform": "Windows",
     "year": 2004,
     "aliases": [
-      "Kaiba the Revenge"
+      "Kaiba the Revenge",
+      "Power of Chaos Kaiba the Revenge"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/16758-yu-gi-oh-power-of-chaos-kaiba-the-revenge",
     "cover_source": "https://images.launchbox-app.com/b2a8463c-c123-4129-8aec-9008fe1f989e.jpg",
@@ -118,7 +150,10 @@
       640,
       908
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2004,
+    "first_region": "North America",
+    "series": "Power of Chaos"
   },
   {
     "id": "wc2004",
@@ -129,7 +164,8 @@
       "World Championship Tournament 2004",
       "Championship Tournament 2004",
       "WC2004",
-      "WCT2004"
+      "WCT2004",
+      "Duel Monsters Expert 3"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/3931-yu-gi-oh-world-championship-tournament-2004",
     "cover_source": "https://images.launchbox-app.com/37743d13-862c-41c8-b21d-7d0bd33166f9.jpg",
@@ -138,7 +174,10 @@
       1000,
       1000
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2004,
+    "first_region": "Japan",
+    "series": "World Championship"
   },
   {
     "id": "trials",
@@ -149,7 +188,10 @@
       "7 Trials to Glory",
       "World Championship Tournament 2005",
       "Championship Tournament 2005",
-      "WC2005"
+      "WC2005",
+      "Day of the Duelist",
+      "Duel Monsters International 2",
+      "WCT2005"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/3929-yu-gi-oh-7-trials-to-glory-world-championship-tournament-2005",
     "cover_source": "https://images.launchbox-app.com/7053f9ce-590d-4f5f-bad6-566b71bfc28d.png",
@@ -158,7 +200,10 @@
       1530,
       1530
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2004,
+    "first_region": "Japan",
+    "series": "World Championship"
   },
   {
     "id": "nightmare",
@@ -175,7 +220,10 @@
       768,
       680
     ],
-    "cover_region": "Europe"
+    "cover_region": "Europe",
+    "first_year": 2005,
+    "first_region": "Japan",
+    "series": "Console"
   },
   {
     "id": "ultimate",
@@ -186,7 +234,9 @@
       "Ultimate Masters",
       "World Championship Tournament 2006",
       "Championship Tournament 2006",
-      "WC2006"
+      "WC2006",
+      "Duel Monsters Expert 2006",
+      "WCT2006"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/26518-yu-gi-oh-ultimate-masters-world-championship-tournament-2006",
     "cover_source": "https://images.launchbox-app.com/272f3ee4-4c36-40a3-b6fb-5e080bd42b24.png",
@@ -195,7 +245,10 @@
       962,
       1000
     ],
-    "cover_region": "Europe"
+    "cover_region": "Europe",
+    "first_year": 2006,
+    "first_region": "Japan",
+    "series": "World Championship"
   },
   {
     "id": "spirit",
@@ -203,7 +256,9 @@
     "platform": "Nintendo DS",
     "year": 2007,
     "aliases": [
-      "Spirit Caller"
+      "Spirit Caller",
+      "GX Spirit Summoner",
+      "Spirit Summoner"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/14404-yu-gi-oh-gx-spirit-caller",
     "cover_source": "https://images.launchbox-app.com/561508ed-5d3d-400c-8d89-885b9ffd39a4.jpg",
@@ -212,7 +267,10 @@
       1061,
       961
     ],
-    "cover_region": "Europe"
+    "cover_region": "Europe",
+    "first_year": 2006,
+    "first_region": "Japan",
+    "series": "Console"
   },
   {
     "id": "tf1",
@@ -221,7 +279,10 @@
     "year": 2007,
     "aliases": [
       "GX Tag Force",
-      "Tag Force 1"
+      "Tag Force 1",
+      "TF1",
+      "タッグフォース1",
+      "TagForce1"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/27703-yu-gi-oh-gx-tag-force",
     "cover_source": "https://images.launchbox-app.com/51830f37-17a5-4923-80ce-7a9d9ebe0e4b.jpg",
@@ -230,7 +291,10 @@
       640,
       1104
     ],
-    "cover_region": "Europe"
+    "cover_region": "Europe",
+    "first_year": 2006,
+    "first_region": "Japan",
+    "series": "Tag Force"
   },
   {
     "id": "tf2",
@@ -238,7 +302,10 @@
     "platform": "PSP",
     "year": 2007,
     "aliases": [
-      "Tag Force 2"
+      "Tag Force 2",
+      "TF2",
+      "タッグフォース2",
+      "TagForce2"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/24392-yu-gi-oh-gx-tag-force-2",
     "cover_source": "https://images.launchbox-app.com/df7472cd-e63a-48d9-aecb-1e89066fe125.jpg",
@@ -247,7 +314,10 @@
       640,
       1128
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2007,
+    "first_region": "North America",
+    "series": "Tag Force"
   },
   {
     "id": "wc2007",
@@ -256,7 +326,9 @@
     "year": 2007,
     "aliases": [
       "Championship 2007",
-      "WC2007"
+      "WC2007",
+      "WCT2007",
+      "World Championship Tournament 2007"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/26507-yu-gi-oh-world-championship-2007",
     "cover_source": "https://images.launchbox-app.com/ff8715c5-a336-4172-beda-547a1672a73a.jpg",
@@ -265,7 +337,10 @@
       789,
       703
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2007,
+    "first_region": "Japan",
+    "series": "World Championship"
   },
   {
     "id": "wc2008",
@@ -274,7 +349,9 @@
     "year": 2007,
     "aliases": [
       "Championship 2008",
-      "WC2008"
+      "WC2008",
+      "WCT2008",
+      "World Championship Tournament 2008"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/20047-yu-gi-oh-world-championship-2008",
     "cover_source": "https://images.launchbox-app.com/64885ce6-1e54-4b37-bc98-1c6d106f9d3e.jpg",
@@ -283,7 +360,10 @@
       798,
       711
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2007,
+    "first_region": "Japan",
+    "series": "World Championship"
   },
   {
     "id": "tf3",
@@ -291,7 +371,10 @@
     "platform": "PSP",
     "year": 2008,
     "aliases": [
-      "Tag Force 3"
+      "Tag Force 3",
+      "TF3",
+      "タッグフォース3",
+      "TagForce3"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/26501-yu-gi-oh-gx-tag-force-3",
     "cover_source": "https://images.launchbox-app.com/3d2990ce-babf-4e82-af2c-1149f2e91c06.jpg",
@@ -300,7 +383,10 @@
       793,
       1352
     ],
-    "cover_region": "Europe"
+    "cover_region": "Europe",
+    "first_year": 2008,
+    "first_region": "Japan",
+    "series": "Tag Force"
   },
   {
     "id": "tf4",
@@ -308,7 +394,10 @@
     "platform": "PSP",
     "year": 2009,
     "aliases": [
-      "Tag Force 4"
+      "Tag Force 4",
+      "TF4",
+      "タッグフォース4",
+      "TagForce4"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/26502-yu-gi-oh-5ds-tag-force-4",
     "cover_source": "https://images.launchbox-app.com/r2_3396ae1b-13bb-4889-940c-5a4a6d5a5ebc.jpg",
@@ -317,7 +406,10 @@
       1151,
       1984
     ],
-    "cover_region": "Germany"
+    "cover_region": "Germany",
+    "first_year": 2009,
+    "first_region": "Japan",
+    "series": "Tag Force"
   },
   {
     "id": "wc2009",
@@ -328,7 +420,9 @@
       "Stardust Accelerator",
       "World Championship 2009",
       "Championship 2009",
-      "WC2009"
+      "WC2009",
+      "WCT2009",
+      "World Championship Tournament 2009"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/26504-yu-gi-oh-5ds-world-championship-2009-stardust-accelerator",
     "cover_source": "https://images.launchbox-app.com/r2_e8e4f3eb-c10f-404e-9439-2364ab14bd3a.jpg",
@@ -337,7 +431,10 @@
       1500,
       1388
     ],
-    "cover_region": "Germany"
+    "cover_region": "Germany",
+    "first_year": 2009,
+    "first_region": "Japan",
+    "series": "World Championship"
   },
   {
     "id": "tf5",
@@ -345,7 +442,10 @@
     "platform": "PSP",
     "year": 2010,
     "aliases": [
-      "Tag Force 5"
+      "Tag Force 5",
+      "TF5",
+      "タッグフォース5",
+      "TagForce5"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/14750-yu-gi-oh-5ds-tag-force-5",
     "cover_source": "https://images.launchbox-app.com/9427fdb8-9d80-4e19-8156-f6bad6035b6f.jpg",
@@ -354,7 +454,10 @@
       640,
       1105
     ],
-    "cover_region": "North America"
+    "cover_region": "North America",
+    "first_year": 2010,
+    "first_region": "Japan",
+    "series": "Tag Force"
   },
   {
     "id": "wc2010",
@@ -365,7 +468,9 @@
       "Reverse of Arcadia",
       "World Championship 2010",
       "Championship 2010",
-      "WC2010"
+      "WC2010",
+      "WCT2010",
+      "World Championship Tournament 2010"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/26505-yu-gi-oh-5ds-world-championship-2010-reverse-of-arcadia",
     "cover_source": "https://images.launchbox-app.com/r2_a9f40beb-c5e8-4951-9860-287a5b04b44d.jpg",
@@ -374,7 +479,10 @@
       1500,
       1348
     ],
-    "cover_region": "Germany"
+    "cover_region": "Germany",
+    "first_year": 2010,
+    "first_region": "Japan",
+    "series": "World Championship"
   },
   {
     "id": "tf6",
@@ -382,7 +490,10 @@
     "platform": "PSP",
     "year": 2011,
     "aliases": [
-      "Tag Force 6"
+      "Tag Force 6",
+      "TF6",
+      "タッグフォース6",
+      "TagForce6"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/26503-yu-gi-oh-5ds-tag-force-6",
     "cover_source": "https://images.launchbox-app.com/bafdbe12-e599-4517-acc6-5b5efce8ca4c.jpg",
@@ -391,7 +502,10 @@
       500,
       857
     ],
-    "cover_region": "Japan"
+    "cover_region": "Japan",
+    "first_year": 2011,
+    "first_region": "Japan",
+    "series": "Tag Force"
   },
   {
     "id": "wc2011",
@@ -402,7 +516,9 @@
       "Over the Nexus",
       "World Championship 2011",
       "Championship 2011",
-      "WC2011"
+      "WC2011",
+      "WCT2011",
+      "World Championship Tournament 2011"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/21500-yu-gi-oh-5ds-world-championship-2011-over-the-nexus",
     "cover_source": "https://images.launchbox-app.com/cb1de173-195c-45bb-b3f5-dc7b68a6f20a.png",
@@ -411,7 +527,10 @@
       1489,
       1370
     ],
-    "cover_region": "Europe"
+    "cover_region": "Europe",
+    "first_year": 2011,
+    "first_region": "Japan",
+    "series": "World Championship"
   },
   {
     "id": "tfs",
@@ -419,7 +538,8 @@
     "platform": "PSP",
     "year": 2015,
     "aliases": [
-      "Tag Force Special"
+      "Tag Force Special",
+      "タッグフォース スペシャル"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/26499-yu-gi-oh-arc-v-tag-force-special",
     "cover_source": "https://images.launchbox-app.com/a9209b03-7eb3-43c8-8d71-af857e1234b0.jpg",
@@ -428,15 +548,19 @@
       640,
       1105
     ],
-    "cover_region": "Japan"
+    "cover_region": "Japan",
+    "first_year": 2015,
+    "first_region": "Japan",
+    "series": "Tag Force"
   },
   {
     "id": "legacy",
     "title": "Legacy of the Duelist",
-    "platform": "Xbox One",
+    "platform": "Xbox One / PlayStation 4 / Windows",
     "year": 2015,
     "aliases": [
-      "Legacy of the Duelist"
+      "Legacy of the Duelist",
+      "LOTD"
     ],
     "cover_page": "https://gamesdb.launchbox-app.com/games/images/34644-yu-gi-oh-legacy-of-the-duelist",
     "cover_source": "https://images.launchbox-app.com/97a78c52-0b96-4336-a8b5-abf76b01f275.jpg",
@@ -444,6 +568,617 @@
     "cover_resolution": [
       584,
       800
+    ],
+    "first_year": 2015,
+    "first_region": "North America",
+    "series": "Modern"
+  },
+  {
+    "id": "breedbattle",
+    "title": "Monster Capsule: Breed & Battle",
+    "platform": "PlayStation",
+    "first_year": 1998,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Monster Capsule Breed and Battle",
+      "Monster Capsule Breed & Battle",
+      "Breed & Battle",
+      "Monster Capsule PS1"
+    ]
+  },
+  {
+    "id": "dm1",
+    "title": "Duel Monsters",
+    "platform": "Game Boy",
+    "first_year": 1998,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Duel Monsters 1",
+      "DM1 GB",
+      "Duel Monsters (1998)",
+      "Yu-Gi-Oh Duel Monsters GB"
+    ]
+  },
+  {
+    "id": "dm2",
+    "title": "Duel Monsters II: Dark Duel Stories",
+    "platform": "Game Boy / Game Boy Color",
+    "first_year": 1999,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Duel Monsters II",
+      "DM2",
+      "Ankai Kettouki",
+      "DM2 Dark Duel Stories",
+      "Ankoku Kettouki"
+    ]
+  },
+  {
+    "id": "capsulemedal",
+    "title": "Monster Capsule (medal game)",
+    "platform": "Medal arcade",
+    "first_year": 1999,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Monster Capsule Arcade",
+      "Monster Capsule Medal Game",
+      "Monster Capsule Medal"
+    ]
+  },
+  {
+    "id": "capsulegb",
+    "title": "Monster Capsule GB",
+    "platform": "Game Boy / Game Boy Color",
+    "first_year": 2000,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Monster Capsule GB",
+      "Monster Capsule GBC"
+    ]
+  },
+  {
+    "id": "dm3",
+    "title": "Dark Duel Stories",
+    "platform": "Game Boy Color",
+    "first_year": 2000,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Dark Duel Stories",
+      "Duel Monsters III",
+      "DM3",
+      "Tri-Holy God Advent",
+      "Dark Duel Stories GBC"
+    ]
+  },
+  {
+    "id": "dm4",
+    "title": "Duel Monsters 4: Battle of Great Duelists",
+    "platform": "Game Boy Color",
+    "first_year": 2000,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Duel Monsters 4",
+      "Saikyou Kettousha Senki",
+      "DM4 Yugi Deck",
+      "DM4 Kaiba Deck",
+      "DM4 Jonouchi Deck",
+      "DM4 Joey Deck"
+    ]
+  },
+  {
+    "id": "dungeon",
+    "title": "Dungeon Dice Monsters",
+    "platform": "Game Boy Advance",
+    "first_year": 2001,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Dungeon Dice Monsters",
+      "DDM GBA",
+      "Double Pack 2 Dungeon Dice Monsters",
+      "Dungeon Dice Monsters Double Pack 2"
+    ]
+  },
+  {
+    "id": "roses",
+    "title": "The Duelists of the Roses",
+    "platform": "PlayStation 2",
+    "first_year": 2001,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Duelists of the Roses",
+      "DOTR PS2",
+      "Shin Duel Monsters II",
+      "Keishou Sareshi Kioku",
+      "Inherited Memories"
+    ]
+  },
+  {
+    "id": "dm6",
+    "title": "Duel Monsters 6: Expert 2",
+    "platform": "Game Boy Advance",
+    "first_year": 2001,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Duel Monsters 6 Expert 2",
+      "DM6",
+      "Expert 2 GBA",
+      "Duel Monsters 6",
+      "DM6 Expert 2"
+    ]
+  },
+  {
+    "id": "falsebound",
+    "title": "The Falsebound Kingdom",
+    "platform": "GameCube",
+    "first_year": 2002,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Falsebound Kingdom",
+      "FBK GameCube",
+      "Kyokou ni Tozasareta Oukoku",
+      "Falsebound Kingdom GCN"
+    ]
+  },
+  {
+    "id": "reshef",
+    "title": "Reshef of Destruction",
+    "platform": "Game Boy Advance",
+    "first_year": 2003,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Reshef of Destruction",
+      "Duel Monsters 8",
+      "DM8",
+      "Hametsu no Daijashin",
+      "Double Pack Reshef of Destruction",
+      "Reshef Double Pack",
+      "DM8 Reshef"
+    ]
+  },
+  {
+    "id": "board",
+    "title": "Destiny Board Traveler",
+    "platform": "Game Boy Advance",
+    "first_year": 2004,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Destiny Board Traveler",
+      "Sugoroku no Sugoroku",
+      "Double Pack 2 Destiny Board Traveler",
+      "Destiny Board Traveller",
+      "Destiny Board Traveler Double Pack 2"
+    ]
+  },
+  {
+    "id": "dawn",
+    "title": "The Dawn of Destiny",
+    "platform": "Xbox",
+    "first_year": 2004,
+    "first_region": "North America",
+    "series": "Console",
+    "aliases": [
+      "Dawn of Destiny",
+      "Dawn of Destiny Xbox",
+      "DOD Xbox"
+    ]
+  },
+  {
+    "id": "coliseum",
+    "title": "Capsule Monster Coliseum",
+    "platform": "PlayStation 2",
+    "first_year": 2004,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Capsule Monster Coliseum",
+      "Capsule Monster Colosseum",
+      "CMC PS2"
+    ]
+  },
+  {
+    "id": "online",
+    "title": "Yu-Gi-Oh! Online",
+    "platform": "Windows",
+    "first_year": 2005,
+    "first_region": "Japan and North America",
+    "series": "Online and mobile",
+    "aliases": [
+      "Yu-Gi-Oh Online",
+      "YGO Online 1",
+      "YGOO1"
+    ]
+  },
+  {
+    "id": "academy",
+    "title": "GX Duel Academy",
+    "platform": "Game Boy Advance",
+    "first_year": 2005,
+    "first_region": "Japan",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "GX Duel Academy",
+      "Duel Academy GBA",
+      "Mezase Duel King"
+    ]
+  },
+  {
+    "id": "online2",
+    "title": "Online: Duel Evolution",
+    "platform": "Windows",
+    "first_year": 2007,
+    "first_region": "Japan and North America",
+    "series": "Online and mobile",
+    "aliases": [
+      "Duel Evolution",
+      "Yu-Gi-Oh Online 2",
+      "YGOO2",
+      "Online Duel Evolution"
+    ]
+  },
+  {
+    "id": "tfe",
+    "title": "GX The Beginning of Destiny",
+    "platform": "PlayStation 2",
+    "first_year": 2007,
+    "first_region": "Japan",
+    "series": "Tag Force",
+    "aliases": [
+      "Beginning of Destiny",
+      "GX Tag Force Evolution",
+      "Tag Force Evolution PS2",
+      "Tag Force Evolution",
+      "GX Tag Force PS2",
+      "The Beginning of Destiny"
+    ]
+  },
+  {
+    "id": "terminal",
+    "title": "Duel Terminal",
+    "platform": "Arcade",
+    "first_year": 2008,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Duel Terminal",
+      "5Ds Duel Terminal",
+      "ZEXAL Duel Terminal",
+      "5D's Duel Terminal"
+    ]
+  },
+  {
+    "id": "wheelie",
+    "title": "5D’s Wheelie Breakers",
+    "platform": "Wii",
+    "first_year": 2009,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Wheelie Breakers",
+      "5Ds Wheelie Breakers"
+    ]
+  },
+  {
+    "id": "mobile",
+    "title": "5D’s Mobile",
+    "platform": "Japanese feature phones, i-mode / EZweb / Yahoo! Mobile",
+    "first_year": 2009,
+    "first_region": "Japan",
+    "series": "Online and mobile",
+    "aliases": [
+      "5Ds Mobile",
+      "Yu-Gi-Oh 5Ds Mobile",
+      "5D's Mobile i-mode"
+    ]
+  },
+  {
+    "id": "online3",
+    "title": "Online 3: Duel Accelerator",
+    "platform": "Windows",
+    "first_year": 2010,
+    "first_region": "Japan, North America and Europe",
+    "series": "Online and mobile",
+    "aliases": [
+      "Duel Accelerator",
+      "Yu-Gi-Oh Online 3",
+      "YGOO3",
+      "Online Duel Accelerator"
+    ]
+  },
+  {
+    "id": "decade",
+    "title": "5D’s Decade Duels",
+    "platform": "Xbox 360 XBLA",
+    "first_year": 2010,
+    "first_region": "North America",
+    "series": "Console",
+    "aliases": [
+      "Decade Duels",
+      "5Ds Decade Duels XBLA",
+      "5Ds Decade Duels",
+      "Decade Duels XBLA"
+    ]
+  },
+  {
+    "id": "transer",
+    "title": "5D’s Duel Transer",
+    "platform": "Wii",
+    "first_year": 2010,
+    "first_region": "Europe",
+    "series": "Console",
+    "aliases": [
+      "Duel Transer",
+      "DuelTranser",
+      "5Ds Master of the Cards",
+      "Master of the Cards",
+      "Duel Transer Wii"
+    ]
+  },
+  {
+    "id": "bam",
+    "title": "BAM",
+    "platform": "Facebook browser game",
+    "first_year": 2012,
+    "first_region": "International",
+    "series": "Online and mobile",
+    "aliases": [
+      "Yu-Gi-Oh BAM",
+      "BAM Facebook",
+      "YGO BAM Facebook"
+    ]
+  },
+  {
+    "id": "decadeplus",
+    "title": "5D’s Decade Duels Plus",
+    "platform": "Xbox 360 XBLA, then PS3 PSN",
+    "first_year": 2013,
+    "first_region": "North America",
+    "series": "Console",
+    "aliases": [
+      "Decade Duels Plus",
+      "5Ds Decade Duels Plus"
+    ]
+  },
+  {
+    "id": "bampocket",
+    "title": "BAM Pocket",
+    "platform": "iOS, later Android",
+    "first_year": 2013,
+    "first_region": "Netherlands (documented)",
+    "series": "Online and mobile",
+    "aliases": [
+      "BAM Pocket",
+      "Yu-Gi-Oh BAM Pocket",
+      "BAM Mobile",
+      "Yu-Gi-Oh BAM Mobile"
+    ]
+  },
+  {
+    "id": "carnival",
+    "title": "ZEXAL World Duel Carnival",
+    "platform": "Nintendo 3DS",
+    "first_year": 2013,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Zexal World Duel Carnival",
+      "Gekitotsu Duel Carnival",
+      "Clash Duel Carnival",
+      "World Duel Carnival",
+      "ZEXAL Duel Carnival"
+    ]
+  },
+  {
+    "id": "millennium",
+    "title": "Millennium Duels",
+    "platform": "Xbox 360 XBLA / PS3 PSN",
+    "first_year": 2014,
+    "first_region": "North America",
+    "series": "Console",
+    "aliases": [
+      "Millennium Duels",
+      "Yu-Gi-Oh Millennium Duels",
+      "YGO Millennium Duels"
+    ]
+  },
+  {
+    "id": "arena",
+    "title": "Duel Arena",
+    "platform": "PC browser / Miniclip",
+    "first_year": 2014,
+    "first_region": "North America and Europe",
+    "series": "Online and mobile",
+    "aliases": [
+      "Duel Arena",
+      "Yu-Gi-Oh Duel Arena",
+      "Miniclip Duel Arena",
+      "Duel Arena Miniclip"
+    ]
+  },
+  {
+    "id": "generation",
+    "title": "Duel Generation",
+    "platform": "iOS, later Android and Kindle Fire",
+    "first_year": 2014,
+    "first_region": "Canada",
+    "series": "Online and mobile",
+    "aliases": [
+      "Duel Generation",
+      "Yu-Gi-Oh Duel Generation",
+      "YGO Duel Generation"
+    ]
+  },
+  {
+    "id": "saikyo",
+    "title": "Duel Monsters: Saikyo Card Battle!",
+    "platform": "Nintendo 3DS eShop",
+    "first_year": 2016,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Saikyo Card Battle",
+      "Saikyou Card Battle",
+      "Strongest Card Battle",
+      "Strongest Card Battle 3DS"
+    ]
+  },
+  {
+    "id": "duellinks",
+    "title": "Duel Links",
+    "platform": "iOS / Android, later Windows (Steam)",
+    "first_year": 2016,
+    "first_region": "Australia and Singapore (soft launch)",
+    "series": "Online and mobile",
+    "aliases": [
+      "Duel Links",
+      "Yu-Gi-Oh Duel Links",
+      "YGO Duel Links",
+      "YGODL"
+    ]
+  },
+  {
+    "id": "linkevolution",
+    "title": "Legacy of the Duelist: Link Evolution",
+    "platform": "Switch first, later PS4 / Xbox One / Windows (Steam)",
+    "first_year": 2019,
+    "first_region": "Japan",
+    "series": "Modern",
+    "aliases": [
+      "Legacy of the Duelist Link Evolution",
+      "Link Evolution",
+      "LotD LE",
+      "LOTD LE"
+    ]
+  },
+  {
+    "id": "rushroyale",
+    "title": "Rush Duel: Dawn of the Battle Royale!!",
+    "platform": "Switch",
+    "first_year": 2021,
+    "first_region": "Japan",
+    "series": "Modern",
+    "aliases": [
+      "Dawn of the Battle Royale",
+      "Rush Duel Dawn of the Battle Royale",
+      "Saikyo Battle Royale",
+      "Rush Duel Saikyo Battle Royale",
+      "Rush Duel Switch 2021"
+    ]
+  },
+  {
+    "id": "masterduel",
+    "title": "Master Duel",
+    "platform": "Switch / PS4 / PS5 / Xbox One / Xbox Series / Windows (Steam), then iOS / Android",
+    "first_year": 2022,
+    "first_region": "Worldwide",
+    "series": "Modern",
+    "aliases": [
+      "Master Duel",
+      "Yu-Gi-Oh Master Duel",
+      "YGO Master Duel",
+      "YGOMD"
+    ]
+  },
+  {
+    "id": "crossduel",
+    "title": "Cross Duel",
+    "platform": "iOS / Android",
+    "first_year": 2022,
+    "first_region": "Canada, Hong Kong and Netherlands",
+    "series": "Online and mobile",
+    "aliases": [
+      "Cross Duel",
+      "Yu-Gi-Oh Cross Duel",
+      "YGO Cross Duel"
+    ]
+  },
+  {
+    "id": "gorush",
+    "title": "Rush Duel: Saikyo Battle Royale!! Let’s Go! Go Rush!!",
+    "platform": "Switch",
+    "first_year": 2022,
+    "first_region": "Japan",
+    "series": "Modern",
+    "aliases": [
+      "Rush Duel Go Rush",
+      "Saikyo Battle Royale Ikuzo Go Rush",
+      "Let's Go Go Rush",
+      "Saikyo Battle Royale Go Rush",
+      "Rush Duel Switch 2022"
+    ]
+  },
+  {
+    "id": "earlydays",
+    "title": "Early Days Collection",
+    "platform": "Switch / Windows (Steam)",
+    "first_year": 2025,
+    "first_region": "Worldwide",
+    "series": "Early Days / Game Boy",
+    "aliases": [
+      "Early Days Collection",
+      "Yu-Gi-Oh EDC",
+      "YGO EDC",
+      "Yu-Gi-Oh Early Days"
+    ]
+  },
+  {
+    "id": "multimaster",
+    "title": "Electronic Multi-Master",
+    "platform": "Mattel LCD handheld",
+    "first_year": 2003,
+    "first_region": "United States (documented)",
+    "series": "Console",
+    "aliases": [
+      "Multi Master Mattel",
+      "Yu-Gi-Oh Multi-Master",
+      "Mattel B0785"
+    ]
+  },
+  {
+    "id": "almanac",
+    "title": "GX Card Almanac",
+    "platform": "Nintendo DS",
+    "first_year": 2007,
+    "first_region": "Japan",
+    "series": "Console",
+    "aliases": [
+      "Card Almanac DS",
+      "GX Card Almanac"
+    ]
+  },
+  {
+    "id": "dueldash",
+    "title": "Duel Dash",
+    "platform": "Xbox 360 Kinect (public event)",
+    "first_year": 2014,
+    "first_region": "North America",
+    "series": "Console",
+    "aliases": [
+      "Duel Dash Kinect",
+      "Yu-Gi-Oh Duel Dash"
+    ]
+  },
+  {
+    "id": "miniclassics",
+    "title": "Nintendo Mini Classics: Yu-Gi-Oh!",
+    "platform": "Dedicated LCD handheld",
+    "first_year": 1998,
+    "first_region": "Unverified",
+    "series": "Console",
+    "aliases": [
+      "Nintendo Mini Classics Yu-Gi-Oh"
     ]
   }
 ]

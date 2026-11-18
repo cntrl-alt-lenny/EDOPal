@@ -9,11 +9,14 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import music_library as library
-from music_import import import_library, import_power_of_chaos
+from music.view import LibraryView, SeekState, run_job
+from music_import import ImportItem, execute_import, import_library, import_power_of_chaos
 from music_player import PreviewPlayer
 
 BG = "#151615"
@@ -34,20 +37,27 @@ class MusicPanel(ttk.Frame):
     def __init__(self, parent, edopro_path: str | Path, scene: str = "deck"):
         super().__init__(parent, padding=(18, 14))
         self.game_path = Path(edopro_path)
-        self.games = library.catalog()
+        self.view = LibraryView(self.game_path)
+        self.games = {}
+        self.restorable = {}
+        self.scan_request = 0
+        self.enabled = None
+        self.group = ()
         self.player = PreviewPlayer()
+        self.preview_worker = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="soundtrack-preview"
+        )
+        self.preview_request = 0
         self.scene = tk.StringVar(self, value=scene if scene in library.SCENES else "deck")
         self.query = tk.StringVar(self)
         self.available = tk.BooleanVar(self)
         self.status = tk.StringVar(self)
         self.current_game = ""
-        self.items: list[library.Track] = []
-        self.by_game: dict[str, list[library.Track]] = {}
         self.pictures = {}
         self.tiles = {}
         self.events = queue.Queue()
         self.busy = False
-        self._dragging = False
+        self.scrub = SeekState()
         self._timer = None
         self._build()
         self.refresh()
@@ -65,7 +75,7 @@ class MusicPanel(ttk.Frame):
         )
         scenes = ttk.Frame(header)
         scenes.grid(row=0, column=1, sticky="e")
-        for col, (key, name) in enumerate(library.SCENES.items()):
+        for col, (key, name) in enumerate((key, library.SCENES[key]) for key in ("deck", "duel")):
             ttk.Radiobutton(
                 scenes,
                 text=name,
@@ -312,17 +322,23 @@ class MusicPanel(ttk.Frame):
 
     def _picture(self, key: str, size: str):
         if (key, size) not in self.pictures:
-            self.pictures[key, size] = tk.PhotoImage(
-                master=self, file=str(library.ART / size / f"{key}.png")
-            )
+            try:
+                self.pictures[key, size] = tk.PhotoImage(
+                    master=self, file=str(library.ART / size / f"{key}.png")
+                )
+            except tk.TclError:
+                self.pictures[key, size] = None
         return self.pictures[key, size]
 
     def _switch_scene(self):
         self.stop_preview()
         self.status.set("")
-        self.refresh()
+        self._show_scene()
 
     def reveal_game(self, key: str):
+        if not self.games:
+            self.current_game = key
+            return
         if key not in self.games:
             return
         self.available.set(False)
@@ -332,8 +348,23 @@ class MusicPanel(ttk.Frame):
             self.after_idle(self._reveal, self.tiles[key])
 
     def refresh(self):
+        self.scan_request += 1
+        request = self.scan_request
+
+        def scan():
+            view = LibraryView(self.game_path)
+            view.refresh()
+            flags = {key: library.can_restore(self.game_path, key) for key in library.SCENES}
+            return view, flags, library.music_enabled(self.game_path)
+
+        def worker():
+            self.events.put(("scan", (request, run_job(scan))))
+
+        threading.Thread(target=worker, name="soundtrack-scan", daemon=True).start()
+
+    def _show_scene(self):
         scene = self.scene.get()
-        enabled = library.music_enabled(self.game_path)
+        enabled = self.enabled
         self.menu.entryconfigure(
             "end",
             label="Disable music in EDOPro" if enabled else "Enable music in EDOPro",
@@ -341,24 +372,13 @@ class MusicPanel(ttk.Frame):
             state="normal" if enabled is not None else "disabled",
         )
         if enabled is False:
+            self.enable.state(["disabled"] if self.busy else ["!disabled"])
             self.enable.grid()
         else:
             self.enable.grid_remove()
-        try:
-            self.items = library.tracks(self.game_path, scene)
-            restorable = library.can_restore(self.game_path, scene)
-        except (OSError, ValueError) as exc:
-            self.items = []
-            self.status.set(str(exc))
-            restorable = False
-        self.restore.state(["!disabled"] if restorable else ["disabled"])
-        self.by_game = {}
-        for track in self.items:
-            self.by_game.setdefault(track.game, []).append(track)
-        for group in self.by_game.values():
-            group.sort(key=lambda t: (not t.in_playlist, t.title.casefold()))
-        if not self.current_game:
-            self.current_game = next((entry.game for entry in self.items if entry.in_playlist), "")
+        self.restore.state(
+            ["!disabled"] if self.restorable.get(scene) and not self.busy else ["disabled"]
+        )
         self._filter(preserve_scroll=True)
         if not self.status.get():
             if enabled is False:
@@ -372,18 +392,15 @@ class MusicPanel(ttk.Frame):
         if not hasattr(self, "wall"):
             return
         top = self.scroll.yview()[0] if preserve_scroll else 0
-        query = self.query.get().strip().casefold()
-        games = [
-            g
-            for g in self.games.values()
-            if (not self.available.get() or g.id in self.by_game)
-            and (g.id != library.LOCAL or g.id in self.by_game)
-            and (
-                not query
-                or query in " ".join((g.title, g.platform, str(g.year), *g.aliases)).casefold()
-            )
-        ]
-        games.sort(key=lambda g: (g.id not in self.by_game, g.id == library.LOCAL, g.year, g.title))
+        selection = self.view.query(
+            self.scene.get(),
+            self.query.get(),
+            audio_only=self.available.get(),
+            game=self.current_game,
+        )
+        games = [album.game for album in selection.games]
+        counts = {album.game.id: album.counts[self.scene.get()] for album in selection.games}
+        self.games.update((g.id, g) for g in games)
         for w in self.wall.winfo_children():
             w.destroy()
         self.tiles.clear()
@@ -391,7 +408,7 @@ class MusicPanel(ttk.Frame):
         for c in range(2):
             self.wall.columnconfigure(c, weight=1, uniform="albums")
         for index, game in enumerate(games):
-            count = len(self.by_game.get(game.id, ()))
+            count = counts[game.id]
             tile = tk.Frame(
                 self.wall,
                 bg=RAISED,
@@ -403,8 +420,8 @@ class MusicPanel(ttk.Frame):
             )
             tile.grid(row=index // 2, column=index % 2, sticky="nsew", padx=(0, 6), pady=(0, 6))
             tile.columnconfigure(0, weight=1)
-            if game.id != library.LOCAL:
-                cover = tk.Label(tile, image=self._picture(game.id, "grid"), bg=RAISED, height=140)
+            if game.cover_page and (picture := self._picture(game.id, "grid")):
+                cover = tk.Label(tile, image=picture, bg=RAISED, height=140)
             else:
                 cover = tk.Label(
                     tile, text="♫", font=("TkDefaultFont", 28), fg=ACCENT, bg=RAISED, height=2
@@ -436,7 +453,7 @@ class MusicPanel(ttk.Frame):
             self.tiles[game.id] = tile
         if not games:
             tk.Label(self.wall, text="No matching games", bg=BG, fg=MUTED, pady=20).grid()
-        key = self.current_game if self.current_game in self.tiles else games[0].id if games else ""
+        key = selection.game or ""
         self._select(key, reset=True)
         self.scroll.yview_moveto(top)
 
@@ -455,6 +472,7 @@ class MusicPanel(ttk.Frame):
     def _select(self, key, *, reset=False):
         if not reset and key == self.current_game:
             return
+        old_track = self._track() if key == self.current_game else None
         self.stop_preview()
         self.current_game = key
         for item, tile in self.tiles.items():
@@ -472,17 +490,21 @@ class MusicPanel(ttk.Frame):
             self.credit.grid()
         else:
             self.credit.grid_remove()
-        if game and key != library.LOCAL:
-            self.art.configure(
-                image=self._picture(key, "detail" if self.winfo_screenheight() >= 720 else "grid"),
-                text="",
-            )
+        size = "detail" if self.winfo_screenheight() >= 720 else "grid"
+        if game and game.cover_page and (picture := self._picture(key, size)):
+            self.art.configure(image=picture, text="")
         else:
             self.art.configure(
                 image="", text="♫" if key else "", font=("TkDefaultFont", 22), fg=ACCENT
             )
         self.tracklist.delete(0, "end")
-        group = self.by_game.get(key, [])
+        selection = self.view.query(
+            self.scene.get(),
+            self.query.get(),
+            game=key,
+            track=old_track.path if old_track else None,
+        )
+        self.group = group = selection.tracks if key else ()
         self.audio_label.configure(
             text=f"{library.SCENES[self.scene.get()]}  ·  {len(group)} available"
         )
@@ -493,8 +515,9 @@ class MusicPanel(ttk.Frame):
                 + ("   ✓" if track.in_playlist else ""),
             )
         if group:
-            self.tracklist.selection_set(0)
-            self.tracklist.activate(0)
+            index = group.index(selection.track)
+            self.tracklist.selection_set(index)
+            self.tracklist.activate(index)
         elif game:
             self.tracklist.insert("end", "Add your audio files to start.")
         self.add.state(["!disabled"] if key and not self.busy else ["disabled"])
@@ -502,7 +525,7 @@ class MusicPanel(ttk.Frame):
 
     def _track(self):
         i = self.tracklist.curselection()
-        group = self.by_game.get(self.current_game, [])
+        group = self.group
         return group[i[0]] if i and i[0] < len(group) else None
 
     def _track_changed(self):
@@ -511,66 +534,64 @@ class MusicPanel(ttk.Frame):
         state = ["!disabled"] if track and not self.busy else ["disabled"]
         self.play.state(state)
         self.apply.state(state)
-        self.apply.configure(
-            text="Use for deck editor" if self.scene.get() == "deck" else "Use for duels"
-        )
+        self.apply.configure(text=f"Use for {library.SCENES[self.scene.get()].lower()}")
         self.seek.state(["disabled"])
 
     def toggle_play(self):
         track = self._track()
         if not track or self.busy:
             return
-        if self.player.playing:
-            self.player.pause()
-        else:
-            start = self.player.position if self.player.path == track.path.resolve() else 0
-            if self.player.duration and start >= self.player.duration - 0.1:
-                start = 0
-            try:
-                self.player.play(track.path, seconds=start)
-            except (ValueError, OSError) as exc:
-                self.status.set(str(exc))
-                return
-        self._player_ui()
 
-    def stop_preview(self):
-        self.player.stop()
-        self._dragging = False
+        def toggle() -> None:
+            if self.player.playing:
+                self.player.pause()
+            else:
+                self.player.play(track.path, seconds=self.player.resume_position(track.path))
+
+        self._preview(toggle)
+
+    def _preview(self, action: Callable[[], None]) -> Future:
+        self.preview_request += 1
+        request = self.preview_request
+
+        def worker() -> None:
+            outcome = run_job(action)
+            self.events.put(("preview", (request, outcome.error)))
+
+        return self.preview_worker.submit(worker)
+
+    def stop_preview(self) -> Future:
+        stopped = self._preview(self.player.stop)
+        self.scrub.fraction = None
         if hasattr(self, "play"):
             self.play.configure(text="▶  Play")
             self.clock.configure(text="0:00")
             self.seek.set(0)
+        return stopped
 
     def _scrub(self, event):
         if self.player.seekable:
             self.seek.focus_set()
-            self._dragging = True
-            self.seek.set(self.seek.get(event.x, event.y))
+            self.scrub.drag(self.seek.get(event.x, event.y) / 100)
+            self.seek.set(self.scrub.fraction * 100)
             self._player_ui()
         return "break"
 
     def _keyboard_scrub(self, event):
         if self.player.seekable and self.player.duration:
-            self._dragging = True
-            if event.keysym in ("Home", "End"):
-                value = 0 if event.keysym == "Home" else 100
-            else:
-                step = 500 / self.player.duration  # Five seconds, independent of track length.
-                value = self.seek.get() + (step if event.keysym in ("Right", "Up") else -step)
-            self.seek.set(value)
+            self.scrub.keyboard(event.keysym, self.player.position, self.player.duration)
+            self.seek.set(self.scrub.fraction * 100)
             self._player_ui()
         return "break"
 
     def _finish_scrub(self, event):
-        if not self._dragging:
+        if self.scrub.fraction is None:
             return "break"
         if event.type == tk.EventType.ButtonRelease:
-            self.seek.set(self.seek.get(event.x, event.y))
-        self._dragging = False
-        try:
-            self.player.seek(self.seek.get() * self.player.duration / 100)
-        except (OSError, ValueError) as exc:
-            self.status.set(str(exc))
+            self.scrub.drag(self.seek.get(event.x, event.y) / 100)
+        offset = self.scrub.release(self.player.duration)
+        if offset is not None:
+            self._preview(lambda: self.player.seek(offset))
         self._player_ui()
         return "break"
 
@@ -578,23 +599,21 @@ class MusicPanel(ttk.Frame):
         self.play.configure(text="Ⅱ  Pause" if self.player.playing else "▶  Play")
         self.seek.state(["!disabled"] if self.player.seekable else ["disabled"])
         if self.player.path:
-            position = (
-                self.seek.get() * self.player.duration / 100
-                if self._dragging
-                else self.player.position
-            )
+            if self.scrub.fraction is not None:
+                self.scrub.drag(self.seek.get() / 100)
+            position = self.scrub.position(self.player.position, self.player.duration)
             self.clock.configure(
                 text=f"{_time(position)} / {_time(self.player.duration)}"
                 if self.player.duration
                 else _time(self.player.position)
             )
-            if self.player.duration and not self._dragging:
+            if self.player.duration and self.scrub.fraction is None:
                 self.seek.set(100 * self.player.position / self.player.duration)
 
     def _work(self, action, result: str):
         if self.busy:
             return
-        self.stop_preview()
+        stopped = self.stop_preview()
         self.busy = True
         self.add.state(["disabled"])
         self.apply.state(["disabled"])
@@ -604,11 +623,13 @@ class MusicPanel(ttk.Frame):
         self.enable.state(["disabled"])
         self.status.set("Updating soundtrack files…")
 
+        def update():
+            stopped.result()
+            return action()
+
         def worker():
-            try:
-                message = action() or result
-            except (ValueError, OSError) as exc:
-                message = str(exc)
+            outcome = run_job(update)
+            message = outcome.error or outcome.value or result
             self.events.put(("done", message))
 
         threading.Thread(target=worker, name="soundtrack-library", daemon=False).start()
@@ -625,8 +646,18 @@ class MusicPanel(ttk.Frame):
         if names:
 
             def add():
-                for name in names:
-                    library.import_track(Path(name), key, scene)
+                rows = execute_import(
+                    (ImportItem(Path(name), key, scene) for name in names), dedup_library=False
+                )
+                counts = {
+                    s: sum(r.status == s for r in rows)
+                    for s in ("imported", "duplicate", "unsupported", "failed")
+                }
+                return (
+                    ", ".join(f"{n} {s}" for s, n in counts.items())
+                    + ". "
+                    + " ".join(f"{r.path.name}: {r.reason}" for r in rows if r.reason)
+                )
 
             self._work(add, f"Added audio to {self.games[key].title}.")
 
@@ -684,11 +715,7 @@ class MusicPanel(ttk.Frame):
             default="ok",
         ):
             return
-        hint = (
-            " Enable Music in EDOPro’s audio settings."
-            if library.music_disabled(self.game_path)
-            else ""
-        )
+        hint = " Enable Music in EDOPro’s audio settings." if self.enabled is False else ""
         self._work(
             lambda: library.use_track(self.game_path, track),
             f"Selected {track.title} for {scope}. Restart EDOPro.{hint}",
@@ -722,6 +749,23 @@ class MusicPanel(ttk.Frame):
                 kind, message = self.events.get_nowait()
             except queue.Empty:
                 break
+            if kind == "preview":
+                request, error = message
+                if request == self.preview_request:
+                    if error:
+                        self.status.set(error)
+                    self._player_ui()
+                continue
+            if kind == "scan":
+                request, message = message
+                if request != self.scan_request:
+                    continue
+                if message.error:
+                    self.status.set(message.error)
+                else:
+                    self.view, self.restorable, self.enabled = message.value
+                    self._show_scene()
+                continue
             self.status.set(message)
             if kind == "done":
                 self.busy = False
@@ -737,7 +781,8 @@ class MusicPanel(ttk.Frame):
             if self._timer is not None:
                 self.after_cancel(self._timer)
                 self._timer = None
-            self.player.stop()
+            self.preview_worker.submit(self.player.stop)
+            self.preview_worker.shutdown(wait=False)
 
 
 def open_music_library(

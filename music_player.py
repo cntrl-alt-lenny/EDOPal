@@ -27,13 +27,17 @@ class PreviewPlayer:
 
     @property
     def playing(self) -> bool:
-        if self._process is not None and self._process.poll() is not None:
+        process = self._process
+        if process is not None and process.poll() is not None:
+            if self._running:
+                self._offset = time.monotonic() - self._started
             self._running = False
         return self._running
 
     @property
     def position(self) -> float:
-        position = self._offset + (time.monotonic() - self._started if self.playing else 0)
+        elapsed = time.monotonic() - self._started if self.playing else 0
+        position = self._offset + elapsed
         return min(self.duration, position) if self.duration else position
 
     @property
@@ -55,10 +59,17 @@ class PreviewPlayer:
                 self._process.wait(timeout=0.5)
             if self._process.poll() is None:
                 self._process.kill()
+                self._process.wait()
             self._process = None
         self._running = False
 
-    def stop(self):
+    def resume_position(self, path: Path) -> float:
+        if self.path != path.absolute():
+            return 0.0
+        position = self.position
+        return 0.0 if self.duration and position >= self.duration - 0.1 else position
+
+    def stop(self) -> None:
         self._release()
         self.path = None
         self._offset = self.duration = 0.0
@@ -87,7 +98,11 @@ class PreviewPlayer:
             import miniaudio
         except ImportError:
             self._native = False
-            self._play_system(path)
+            try:
+                self._play_system(path)
+            except OSError:
+                self.stop()
+                raise
         else:
             self._native = True
             try:
