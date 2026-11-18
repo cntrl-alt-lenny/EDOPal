@@ -121,6 +121,14 @@ def groups(items: tuple[Finding, ...]) -> list[tuple[str, str, list[Finding]]]:
     ]
 
 
+def check_age(elapsed: int) -> str:
+    for unit, seconds in (("day", 86_400), ("hour", 3_600), ("minute", 60)):
+        count = elapsed // seconds
+        if count > 0:
+            return f"Checked {count:,} {unit}{'s' if count != 1 else ''} ago"
+    return "Checked just now"
+
+
 def byte_size(size: int) -> str:
     amount = float(size)
     for unit in ("bytes", "KB", "MB", "GB", "TB"):
