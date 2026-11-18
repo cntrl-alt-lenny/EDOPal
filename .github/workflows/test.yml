@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release-test/**']
   pull_request:
   workflow_dispatch:
 
@@ -10,6 +10,7 @@ jobs:
   test:
     name: Unit tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
     strategy:
@@ -28,6 +29,10 @@ jobs:
         cache: 'pip'
         cache-dependency-path: requirements.txt
 
+    - name: Install Qt runtime and fonts
+      if: runner.os == 'Linux'
+      run: bash .github/workflows/qt-linux.sh
+
     - name: Install dependencies
       run: |
         pip install -r requirements.txt
@@ -40,4 +45,4 @@ jobs:
       run: ruff format --check .
 
     - name: Run unit tests
-      run: python -m pytest -q
+      run: python -m pytest -q -rs
