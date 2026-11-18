@@ -1,7 +1,7 @@
 """Virtualized gallery with bounded, asynchronous thumbnail decoding."""
 
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +18,8 @@ from studio.tasks import Job, TaskRunner, WorkerContext
 class Tile:
     title: str
     path: Path
+    render: Callable[[WorkerContext], QImage] | None = None
+    tooltip: str | None = None
 
 
 class _Tiles(QAbstractListModel):
@@ -47,7 +49,7 @@ class _Tiles(QAbstractListModel):
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.AccessibleTextRole):
             return item.title
         if role == Qt.ItemDataRole.ToolTipRole:
-            return str(item.path)
+            return item.tooltip if item.tooltip is not None else str(item.path)
         if role != Qt.ItemDataRole.DecorationRole:
             return None
         path = item.path
@@ -56,7 +58,7 @@ class _Tiles(QAbstractListModel):
             return self.cache[path]
         key = (self.generation, path)
         if key not in self.pending.values() and len(self.pending) < 4:
-            job = self.runner.start(lambda ctx: _read_thumbnail(path, ctx))
+            job = self.runner.start(item.render or (lambda ctx: _read_thumbnail(path, ctx)))
             self.pending[job] = key
             job.result.connect(self._loaded)
             job.error.connect(self._failed)

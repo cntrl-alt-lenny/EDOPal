@@ -41,6 +41,22 @@ class ThemeLibrary:
     def load(self, theme_id: str) -> Theme:
         return Theme.from_json(_read(self._path(check_id(theme_id) + ".json"), MAX_DEFINITION))
 
+    def delete(self, theme_id: str) -> None:
+        """Remove from the library, keeping its recipe for games that still use it."""
+        name = check_id(theme_id) + ".json"
+        removed = self._path("removed/" + name)
+        removed.parent.mkdir(parents=True, exist_ok=True)
+        self._path(name).replace(removed)
+
+    def removed_entries(self) -> dict[str, Theme]:
+        """Deleted recipes can still identify installation history in another game."""
+        return {
+            path.stem: Theme.from_json(
+                _read(self._path("removed/" + check_id(path.stem) + ".json"), MAX_DEFINITION)
+            )
+            for path in (self.directory / "removed").glob("*.json")
+        }
+
     def save(self, theme: Theme, theme_id: str | None = None) -> str:
         theme_id = uuid4().hex if theme_id is None else check_id(theme_id)
         if theme.image:

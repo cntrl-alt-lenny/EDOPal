@@ -27,6 +27,7 @@ from config import Config  # noqa: E402
 from studio import theme  # noqa: E402
 from studio.context import AppContext, Installation  # noqa: E402
 from studio.shell import StudioWindow  # noqa: E402
+from tools.studio_skins_screenshots import render_skins  # noqa: E402
 
 
 def create_demo(root: Path) -> Config:
@@ -156,6 +157,8 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
             ("skins", "sleeves", "sounds", "music", "decks", "settings"), 8
         ):
             window.navigate(key)
+            if key == "skins":
+                render_skins(window, shot, settle)
             shot(f"{number:02}-{key}")
         window.navigate("cards")
         fake.release.clear()
