@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from PIL import Image
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QAbstractItemView, QApplication
 
 import main
 from config import Config
@@ -19,7 +19,7 @@ from decks import DeckIndexer, Sections, encode_ydke
 from decks.sharing import MAX_CODE
 from studio import theme
 from studio.context import AppContext, Installation
-from studio.pages.decks_contents import CardGrid
+from studio.pages.decks_contents import CardList
 from studio.pages.mydecks import MyDecksPage
 from studio.pages.mydecks_checks import Comparison, FormatCheck
 from studio.pages.mydecks_library import Collection
@@ -165,16 +165,20 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         win.setFocus(Qt.FocusReason.MouseFocusReason)
 
         def thumbs_ready() -> bool:
-            for grid in page.view.findChildren(CardGrid):
-                if grid.isVisible():
-                    for i, tile in enumerate(grid.tiles.items):
-                        idx = grid.model().index(i, 0)
-                        if (
-                            grid.viewport().rect().intersects(grid.visualRect(idx))
-                            and tile.path not in grid.tiles.cache
-                        ):
-                            idx.data(Qt.ItemDataRole.DecorationRole)
-                            grid.viewport().update()
+            for cards in page.view.findChildren(CardList):
+                if not cards.isVisible():
+                    continue
+                for i, band in enumerate(cards.rows.rows):
+                    if (
+                        not cards.viewport()
+                        .rect()
+                        .intersects(cards.visualRect(cards.rows.index(i, 0)))
+                    ):
+                        continue
+                    for card in band.cards:
+                        if card.artwork and card.artwork not in cards.thumbnails.cache:
+                            cards.thumbnail(card.artwork)
+                            cards.viewport().update()
                             return False
             return True
 
@@ -240,10 +244,11 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
 
         open_named("Empty Jar - Athens")
         shot("09-main-deck")
-        page.view.contents.sections.buttons[1].click()
-        shot("10-extra-deck")
-        page.view.contents.sections.buttons[2].click()
-        shot("11-side-deck")
+        cards = page.view.contents.cards
+        for group, name in (("Extra", "10-extra-deck"), ("Side", "11-side-deck")):
+            row = next(i for i, band in enumerate(cards.rows.rows) if band.title.startswith(group))
+            cards.scrollTo(cards.rows.index(row, 0), QAbstractItemView.ScrollHint.PositionAtTop)
+            shot(name)
         page.escape()
         open_named("Damaged copy")
         shot("12-unreadable")

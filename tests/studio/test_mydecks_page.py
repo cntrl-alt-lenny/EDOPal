@@ -75,7 +75,7 @@ def test_filter_sort_search_and_open_by_keyboard(saved: tuple, qtbot: QtBot) -> 
     assert row.counts == "1 Main   ·   0 Extra   ·   0 Side"
     qtbot.keyClick(lib.search, Qt.Key.Key_Return)
     qtbot.keyClick(lib.rows, Qt.Key.Key_Return)
-    assert p.view.contents.grid.isVisible()
+    assert p.view.contents.cards.isVisible()
     qtbot.keyClick(win, Qt.Key.Key_Escape)
     assert p.view is lib and lib.search.text() == "Pot of Greed"
 
@@ -87,13 +87,20 @@ def test_deck_contents_clipboard_artwork_and_file_reveal(
     open_row(p.view, "Empty Jar - Athens", qtbot)
     d = next(d for d in p.lib.decks if d.name == "Empty Jar - Athens")
     view = p.view
-    view.contents.sections.buttons[2].click()
-    assert view.contents.types.text() == "3 monsters"
-    assert [t.title for t in view.contents.grid.tiles.items] == [
-        "1 × Buster Blader",
-        "1 × Jinzo",
-        "1 × Black Luster Soldier",
+    cards = view.contents.cards
+    qtbot.waitUntil(lambda: bool(cards.sections))
+    assert [row.title for row in cards.rows.rows if row.title] == [
+        "Main  ·  40 cards",
+        "Extra  ·  2 cards",
+        "Side  ·  3 cards",
     ]
+    assert [card.name for card in cards.sections[2].cards] == [
+        "Buster Blader",
+        "Jinzo",
+        "Black Luster Soldier",
+    ]
+    assert cards.sections[2].type_counts == (("Monster", 3),)
+    assert cards.verticalScrollBar().maximum() > 0
     control(view, "Copy code").click()
     assert QApplication.clipboard().text() == encode_ydke(d.preview.sections)
     revealed = []
@@ -177,7 +184,8 @@ def test_import_busy_retry_no_clobber_and_undo(
     review.code.setText(code)
     review.preview_btn.click()
     qtbot.waitUntil(lambda: review.contents is not None)
-    assert len(review.contents.grid.tiles.items) == 2
+    qtbot.waitUntil(lambda: bool(review.contents.cards.sections))
+    assert len(review.contents.cards.sections[0].cards) == 2
     review.code.setText(code + "!")
     assert not review.save_btn.isEnabled() and review.contents is None
     review.code.setText(code)

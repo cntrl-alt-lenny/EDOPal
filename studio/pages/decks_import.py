@@ -39,7 +39,6 @@ class DeckImports:
 
         host.browser.recent.clicked.connect(self.open_receipt)
         host.browser.save.clicked.connect(self.start_import)
-        host.preview.save.clicked.connect(self.start_import)
         host.import_view.progress.cancel.clicked.connect(self.cancel)
         host.results.review.clicked.connect(self._open_review)
         host.results.undo.clicked.connect(self._confirm_undo)
@@ -58,19 +57,14 @@ class DeckImports:
             return
         game = Path(self.host.ctx.installation.path)
         goat = self.host.goat_available and self.host.browser.goat.isChecked()
-        if self.host.view is self.host.preview and self.host.preview_target:
-            event, deck = self.host.preview_target
-            batch = ImportBatch(game, event, (deck,), goat)
-        else:
-            batch = self.host.selection.capture(game, goat)
+        batch = self.host.selection.capture(game, goat)
         if batch is not None:
             self.batch = batch
             self._reset_undo()
             self._run_import(batch)
 
     def _run_import(self, batch: ImportBatch, resume: ImportReceipt | None = None) -> None:
-        self.host._discard("preview", "artwork")
-        self.host.preview_target = None
+        self.host._discard("artwork")
         self.host.import_view.progress.begin("Preparing deck folder…")
         self.host.import_view.progress.detail.setText("Checking the selected EDOPro installation.")
         self.host._show(self.host.import_view, self.host.import_view.progress.cancel)

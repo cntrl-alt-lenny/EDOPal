@@ -242,4 +242,5 @@ class DeckDelegate(QStyledItemDelegate):
 class Contents(DeckContents):
     def __init__(self, runner: TaskRunner, game: Path, preview: Preview) -> None:
         super().__init__(runner)
-        self.set_sections(saved_sections(game, preview))
+        job = runner.start(lambda worker: saved_sections(game, preview, worker.cancel))
+        job.result.connect(self.set_sections)

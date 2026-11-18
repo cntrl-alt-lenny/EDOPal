@@ -7,9 +7,10 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 
 from decks import Change, Counts, Finding, Library, Preview, SavedDeck
-from studio.pages.decks_preview_data import PreviewCard, PreviewSection
+from studio.pages.decks_preview_data import PreviewCard, PreviewSection, local_artwork
 
 
 def quantity(n: int, noun: str) -> str:
@@ -47,35 +48,36 @@ def card_name(preview: Preview, code: int) -> str:
     return preview.cards[code].name if code in preview.cards else f"Unknown card #{code}"
 
 
-def saved_sections(game: Path, preview: Preview) -> tuple[PreviewSection, ...]:
+def saved_sections(game: Path, preview: Preview, cancel: Event) -> tuple[PreviewSection, ...]:
     pictures = game / "pics"
     sections = []
     for codes in preview.sections:
-        cards = []
+        cards: dict[str, PreviewCard] = {}
         for code, copies in Counter(codes).items():
+            if cancel.is_set():
+                return ()
             card = preview.cards.get(code)
-            cards.append(
-                PreviewCard(
-                    card_name(preview, code),
-                    copies,
-                    pictures / f"{code}.jpg",
-                    (((card.kind.title() if card else "Unknown type"), copies),),
-                    " · ".join(
-                        part
-                        for part in (
-                            card.type_line,
-                            f"{card.rating_kind} {card.rating}"
-                            if card.rating_kind and card.rating is not None
-                            else "",
-                            card.attribute.title(),
-                        )
-                        if part
-                    )
-                    if card
-                    else "Missing from game data",
+            name = card_name(preview, code)
+            existing = cards.get(name)
+            types = Counter(dict(existing.types)) if existing else Counter()
+            types[card.kind.title() if card else "Unknown type"] += copies
+            artwork = (existing.artwork if existing else None) or local_artwork(pictures, (code,))
+            detail = "Missing from game data"
+            if card:
+                rating = (
+                    f"{card.rating_kind} {card.rating}"
+                    if card.rating_kind and card.rating is not None
+                    else ""
                 )
+                detail = " · ".join(filter(None, (card.type_line, rating, card.attribute.title())))
+            cards[name] = PreviewCard(
+                name,
+                copies + (existing.copies if existing else 0),
+                artwork,
+                tuple(types.items()),
+                existing.detail if existing else detail,
             )
-        sections.append(PreviewSection(tuple(cards)))
+        sections.append(PreviewSection(tuple(cards.values())))
     return tuple(sections)
 
 

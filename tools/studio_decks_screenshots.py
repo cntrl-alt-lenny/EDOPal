@@ -11,6 +11,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image
+from PySide6.QtWidgets import QAbstractItemView
 
 from studio import theme
 from studio.context import Installation
@@ -93,7 +94,7 @@ class Archive:
         self.event_release: Event | None = None
         self.hold: int | None = None
         self.fail: int | None = None
-        self.details_fail = False
+        self.details_status: dict[int, str] = {}
 
     def response(self, url: str, *, limit: int) -> bytes:
         parsed = urlsplit(url)
@@ -145,11 +146,17 @@ class Archive:
                 raise DeckError("Format Library couldn’t provide this deck. Try again shortly.")
             return _published_deck().encode()
         elif path.startswith("decks/"):
-            if self.details_fail:
+            ident = int(path.rsplit("/", 1)[1])
+            status = self.details_status.get(ident)
+            if status == "error":
                 raise DeckError("The published decklist is temporarily unavailable.")
+            if status == "offline":
+                raise DeckError(
+                    "Check your connection to Format Library and try again."
+                ) from URLError("offline")
             value = {
-                "id": int(path.rsplit("/", 1)[1]),
-                "display": True,
+                "id": ident,
+                "display": status != "private",
                 "ydk": _published_deck(),
                 **dict(zip(("main", "extra", "side"), _sections(), strict=True)),
             }
@@ -214,7 +221,11 @@ def render_decks(
         shot(f"decks-{name}")
 
     def select(row: int) -> None:
-        browser.events.setCurrentItem(browser.events.topLevelItem(row))
+        if browser.open_events.isVisible():
+            browser.open_events.click()
+        item = browser.events.topLevelItem(row)
+        browser.events.setCurrentItem(item)
+        browser.events.itemActivated.emit(item, 0)
         settle(lambda: "standings" not in page.reads and "goat" not in page.reads)
 
     def search(term: str) -> None:
@@ -222,16 +233,27 @@ def render_decks(
         browser.submit.click()
         settle(lambda: "events" not in page.reads and "standings" not in page.reads)
 
-    def thumbnails_ready() -> bool:
-        gallery = page.preview.contents.grid
-        tiles = gallery.tiles
-        visible = [
-            tile.path
-            for row, tile in enumerate(tiles.items)
-            if gallery.cards[row].artwork
-            and gallery.viewport().rect().intersects(gallery.visualRect(tiles.index(row, 0)))
-        ]
-        return bool(visible) and all(path in tiles.cache for path in visible)
+    def focus_deck(row: int) -> None:
+        item = browser.standings.topLevelItem(row)
+        browser.standings.setCurrentItem(item)
+        if browser.layout_mode == "stacked":
+            browser.standings.itemActivated.emit(item, 0)
+
+    def capture_preview(name: str) -> None:
+        scroll = page.scrolls[browser]
+        saved_scroll = scroll.verticalScrollBar().value()
+        if browser.layout_mode == "stacked":
+            scroll.ensureWidgetVisible(page.preview)
+        cards = page.preview.contents.cards
+        if page.preview.contents.isVisible() and cards.verticalScrollBar().value() == 0:
+            settle(lambda: len(cards.thumbnails.cache) >= 3)
+        capture(name)
+        scroll.verticalScrollBar().setValue(saved_scroll)
+
+    def scroll_cards(group: str) -> None:
+        cards = page.preview.contents.cards
+        row = next(i for i, band in enumerate(cards.rows.rows) if band.title.startswith(group))
+        cards.scrollTo(cards.rows.index(row, 0), QAbstractItemView.ScrollHint.PositionAtTop)
 
     with (
         patch("tournament_decks._fetch", archive.response),
@@ -239,7 +261,7 @@ def render_decks(
     ):
         if overview:
             window.navigate("decks")
-            settle(lambda: not window.ctx.tasks.jobs)
+            settle(lambda: not window.ctx.tasks.jobs and not page.preview_timer.isActive())
             shot(overview)
             return
         settle(lambda: not window.ctx.tasks.jobs)
@@ -255,20 +277,39 @@ def render_decks(
         capture("02-awaiting-cards")
         window.ctx.set_installation(selected)
         settle(lambda: browser.standings.topLevelItemCount() > 0 and page.goat_available)
+        settle(page.preview.contents.isVisible)
         capture("03-standings")
-        archive.details_fail = True
-        browser.preview.click()
+        cards = page.preview.contents.cards
+        capture_preview("04-preview")
+        scroll_cards("Extra")
+        capture_preview("05-extra")
+        scroll_cards("Side")
+        capture_preview("17-side")
+        cards.scrollToTop()
+        if browser.open_events.isVisible():
+            browser.open_events.click()
+            capture("24-browse-events")
+            browser.open_standings.click()
+
+        archive.details_status = {2: "error", 3: "offline", 4: "private"}
+        focus_deck(1)
+        capture_preview("21-preview-loading")
         settle(page.preview.message.retry.isVisible)
-        capture("16-preview-error")
-        archive.details_fail = False
+        capture_preview("16-preview-error")
+        archive.details_status.pop(2)
         page.preview.message.retry.click()
-        settle(thumbnails_ready)
-        capture("04-preview")
-        page.preview.contents.sections.buttons[1].click()
-        capture("05-extra")
-        page.preview.contents.sections.buttons[2].click()
-        capture("17-side")
-        page.preview.back.click()
+        settle(page.preview.contents.isVisible)
+
+        focus_deck(2)
+        settle(lambda: page.preview.message.title.text() == "Format Library is unreachable")
+        capture_preview("22-preview-offline")
+        archive.details_status.pop(3)
+        focus_deck(3)
+        settle(lambda: page.preview.message.title.text() == "No public decklist")
+        capture_preview("23-decklist-unpublished")
+        archive.details_status.pop(4)
+        focus_deck(0)
+        page.scrolls[browser].verticalScrollBar().setValue(0)
 
         select(1)
         capture("06-no-public-decks")
@@ -289,6 +330,7 @@ def render_decks(
         page.results.back.click()
         browser.goat.setChecked(True)
         browser.select_all.click()
+        capture_preview("25-batch-with-preview")
         event = page.selection.event
         assert event
         first = page.selection.decks[0]

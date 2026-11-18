@@ -20,7 +20,6 @@ from studio.widgets import (
     Notice,
     Panel,
     ProgressBlock,
-    ToggleSwitch,
     glyph,
     label,
 )
@@ -48,39 +47,53 @@ class Detail(QWidget):
         return name, meta
 
 
-class PreviewView(Detail):
+class PreviewView(Panel):
     def __init__(self, tasks: TaskRunner) -> None:
-        super().__init__("Back to standings")
-        self.title, self.meta = self.heading("", "")
+        super().__init__(t.MD)
+        self.setAccessibleName("Tournament deck preview")
+        self.body.setSpacing(t.XS)
+        event_row = QHBoxLayout()
+        self.event = ElidedLabel()
+        self.event.setProperty("role", "muted")
+        event_row.addWidget(self.event, 1)
+        self.source = Button("Source", "quiet", "link")
+        self.source.setAccessibleName("Open the published decklist")
+        self.source.setMinimumHeight(t.XXL)
+        event_row.addWidget(self.source)
+        self.body.addLayout(event_row)
+        heading = QHBoxLayout()
+        self.title = ElidedLabel()
+        self.title.setProperty("role", "heading")
+        heading.addWidget(self.title, 3)
+        self.meta = ElidedLabel()
+        self.meta.setProperty("role", "body")
+        heading.addWidget(self.meta, 2)
+        self.body.addLayout(heading)
         self.message = ListMessage()
         self.body.addWidget(self.message, 1)
-        self.contents = DeckContents(tasks)
+        self.contents = DeckContents(tasks, inset=0)
         self.body.addWidget(self.contents, 1)
+        self.reset("Choose a tournament", "Published decklists will appear here.")
 
-        footer = Panel(t.MD)
-        row = QHBoxLayout()
-        self.source = Button("Source decklist", "quiet", "link")
-        self.save = Button("Add to EDOPro", "primary", "download")
-        row.addWidget(self.source)
-        row.addStretch()
-        self.goat = ToggleSwitch(
-            "Use GOAT card versions",
-            "Save a separate historical copy.",
-            False,
-        )
-        self.goat.setMinimumWidth(t.TILE_LARGE * 2 + t.LG)
-        row.addWidget(self.goat)
-        row.addWidget(self.save)
-        footer.body.addLayout(row)
-        self.body.addWidget(footer)
+    def reset(self, title: str, description: str) -> None:
+        self.event.hide()
+        self.title.set_value("Deck preview")
+        self.meta.hide()
+        self.source.hide()
+        self.show_message(title, description)
 
     def start(self, event: Event, deck: Deck) -> None:
+        self.event.set_value(event.name)
+        self.event.show()
         self.title.set_value(deck.name)
-        placement = f"  ·  Place {deck.place}" if deck.place else ""
-        self.meta.set_value(f"{deck.builder}  ·  {event.name}{placement}")
-        self.contents.grid.show_cards(())
+        placement = f"Place {deck.place}" if deck.place else "Placement unlisted"
+        self.meta.set_value(f"{placement}  ·  Pilot {deck.builder}")
+        self.meta.show()
+        self.source.show()
+
+    def show_message(self, title: str, description: str, retry: bool = False) -> None:
         self.contents.hide()
-        self.message.set_copy("Loading deck preview?", "Reading the published list.", False)
+        self.message.set_copy(title, description, retry)
         self.message.show()
 
     def loaded(self, sections: tuple[PreviewSection, ...]) -> None:

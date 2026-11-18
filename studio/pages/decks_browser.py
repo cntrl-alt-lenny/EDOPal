@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QBoxLayout,
     QComboBox,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QStackedWidget,
@@ -99,11 +100,14 @@ class Rows(QTreeWidget):
         self, index: QModelIndex, event: QInputEvent | None = None
     ) -> QItemSelectionModel.SelectionFlag:
         if self.multiple and index.isValid() and isinstance(event, QKeyEvent):
-            # Arrow keys move the focus without dropping the batch. Space toggles a row.
+            # Keep a marked batch while moving the preview focus. Space toggles a row.
             flags = QItemSelectionModel.SelectionFlag
             if event.key() == Qt.Key.Key_Space:
                 return flags.Toggle | flags.Rows
-            if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down) and not event.modifiers():
+            if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down) and (
+                event.modifiers() == Qt.KeyboardModifier.ControlModifier
+                or (not event.modifiers() and len(self.selectedItems()) > 1)
+            ):
                 return flags.NoUpdate
         return super().selectionCommand(index, event)
 
@@ -170,7 +174,7 @@ class FormatPicker(QComboBox):
 
 
 class Browser(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, preview: QWidget) -> None:
         super().__init__()
         body = QVBoxLayout(self)
         body.setSpacing(t.MD)
@@ -198,11 +202,21 @@ class Browser(QWidget):
         toolbar.addWidget(self.credit)
         body.addLayout(toolbar)
 
-        panels = QHBoxLayout()
-        panels.setSpacing(t.LG)
-        events_panel = Panel(t.LG)
+        self.preview_panel = preview
+        self.layout_mode = ""
+        self.events_open = True
+        self.results = QWidget()
+        self.panels = QGridLayout(self.results)
+        self.panels.setSpacing(t.MD)
+        self.panels.setContentsMargins(0, 0, 0, 0)
+        self.events_panel = events_panel = Panel(t.LG)
         events_panel.body.setSpacing(t.SM)
-        events_panel.body.addWidget(label("Events", "heading"))
+        event_heading = QHBoxLayout()
+        event_heading.addWidget(label("Events", "heading"), 1)
+        self.open_standings = Button("Standings", "quiet", "arrow")
+        event_heading.addWidget(self.open_standings)
+        events_panel.body.addLayout(event_heading)
+
         self.event_context = label("", "muted", True)
         events_panel.body.addWidget(self.event_context)
         self.events = Rows(("Tournament", "Date"), dense=True)
@@ -222,14 +236,17 @@ class Browser(QWidget):
         paging.addStretch()
         paging.addWidget(self.next)
         events_panel.body.addLayout(paging)
-        panels.addWidget(events_panel, 4)
 
-        standings_panel = Panel(t.LG)
-        standings_panel.body.setSpacing(t.SM)
+        self.standings_panel = standings_panel = Panel(t.LG)
+        standings_panel.body.setSpacing(t.XS)
         self.standings_title = ElidedLabel()
         self.standings_title.setProperty("role", "heading")
         self.standings_title.set_value("Standings")
-        standings_panel.body.addWidget(self.standings_title)
+        standings_heading = QHBoxLayout()
+        standings_heading.addWidget(self.standings_title, 1)
+        self.open_events = Button("Browse events", "quiet", "search")
+        standings_heading.addWidget(self.open_events)
+        standings_panel.body.addLayout(standings_heading)
         self.event_meta = label("Public decklists", "muted", True)
         standings_panel.body.addWidget(self.event_meta)
         self.standings = Rows(("Place", "Player", "Deck"), multiple=True, dense=True)
@@ -246,10 +263,6 @@ class Browser(QWidget):
         tools.addStretch()
         tools.addWidget(self.select_all)
         standings_panel.body.addLayout(tools)
-        panels.addWidget(standings_panel, 6)
-        self.results = QWidget()
-        panels.setContentsMargins(0, 0, 0, 0)
-        self.results.setLayout(panels)
         body.addWidget(self.results, 1)
 
         self.unavailable = Panel()
@@ -287,11 +300,9 @@ class Browser(QWidget):
         details.addWidget(self.destination)
         actions.addLayout(details, 1)
         actions.setAlignment(details, Qt.AlignmentFlag.AlignVCenter)
-        self.preview = Button("Preview deck")
         self.recent = Button("Last save", "quiet")
         self.save = Button("Add to EDOPro", "primary", "download")
         actions.addWidget(self.recent)
-        actions.addWidget(self.preview)
         actions.addWidget(self.save)
         self.footer_row.addLayout(actions, 1)
         self.readiness = label(
@@ -300,21 +311,84 @@ class Browser(QWidget):
             True,
         )
         footer.body.addWidget(self.readiness)
-        body.addWidget(footer)
+        self.open_events.clicked.connect(self.browse_events)
+        self.open_standings.clicked.connect(self.show_standings)
+        self._reflow("split")
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self.footer_row.setDirection(
             QBoxLayout.Direction.LeftToRight
-            if self.width() >= t.HERO_MAX + t.TILE_LARGE * 2
+            if self.width() >= t.HERO_MAX + t.XL * 5
             else QBoxLayout.Direction.TopToBottom
         )
-        compact = event.size().width() + t.RAIL_COMPACT < t.COMPACT_WIDTH
+        width = event.size().width()
+        if width >= t.WIDE_CONTENT + 2 * t.XXL:
+            self._reflow("wide")
+        elif width >= t.HERO_MAX + 2 * t.TILE_LARGE:
+            self._reflow("split")
+        else:
+            self._reflow("stacked")
+        compact = width + t.RAIL_COMPACT < t.COMPACT_WIDTH
         if compact != self.compact:
             self.compact = compact
             self.hero.headline.setStyleSheet(f"font-size: {t.XXL}px;" if compact else "")
             trim = t.XXL if compact else t.SM
             self.hero.setMinimumHeight(t.HERO_MIN - t.HUGE - trim)
+
+    def _reflow(self, mode: str) -> None:
+        if mode == self.layout_mode:
+            return
+        self.layout_mode = mode
+        grid = self.panels
+        for panel in (self.events_panel, self.standings_panel, self.preview_panel, self.footer):
+            grid.removeWidget(panel)
+        for i in range(3):
+            grid.setColumnStretch(i, 0)
+            grid.setRowStretch(i, 0)
+        if mode == "wide":
+            grid.addWidget(self.events_panel, 0, 0)
+            grid.addWidget(self.standings_panel, 0, 1)
+            grid.addWidget(self.preview_panel, 0, 2)
+            grid.addWidget(self.footer, 1, 0, 1, 3)
+            for i, stretch in enumerate((4, 5, 8)):
+                grid.setColumnStretch(i, stretch)
+        else:
+            grid.addWidget(self.events_panel, 0, 0)
+            grid.addWidget(self.standings_panel, 0, 0)
+            if mode == "stacked":
+                grid.addWidget(self.footer, 1, 0)
+                grid.addWidget(self.preview_panel, 2, 0)
+            else:
+                grid.addWidget(self.preview_panel, 0, 1)
+                grid.addWidget(self.footer, 1, 0, 1, 2)
+                grid.setColumnStretch(0, 4)
+                grid.setColumnStretch(1, 6)
+        grid.setRowStretch(0, 1)
+        stacked = mode == "stacked"
+        for panel in (self.events_panel, self.standings_panel):
+            panel.setMinimumHeight(t.TILE_LARGE + t.BUTTON_H * 4 if stacked else 0)
+        self.preview_panel.setMinimumHeight(t.HERO_MIN + t.TILE_LARGE if stacked else 0)
+        self._show_archive_panel()
+
+    def _show_archive_panel(self) -> None:
+        wide = self.layout_mode == "wide"
+        self.open_events.setVisible(not wide)
+        self.open_standings.setVisible(not wide)
+        self.events_panel.setVisible(wide or self.events_open)
+        self.standings_panel.setVisible(wide or not self.events_open)
+
+    def browse_events(self) -> None:
+        self.events_open = True
+        self._show_archive_panel()
+        if self.events.isVisible():
+            self.events.setFocus()
+
+    def show_standings(self, *, focus: bool = True) -> None:
+        self.events_open = False
+        self._show_archive_panel()
+        if focus and self.standings.isVisible():
+            self.standings.setFocus()
 
     def set_formats(self, choices: tuple[str, ...]) -> None:
         selected = self.format.currentText()

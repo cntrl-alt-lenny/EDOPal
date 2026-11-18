@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event, get_ident
+from urllib.error import URLError
 
 import pytest
 from PySide6.QtCore import Qt
@@ -14,7 +15,7 @@ from studio.pages.decks import DecksPage
 from studio.pages.mydecks_library import Collection
 from studio.shell import StudioWindow
 from tools.studio_decks_screenshots import Archive, _install_preview_cards
-from tournament_decks import DeckError
+from tournament_decks import Deck, DeckError, DeckPreview
 
 
 def open_browser(
@@ -75,6 +76,8 @@ def test_search_paging_errors_cache_and_stale_events(
     page, _ = open_browser(window, monkeypatch, archive)
     b = page.browser
     qtbot.waitUntil(lambda: bool(page.selection.decks))
+    if b.open_events.isVisible():
+        b.open_events.click()
     assert b.next.isEnabled() and not b.previous.isEnabled()
     b.next.click()
     qtbot.waitUntil(lambda: b.event_message.title.text() == "No tournaments found")
@@ -105,8 +108,11 @@ def test_search_paging_errors_cache_and_stale_events(
     b.search.clear()
     b.submit.click()
     qtbot.waitUntil(lambda: bool(page.selection.decks))
+    if b.open_events.isVisible():
+        b.open_events.click()
     b.events.setFocus()
     qtbot.keyClick(b.events, Qt.Key.Key_Down)
+    qtbot.keyClick(b.events, Qt.Key.Key_Return)
     qtbot.waitUntil(lambda: b.standings_message.title.text() == "No public decklists")
     assert not b.save.isEnabled()
 
@@ -122,6 +128,7 @@ def test_keyboard_preview_and_historical_artwork_handoff(
 
     window = make_window(sync)
     game = Path(window.ctx.installation.path)
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
     _install_preview_cards(game)
     page, _ = open_browser(window, monkeypatch)
     b = page.browser
@@ -129,25 +136,34 @@ def test_keyboard_preview_and_historical_artwork_handoff(
     b.standings.setFocus()
     qtbot.keyClick(b.standings, Qt.Key.Key_Down)
     assert b.standings.currentIndex().row() == 1
-    assert b.selection_count.text() == "1 selected"
+    assert [deck.name for deck in page.selection.selected] == ["Goat Control"]
+    assert page.preview.title.value == "Goat Control"
+    assert page.preview.event.value == "Goat Format Championship 41"
+    assert page.preview.meta.value == "Place 2  ·  Pilot Morgan Ellis"
+    qtbot.keyClick(b.standings, Qt.Key.Key_Up, modifier=Qt.KeyboardModifier.ControlModifier)
     qtbot.keyClick(b.standings, Qt.Key.Key_Space)
     assert b.selection_count.text() == "2 selected"
-    assert not b.preview.isEnabled()
+    qtbot.keyClick(b.standings, Qt.Key.Key_Down)
+    assert b.selection_count.text() == "2 selected" and page.preview.title.value == "Goat Control"
     qtbot.keyClick(b.standings, Qt.Key.Key_Space)
     qtbot.keyClick(b.standings, Qt.Key.Key_Up)
-    qtbot.keyClick(b.standings, Qt.Key.Key_Return)
     preview = page.preview.contents
     qtbot.waitUntil(preview.isVisible)
-    assert preview.sections.buttons[0].hint.text() == "40 cards"
-    assert preview.grid.tiles.rowCount() == 17
-    assert sum(card.artwork is not None for card in preview.grid.cards) == 3
-    assert "monsters" in preview.types.text()
-    preview.sections.buttons[2].click()
-    assert preview.grid.isVisible()
-    assert preview.grid.tiles.rowCount() == 4
-    assert all(card.artwork is None for card in preview.grid.cards)
-    qtbot.keyClick(page.preview.back, Qt.Key.Key_Escape)
-    assert page.view is b and b.preview.hasFocus()
+    cards = preview.cards
+    assert [row.title for row in cards.rows.rows if row.title] == [
+        "Main  ·  40 cards",
+        "Extra  ·  6 cards",
+        "Side  ·  12 cards",
+    ]
+    main, _, side = cards.sections
+    assert len(main.cards) == 17
+    assert sum(card.artwork is not None for card in main.cards) == 3
+    assert main.type_counts == (("Monster", 21), ("Spell", 13), ("Trap", 6))
+    assert len(side.cards) == 4 and all(card.artwork is None for card in side.cards)
+    qtbot.keyClick(b.standings, Qt.Key.Key_Return)
+    assert cards.hasFocus()
+    qtbot.keyClick(cards, Qt.Key.Key_Escape)
+    assert page.view is b and b.standings.hasFocus()
 
     b.goat.click()
     b.save.click()
@@ -232,22 +248,20 @@ def test_failed_preview_retry_and_moved_deck_refuses_handoff(
 ) -> None:
     window = make_window()
     page, _ = open_browser(window, monkeypatch)
-    qtbot.waitUntil(lambda: page.browser.preview.isEnabled())
     real_preview = page.library.preview
     fail = True
 
-    def preview(deck):
+    def preview(deck: Deck) -> DeckPreview:
         if fail:
             raise DeckError("Published list temporarily unavailable.")
         return real_preview(deck)
 
     monkeypatch.setattr(page.library, "preview", preview)
-    page.browser.preview.click()
     qtbot.waitUntil(lambda: page.preview.message.retry.isVisible())
     fail = False
     page.preview.message.retry.click()
     qtbot.waitUntil(page.preview.contents.isVisible)
-    page.preview.save.click()
+    page.browser.save.click()
     qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
     page.imports.receipt.paths[0].unlink()
     page.results.artwork.click()
@@ -261,13 +275,15 @@ def test_last_save_keeps_artwork_and_selects_the_saved_batch(
     window = make_window()
     page, _ = open_browser(window, monkeypatch)
     browser = page.browser
-    qtbot.waitUntil(browser.preview.isEnabled)
+    qtbot.waitUntil(browser.save.isEnabled)
     browser.standings.topLevelItem(1).setSelected(True)
     browser.save.click()
     qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
     paths = set(page.imports.receipt.paths)
     assert len(paths) == 2
     page.results.back.click()
+    if browser.open_events.isVisible():
+        browser.open_events.click()
     browser.events.setCurrentItem(browser.events.topLevelItem(1))
     qtbot.waitUntil(lambda: not page.reads)
     browser.recent.click()
@@ -280,8 +296,9 @@ def test_last_save_keeps_artwork_and_selects_the_saved_batch(
     view = mine.view
     assert {view.model.rows[i.row()].deck.path for i in view.rows.selectedIndexes()} == paths
     qtbot.keyClick(view.rows, Qt.Key.Key_Return)
-    assert mine.view.contents.sections.buttons[0].hint.text() == "40 cards"
-    assert mine.view.contents.grid.tiles.rowCount() == 17
+    qtbot.waitUntil(lambda: bool(mine.view.contents.cards.sections))
+    main = mine.view.contents.cards.sections[0]
+    assert main.count == 40 and len(main.cards) == 17
     assert window.navigate("decks") and page.view is page.results
 
 
@@ -294,13 +311,12 @@ def test_steam_deck_lists_leave_room_for_standings_and_actions(
     _install_preview_cards(Path(window.ctx.installation.path))
     page, _ = open_browser(window, monkeypatch)
     browser = page.browser
-    qtbot.waitUntil(lambda: browser.preview.isEnabled() and page.goat_available)
-    for rows in (browser.events, browser.standings):
-        qtbot.waitUntil(
-            lambda rows=rows: (
-                rows.viewport().rect().contains(rows.visualItemRect(rows.topLevelItem(5)))
-            )
-        )
+    qtbot.waitUntil(lambda: page.preview.contents.isVisible() and page.goat_available)
+    rows = browser.standings
+    assert browser.layout_mode == "split"
+    assert rows.viewport().rect().contains(rows.visualItemRect(rows.topLevelItem(5)))
+    assert page.preview.x() > browser.standings_panel.x()
+    assert page.preview.contents.cards.viewport().width() > 480
     assert page.scrolls[browser].verticalScrollBar().maximum() == 0
 
 
@@ -309,25 +325,22 @@ def test_preview_can_finish_off_page_and_retry_skips_completed_saves(
 ) -> None:
     window = make_window()
     page, archive = open_browser(window, monkeypatch)
-    qtbot.waitUntil(page.browser.preview.isEnabled)
     entered, release = Event(), Event()
     load = page.library.preview
 
-    def held(deck):
+    def held(deck: Deck) -> DeckPreview:
         entered.set()
         release.wait(5)
         return load(deck)
 
     monkeypatch.setattr(page.library, "preview", held)
-    page.browser.preview.click()
     try:
         qtbot.waitUntil(entered.is_set)
         assert window.navigate("settings")
-        assert window.navigate("decks") and page.view is page.preview
+        assert window.navigate("decks") and page.view is page.browser
     finally:
         release.set()
     qtbot.waitUntil(page.preview.contents.isVisible)
-    page.preview.back.click()
     page.browser.standings.topLevelItem(1).setSelected(True)
     archive.fail = 2
     page.browser.save.click()
@@ -339,3 +352,85 @@ def test_preview_can_finish_off_page_and_retry_skips_completed_saves(
     page.results.retry.click()
     qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
     assert len(page.imports.receipt.paths) == 2 and first.stat().st_mtime_ns == modified
+
+
+def test_inline_preview_discards_stale_deck_and_reuses_successes(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    page, _ = open_browser(window, monkeypatch)
+    load = page.library.preview
+    entered, release = Event(), Event()
+    calls: list[int] = []
+
+    def held(deck: Deck) -> DeckPreview:
+        calls.append(deck.id)
+        if deck.id == 1:
+            entered.set()
+            release.wait(5)
+        return load(deck)
+
+    monkeypatch.setattr(page.library, "preview", held)
+    rows = page.browser.standings
+    try:
+        qtbot.waitUntil(entered.is_set)
+        qtbot.keyClick(rows, Qt.Key.Key_Down)
+        assert page.preview.title.value == "Goat Control"
+        assert page.preview.message.title.text() == "Loading decklist…"
+        qtbot.waitUntil(page.preview.contents.isVisible)
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+    assert page.preview.title.value == "Goat Control" and 1 not in page.preview_cache
+    qtbot.keyClick(rows, Qt.Key.Key_Down)
+    qtbot.waitUntil(lambda: 3 in page.preview_cache)
+    qtbot.keyClick(rows, Qt.Key.Key_Up)
+    assert page.preview.contents.isVisible() and not page.preview_timer.isActive()
+    assert page.preview.title.value == "Goat Control" and calls == [1, 2, 3]
+
+
+def test_inline_preview_offline_and_unpublished(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    page, _ = open_browser(window, monkeypatch)
+
+    def preview(deck: Deck) -> DeckPreview:
+        if deck.id == 1:
+            raise DeckError("Check your connection.") from URLError("offline")
+        raise DeckError("This decklist isn’t publicly available.")
+
+    monkeypatch.setattr(page.library, "preview", preview)
+    message = page.preview.message
+    qtbot.waitUntil(lambda: message.title.text() == "Format Library is unreachable")
+    assert message.retry.isVisible()
+    rows = page.browser.standings
+    rows.setFocus()
+    qtbot.keyClick(rows, Qt.Key.Key_Down)
+    qtbot.waitUntil(lambda: message.title.text() == "No public decklist")
+    assert rows.hasFocus() and not message.retry.isVisible()
+    assert page.browser.save.isEnabled()
+
+
+def test_preview_stacks_at_minimum_size_and_reflows_wide(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    window.resize(960, 600)
+    page, _ = open_browser(window, monkeypatch)
+    browser = page.browser
+    qtbot.waitUntil(page.preview.contents.isVisible)
+    cards = page.preview.contents.cards
+    assert browser.layout_mode == "stacked"
+    assert page.preview.y() > browser.standings_panel.y()
+    browser.standings.setFocus()
+    qtbot.keyClick(browser.standings, Qt.Key.Key_Return)
+    assert cards.hasFocus() and page.scrolls[browser].verticalScrollBar().value() > 0
+    qtbot.keyClick(cards, Qt.Key.Key_Escape)
+    assert browser.standings.hasFocus()
+
+    window.resize(2560, 1440)
+    qtbot.waitUntil(lambda: browser.layout_mode == "wide")
+    assert browser.events.isVisible() and browser.standings.isVisible()
+    assert page.preview.x() > browser.standings_panel.x() > browser.events_panel.x()
+    assert page.preview.title.value == "Chaos Control"
