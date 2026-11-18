@@ -13,7 +13,7 @@ _UNSAFE = re.compile(r'[<>:"\\|?*\x00-\x1f]')
 
 
 def _validate_name(name: str) -> None:
-    parts = name.rstrip("/").split("/")
+    parts = name.removesuffix("/").split("/")
     if any(
         not part
         or part in {".", ".."}
@@ -30,6 +30,8 @@ def pack_files(archive: ZipFile) -> dict[str, str]:
     files = {}
     names = set()
     expanded = 0
+    if len(archive.infolist()) > 4096:
+        raise ValueError("Too many ZIP members.")
     for info in archive.infolist():
         name = info.orig_filename
         _validate_name(name)
@@ -60,6 +62,8 @@ def pack_files(archive: ZipFile) -> dict[str, str]:
         if not isinstance(aliases, dict):
             raise ValueError("duplicates.json must be an object.")
         del files["duplicates.json"]
+        if len(names) + len(aliases) > 4096:
+            raise ValueError("Too many expanded ZIP members.")
         for target, source in aliases.items():
             _validate_name(target)
             if (
@@ -82,4 +86,30 @@ def pack_files(archive: ZipFile) -> dict[str, str]:
         parts = name.split("/")
         if any("/".join(parts[:i]) in file_names for i in range(1, len(parts))):
             raise ValueError(f"A ZIP file is also used as a directory: {name!r}.")
+    return files
+
+
+def shared_files(archive: ZipFile) -> dict[str, str]:
+    files = pack_files(archive)
+    fonts = {"fonts/Inter-Medium.ttf", "fonts/InterEDO-Regular.ttf"}
+    allowed = fonts | {"fonts/Inter-OFL.txt", "textures/cover.png", "textures/cover2.png"}
+    if not fonts <= files.keys() or any(
+        name not in allowed and not re.fullmatch(r"sound/[A-Za-z0-9_-]+\.wav", name)
+        for name in files
+    ):
+        raise ValueError("Expected both Inter fonts and only legacy shared assets.")
+    return files
+
+
+def skin_files(archive: ZipFile, title: str) -> dict[str, str]:
+    files = pack_files(archive)
+    prefix = f"skin/Monokai {title}/"
+    if not re.fullmatch(r"[\w][\w -]{0,63}", title) or prefix + "skin.xml" not in files:
+        raise ValueError(f"Expected {prefix}skin.xml.")
+    if any(
+        not name.startswith(prefix)
+        or (name != prefix + "skin.xml" and not name.lower().endswith((".png", ".jpg", ".jpeg")))
+        for name in files
+    ):
+        raise ValueError("Unexpected file in skin archive.")
     return files

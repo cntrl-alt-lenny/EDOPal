@@ -1,8 +1,10 @@
 import asyncio
+import io
 import json
 import shutil
 import subprocess
 import sys
+import wave
 from pathlib import Path
 from zipfile import ZipFile, ZipInfo
 
@@ -100,11 +102,19 @@ def setup_pack_folder(root: Path, *, unsafe: str | None = None, withheld: bool =
     folder = root / "input"
     folder.mkdir(parents=True)
     with ZipFile(folder / "example.zip", "w") as archive:
-        member = ZipInfo("music/example.ogg")
+        archive.writestr(
+            "pack.json",
+            json.dumps({"items": [{"file": "forbidden/example.wav", "scenes": ["duel"]}]}),
+        )
+        member = ZipInfo("forbidden/example.wav")
         if unsafe:
             # ZipInfo's constructor normalizes backslashes on Windows.
             member.filename = unsafe
-        archive.writestr(member, b"demo asset")
+        audio = io.BytesIO()
+        with wave.open(audio, "wb") as wav:
+            wav.setparams((1, 2, 8000, 0, "NONE", ""))
+            wav.writeframes(bytes(160))
+        archive.writestr(member, audio.getvalue())
     metadata = pack_entry("https://editor.test")
     for field in ("size_bytes", "sha256", "download_url", "previews"):
         del metadata[field]

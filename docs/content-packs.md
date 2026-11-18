@@ -141,7 +141,7 @@ kinds while validating the known entries.
 Use `packs.json` as the publisher's input metadata. It is an array of
 entries with the editorial fields shown above. Use `preview_files` (a
 list of filenames relative to the preview directory) in place of
-`previews`. Put one `<id>.zip` in the input folder per entry. The tool
+`previews`. Supply a subfolder named `<id>` or a ZIP named `<id>.zip` for each entry. The tool
 derives URLs, sizes and hashes from the staged assets. Skin ZIPs contain
 `skin/Monokai <title>/skin.xml` and game-relative assets. The shared
 package uses ID `shared` and supplies the two Inter fonts. Include
@@ -164,4 +164,158 @@ For reviewed content, choose a fresh `--tag`, leave off `--draft`, and
 review the printed `gh release` commands. Use
 `--base-manifest path/to/previous/manifest.json` to keep unchanged entries
 and their original asset URLs while staging only new or updated packs.
-The tool performs no network requests.
+The tool performs no network requests. A mixed release skips entries marked
+`withheld: true` and their assets. Use `--draft` to stage those locally for review.
+
+## Building library packs from folders
+
+Make a release folder, for example `my-release/`. Put a small preview there and
+create `packs.json`. This example describes a music pack. Copy the entry for each
+additional pack, give it its own ID, kind, title and preview, and fill in the
+creator's actual credit and licence information.
+
+```json
+[{
+  "id": "practice-music", "kind": "music", "title": "Practice music",
+  "description": "Two original practice cues.", "author": "Example Artist",
+  "license": "CC0-1.0", "attribution": "Practice music by Example Artist.",
+  "source_url": "https://example.org/practice-music",
+  "version": "1.0.0", "min_app_version": "5.5.0",
+  "preview_files": ["preview.png"], "withheld": true
+}]
+```
+
+The pack folder's **contents** become the ZIP root. Put the following
+`pack.json` and exactly the files it lists in each example folder.
+
+| Kind and example folder | Complete example `pack.json` |
+|---|---|
+| `music`, `practice-music/` | `{"items":[{"file":"forbidden/Practice.wav","title":"Practice duel","scenes":["deck","duel"]},{"file":"forbidden/Victory.ogg","scenes":["win"]},{"file":"forbidden/cover.png"}]}` |
+| `covers`, `practice-covers/` | `{"items":[{"file":"forbidden/cover.jpg"}]}` |
+| `wallpaper`, `practice-walls/` | `{"items":[{"file":"images/Dawn.png","title":"Dawn over the water"}]}` |
+| `sleeves`, `practice-sleeves/` | `{"items":[{"file":"images/Blue.jpg","name":"Blue ink","tags":["blue","ink"]}]}` |
+
+For the music example place `Practice.wav`, `Victory.ogg` and `cover.png` in
+`my-release/practice-music/forbidden/`. Use game IDs from
+`assets/music/catalog.json`. A second game gets its own folder and rows.
+Each recording names one or more of `menu`, `deck`, `duel`, `advantage`,
+`disadvantage`, `win`, `lose`. A missing title defaults to the filename stem.
+Use FLAC, Ogg Vorbis, MP3 or WAV. Each recorded game may have one optional
+`cover.png`, `cover.jpg` or `cover.jpeg`. A covers-only pack follows that same
+naming rule and can supply several games. Sleeve tags may be an empty array.
+
+For a skin called Grid, create `my-release/grid/skin/Monokai Grid/skin.xml`
+and put its PNG/JPEG assets under that skin folder. Use ID `grid`, kind `skin`
+and title `Grid` in `packs.json`. The existing skin format also accepts the
+bounded `duplicates.json` alias map. The reserved `shared` dependency carries
+the Inter fonts and legacy sound and sleeve assets.
+
+**Sound effects** are reserved for the separate sound engine. A regular
+`sound-effects` entry has no installable layout yet. Keep proposed sound packs
+withheld and outside the staged release until that handler lands. The existing
+`shared` archive is the only supported exception.
+
+```powershell
+& $py tools/build_content_release.py my-release --out reviewed-draft --draft
+# After review, set withheld to false on the entries chosen for publication.
+& $py tools/build_content_release.py my-release --tag content-v2 --out ready-to-upload
+```
+
+The four library layouts accept 1–256 declared files in stored or deflated
+ZIPs. Limits are 512 MiB expanded per pack, 128 MiB per recording, 16 MiB per
+image and 256 KiB for UTF-8 `pack.json`. Static PNG/JPEG images may contain up
+to 12 million pixels, with at most 8,192 pixels per side. Titles, names, and
+each of up to 24 tags may contain 1–128 printable characters. Filenames start
+with an ASCII letter or digit and have up to 80 characters including the
+extension, using ASCII letters, digits, spaces, dots, underscores or hyphens.
+The reader rejects extra members, unsafe or case-colliding paths, links,
+device names, encrypted members, ZIP64 trailers, ZIP comments and unknown
+metadata fields. The publisher runs the installer's layout and media checks.
+
+## Page actions and library reads
+
+Initialize Qt on the main thread. Use the existing background worker event
+loop for the whole action, including catalogue reads, SHA-256 verification,
+image decoding, library writes and removal. Send progress and phase changes
+back through queued signals. Capture the config and selection before starting.
+
+```python
+from threading import Event
+from content.cache import PackCache
+from content.libraries import installed_origins, make_available, remove_pack
+
+cache = PackCache.for_config(cfg)
+# status comes from Catalogue.list_packs(...), version is the running app version.
+cancel = Event()
+changes = await make_available(cache, status, app_version=version,
+                               progress=on_bytes, phase=on_phase, cancel=cancel)
+# A separate Remove action on a worker:
+changes = remove_pack(cache, status)
+```
+
+Use the selected pack's `author`, `license`, `attribution` and `source_url`
+in **every** state, including failure and incompatibility. For the offline
+library detail view read those same fields plus `id`, `version` and archive
+`sha256` from the entry's `origin`. Personal items can have no origin.
+
+| Kind | Call and result for the page |
+|---|---|
+| Music | Run `make_available` above. Browse through `music_library.tracks(game, scene, root=music_root)` or `LibraryView`. One recording can appear in several scenes. `use_track` and playlist actions remain explicit player choices. |
+| Covers | Run `make_available`. Use `music.packs.cover_path(game_id, music_root, size="grid")`. It prefers the latest installed matching cover, falls back to the bundled size, and returns `None` for a placeholder. `music.packs.pack_media(music_root)` supplies the credited entries for recordings and covers. |
+| Wallpaper | Run `make_available`. Enumerate `ThemeLibrary(theme_root).wallpapers()`. Select with `replace(theme, wallpaper="image", image=row.digest)` and use the existing theme preview and save APIs. A saved theme retains its photo after pack removal. |
+| Sleeves | Run `make_available`. Read `sleeves.Library(sleeve_root).entries()` for named, tagged and credited entries. Pass a selected entry ID to `sleeves.apply` when the player chooses a slot. |
+| Skin | Run `make_available` for the selected skin and its legacy `shared` dependency. This makes the verified archives available in the cache. Then use the existing explicit Apply/Restore calls described above for the selected installation. |
+| Sound effects | Show **Installation unavailable**. The reserved `shared` dependency uses the skin flow. |
+
+The three library roots above are `cache.root.parent / "soundtracks"`,
+`"themes"` and `"sleeves"` respectively, all siblings of `packs/`.
+`Changes.added`, `.removed` and `.retained` identify sleeve entries by their
+stable library ID and other media by archive member. Replacing an edition
+may return both the retired and replacement member. Keep the selected
+manifest entry for credit display when a pack contributes several media.
+
+For all four library kinds, render **Not downloaded**, **Downloading** (bytes,
+total, rate, Cancel), **Downloaded** (cached), **Verifying**, **Installing**,
+then **Available in library** when the action succeeds. On page load compare
+`installed_origins(cache, status.pack.id)` with the selected version and
+digest. An installed edition remains usable after cache eviction. Show
+**Update available** when another edition is installed or cached. Honour
+**Incompatible** even if an older edition remains usable. The phase callback
+reports `downloading` (includes a cache hit), `verifying`, and `installing`.
+Disable Cancel during installation. Skin and shared assets stop at
+**Downloaded** before the separate **Applying / Applied** states.
+
+On cancellation offer **Resume** with a fresh event. For a transfer failure
+use the download errors above. Show **Invalid pack** on layout/media
+`ValueError`, **Busy / Retry** for a lock conflict, and the filesystem message
+for storage failures. Keep the previous library contents visible on a failed
+validation. Refresh the catalogue state and installed origins after each action.
+If the catalogue drops a pack, pass its saved ID to `remove_pack(cache, pack_id)`.
+Render **Removing** during `remove_pack`, then refresh the library and cache.
+Show the retained items when edits or sleeve assignments kept a player's copy.
+Removal never uninstalls an active EDOPro skin or playlist. Use their own
+Restore actions if the player also wants to change the game.
+
+### Carry sleeve choices across game appearance changes
+
+`extras.apply_appearance` reapplies saved sleeve assignments after skin apply
+and restore. An explicit legacy sleeve selection takes priority for its slot
+in that operation. Theme operations take a game path and theme ID; the page
+owns the active sleeve library and config path. Group the calls on one worker
+for install, switch back, undo, remove or recovery that changes the active skin:
+
+```python
+from pathlib import Path
+from state_lock import appearance_lock
+import sleeves
+import themes
+
+with appearance_lock(game):
+    themes.install_theme(game, theme_id, theme, image=theme_library.image(theme))
+    sleeves.reapply(sleeve_library, game, Path(cfg.config_path))
+```
+
+For a failure in the second call, report that the theme change succeeded and
+offer to retry the sleeve operation. The same installation lock covers sleeve
+apply/reapply/undo, skin operations, theme changes, game music settings and
+publication of curated textures. Hold it only during synchronous game work.

@@ -7,13 +7,14 @@ import re
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 from zipfile import ZipFile
 
 import extras
+from content.media import Origin
 from state_lock import locked
 
 from .catalog import Recipe
@@ -42,6 +43,16 @@ class Entry:
     tags: tuple[str, ...] = ()
     favourite: bool = False
     last_used: float = 0
+    origin: Origin | None = None
+    pack_member: str = ""
+    retained: bool = False
+    pack_baseline: str = ""
+
+    def fingerprint(self) -> str:
+        metadata = asdict(self)
+        for key in ("origin", "retained", "pack_baseline", "last_used"):
+            metadata.pop(key)
+        return digest(json.dumps(metadata, sort_keys=True).encode())
 
 
 def _entry(row: dict) -> Entry:
@@ -62,14 +73,19 @@ def _entry(row: dict) -> Entry:
         and (e.layout is None or isinstance(e.layout, dict))
     ):
         raise ValueError("Damaged sleeve entry.")
-    return Entry(
+    entry = Entry(
         **{
             **row,
             "tags": tuple(e.tags),
+            "origin": Origin(**e.origin) if e.origin else None,
             "recipe": None if e.recipe is None else Recipe.from_dict(row["recipe"]),
             "layout": None if e.layout is None else Layout.from_dict(row["layout"]),
         }
     )
+
+    if entry.pack_baseline and entry.pack_baseline != entry.fingerprint():
+        return replace(entry, retained=True)
+    return entry
 
 
 class _NewerCatalogue(RuntimeError):
@@ -211,7 +227,10 @@ class Store:
         return salvage
 
     def _presets(self, state: Catalog) -> None:
-        with ZipFile(extras.PACKS / "shared.zip") as archive:
+        bundled = extras.PACKS / "shared.zip"
+        if not bundled.exists():
+            return
+        with ZipFile(bundled) as archive:
             for name, member in extras.SLEEVES.items():
                 key = self.put(archive.read(member))
                 uid = digest(name.encode())[:32]

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import extras
+from state_lock import appearance_lock
 
 from .library import Library
 from .storage import Catalog, digest
@@ -63,9 +64,11 @@ def apply(
     return _change(library, installation, config_path, selected)
 
 
-def reapply(library: Library, installation: Path, config_path: Path) -> tuple[Path, ...]:
+def reapply(
+    library: Library, installation: Path, config_path: Path, *, exclude: tuple[Slot, ...] = ()
+) -> tuple[Path, ...]:
     """Call after an app-managed skin change to carry both saved choices forward."""
-    return _change(library, installation, config_path, None)
+    return _change(library, installation, config_path, None, exclude=exclude)
 
 
 def undo(library: Library, installation: Path, config_path: Path) -> tuple[Path, ...]:
@@ -80,15 +83,18 @@ def _change(
     selected: dict[str, str] | None,
     *,
     restoring: bool = False,
+    exclude: tuple[Slot, ...] = (),
 ) -> tuple[Path, ...]:
     root = installation.resolve()
     store = library._store
     journal_dir = extras._group_dir(root, str(config_path), "sleeves")
     prefix = os.path.normcase(str(journal_dir)) + "|"
-    with store.open(writable=True) as state:
+    with appearance_lock(root), store.open(writable=True) as state:
         before = state.encode()
         slots = state.assignments.setdefault(install_key(root), {})
-        choices = slots.copy() if selected is None else selected
+        choices = (
+            {k: v for k, v in slots.items() if k not in exclude} if selected is None else selected
+        )
 
         def prepare(changes: dict) -> None:
             # Save intent under both locks, before touching textures. A process exit

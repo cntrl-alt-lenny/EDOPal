@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from content.media import Origin
 from music.audio import FORMATS, _audio, _digest, _scene
 from music.catalogue import ART, ID, LOCAL, Game, catalog, identify, library_root
+from music.packs import pack_media
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,7 @@ class Track:
     in_playlist: bool = False
     source: str = "personal"
     digest: str = ""
+    origin: Origin | None = None
 
 
 def _sound_path(game: Path, *parts: str) -> Path:
@@ -62,8 +65,9 @@ def read_json(path: Path) -> dict:
     return obj
 
 
-def describe(track: Track, digest: str) -> dict[str, str]:
+def describe(track: Track, digest: str) -> dict:
     return {
+        **({"origin": asdict(track.origin)} if track.origin else {}),
         "name": f"HD Sync - {track.game} - {digest[:16]}{track.path.suffix.lower()}",
         "digest": digest,
         "game": track.game,
@@ -71,7 +75,12 @@ def describe(track: Track, digest: str) -> dict[str, str]:
     }
 
 
-def validate_records(values: object) -> list[dict[str, str]]:
+def record_track(row: dict, path: Path, scene: str) -> Track:
+    origin = Origin(**row["origin"]) if "origin" in row else None
+    return Track(row["game"], row["title"], path, scene, digest=row["digest"], origin=origin)
+
+
+def validate_records(values: object) -> list[dict]:
     if not isinstance(values, list):
         raise ValueError("Cannot read the saved soundtrack selection.")
     for row in values:
@@ -79,6 +88,11 @@ def validate_records(values: object) -> list[dict[str, str]]:
             isinstance(row.get(k), str) for k in ("name", "digest", "game", "title")
         ):
             raise ValueError("Incomplete soundtrack selection.")
+        if "origin" in row:
+            try:
+                Origin(**row["origin"])
+            except TypeError as exc:
+                raise ValueError("Invalid soundtrack credit record.") from exc
         ext = Path(row["name"]).suffix
         if (
             not ID.fullmatch(row["game"])
@@ -90,7 +104,7 @@ def validate_records(values: object) -> list[dict[str, str]]:
     return values
 
 
-def records(state: Path, filename: str = "selection.json") -> list[dict[str, str]]:
+def records(state: Path, filename: str = "selection.json") -> list[dict]:
     data = read_json(state / filename)
     if not data:
         return []
@@ -114,7 +128,7 @@ def active_tracks(game: Path, scene: str, games: dict[str, Game]) -> list[Track]
             if folder.name == scene and index is not None and selected[index]["digest"] == digest:
                 record = selected[index]
                 rows.append(
-                    Track(record["game"], record["title"], path, scene, True, "installed", digest)
+                    replace(record_track(record, path, scene), in_playlist=True, source="installed")
                 )
             else:
                 rows.append(
@@ -149,16 +163,32 @@ def physical_tracks(game: Path, scene: str, root: Path, games: dict[str, Game]) 
     for key in games:
         for path in _audio(root / key / scene):
             output.append(Track(key, _title(path), path, scene, False, "personal", _digest(path)))
+    for row in pack_media(root):
+        item = row.item
+        if item.role == "track" and scene in item.scenes and row.path.is_file():
+            output.append(
+                Track(
+                    item.game,
+                    item.title,
+                    row.path,
+                    scene,
+                    False,
+                    "pack",
+                    _digest(row.path),
+                    row.origin,
+                )
+            )
     for path in _audio(ART.parent / "extras" / "sound" / "BGM" / scene):
         output.append(Track(LOCAL, _title(path), path, scene, False, "bundled", _digest(path)))
     # Identical personal audio can identify an otherwise anonymous installed recording.
     # Keep its playable live path and active flag. Explicit album assignments are independent.
-    personal = {row.digest: row for row in output if row.source == "personal"}
+    personal = {row.digest: row for row in output if row.source in {"personal", "pack"}}
+    credits = {(row.game, row.digest): row.origin for row in output if row.origin}
     for row in output:
         known = personal.get(row.digest)
         if known and (row.game == LOCAL or row.title.startswith("HD Sync - ")):
             row = replace(row, game=known.game, title=known.title)
-        yield row
+        yield replace(row, origin=row.origin or credits.get((row.game, row.digest)))
 
 
 def scan_scene(game: Path, scene: str, root: Path, games: dict[str, Game]) -> list[Track]:

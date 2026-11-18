@@ -5,9 +5,12 @@ import os
 import tempfile
 import types
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest import mock
 
 import main
+from state_lock import appearance_lock
 
 PNG_BODY = main.PNG_MAGIC + b"\x00" * 1024 + b"IEND"
 JPEG_BODY = b"\xff\xd8\xff" + b"\x00" * 1024 + b"\xff\xd9"
@@ -124,6 +127,18 @@ class CuratedTexturesTests(unittest.TestCase):
 
         self.assertEqual(self._run(session), (0, 0, 0))
         self.assertEqual(session.requested, [main.TEXTURES_RELEASE_API])
+
+    def test_appearance_lock_covers_texture_publication(self) -> None:
+        game = Path(self.tmp.name)
+        session = _Session({"assets": [{"name": "cover.png", "browser_download_url": "http://x"}]})
+        with (
+            ThreadPoolExecutor(max_workers=1) as pool,
+            appearance_lock(game),
+            self.assertRaises(OSError),
+        ):
+            pool.submit(self._run, session).result(timeout=5)
+        self.assertFalse((game / "textures/cover.png").exists())
+        self.assertEqual(self._run(session), (1, 0, 1))
 
     def test_counts_failed_asset_downloads(self):
         release = {"assets": [{"name": "bg.png", "browser_download_url": "http://x/bg.png"}]}

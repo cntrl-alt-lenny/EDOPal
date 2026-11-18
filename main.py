@@ -20,6 +20,8 @@ import sys
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import perf_counter
 from uuid import uuid4
 
@@ -40,6 +42,7 @@ from artwork_flow import format_size as _format_size
 from card_databases import FIELD_SPELL_TYPE, get_db_files
 from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, app_version, find_edopro_folder
 from network_tls import create_http_session as _create_http_session
+from state_lock import appearance_lock
 
 # Rich console setup
 # We import rich here so the rest of the file can use `console` everywhere.
@@ -1242,8 +1245,8 @@ async def download_curated_textures(
         console.print("[yellow]No curated textures have been published yet.[/yellow]")
         return (0, 0, 0)
 
-    textures_dir = os.path.join(cfg.edopro_path, "textures")
-    os.makedirs(textures_dir, exist_ok=True)
+    game = Path(cfg.edopro_path).resolve()
+    textures_dir = game / "textures"
     # Textures can be large (multi-MB backgrounds), so allow extra time.
     timeout = aiohttp.ClientTimeout(total=max(cfg.timeout, 120))
     downloaded = 0
@@ -1254,23 +1257,33 @@ async def download_curated_textures(
         if cancel_event is not None and cancel_event.is_set():
             break
         name = os.path.basename(asset["name"])  # guard against odd asset names
-        dest = os.path.join(textures_dir, name)
-        if not force and os.path.exists(dest):
+        dest = extras._regular_path(game, textures_dir / name)
+        if not force and dest.exists():
             skipped += 1
             continue
-        result = await _try_download(
-            session,
-            asset["browser_download_url"],
-            dest,
-            timeout,
-            cfg.max_retries,
-            is_valid=_looks_like_image,
-        )
-        if result is FetchResult.OK:
-            downloaded += 1
-            console.print(f"  [dim]downloaded {name}[/dim]")
-        else:
-            console.print(f"  [yellow]could not download {name}[/yellow]")
+        # Keep the installation lock out of asynchronous network waits.
+        with TemporaryDirectory(dir=game) as temporary:
+            staged = Path(temporary) / "texture"
+            result = await _try_download(
+                session,
+                asset["browser_download_url"],
+                str(staged),
+                timeout,
+                cfg.max_retries,
+                is_valid=_looks_like_image,
+            )
+            if result is FetchResult.OK:
+                with appearance_lock(game):
+                    dest = extras._regular_path(game, textures_dir / name)
+                    if dest.exists() and not force:
+                        skipped += 1
+                        continue
+                    textures_dir.mkdir(exist_ok=True)
+                    staged.replace(dest)
+                downloaded += 1
+                console.print(f"  [dim]downloaded {name}[/dim]")
+            else:
+                console.print(f"  [yellow]could not download {name}[/yellow]")
     return (downloaded, skipped, len(assets))
 
 
@@ -1574,10 +1587,17 @@ def run_health_check(cfg: Config) -> bool:
     )
 
     from content.catalogue import bundled_manifest
-    from music_library import ART, catalog
+    from music.catalogue import ART, SCENES, official_games
+    from music_library import catalog
+    from sleeves import PALETTES, PATTERNS, Recipe
+    from themes import PRESETS, Theme
 
     try:
-        games = [game.id for game in catalog().values() if game.cover_page]
+        games = [
+            game.id
+            for game in catalog(root=Path(cfg.config_path).parent / "soundtracks").values()
+            if game.cover_page
+        ]
         music_present = bool(games) and all(
             (ART / size / f"{game}.png").is_file()
             for game in games
@@ -1593,6 +1613,26 @@ def run_health_check(cfg: Config) -> bool:
     else:
         content_present = True
     checks.append((content_present, "Bundled content catalogue"))
+    checks.append(
+        (
+            music_present and len(SCENES) == 7 and bool(official_games()),
+            "Music scenes and catalogue IDs",
+        )
+    )
+    checks.append(
+        (
+            bool(PRESETS) and Theme.from_json(PRESETS[0].to_json()) == PRESETS[0],
+            "Editable theme preset",
+        )
+    )
+    checks.append(
+        (
+            bool(PATTERNS)
+            and Recipe.from_dict({"pattern": "sun"}).pattern in PATTERNS
+            and all(pattern.palette in PALETTES for pattern in PATTERNS.values()),
+            "Sleeve pattern catalogue and recipe",
+        )
+    )
     gallery = extras.PACKS.parent / "window" / "gallery"
     if getattr(sys, "frozen", False):
         try:

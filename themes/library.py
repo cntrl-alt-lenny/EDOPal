@@ -4,6 +4,7 @@ import hashlib
 import json
 import stat
 import struct
+from collections.abc import Iterable
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
@@ -12,6 +13,9 @@ from zipfile import ZIP_STORED, BadZipFile, ZipFile
 from PySide6.QtGui import QImage
 
 import config
+from content.cache import file_sha256
+from content.manifest import SHA256
+from content.media import Changes, Item, Media, MediaCollection, Origin
 from extras import _atomic_write, _regular_path
 
 from .imaging import MAX_IMAGE_BYTES, decode_photo
@@ -44,9 +48,33 @@ class ThemeLibrary:
     def save(self, theme: Theme, theme_id: str | None = None) -> str:
         theme_id = uuid4().hex if theme_id is None else check_id(theme_id)
         if theme.image:
-            self._photo(theme)
+            data = self._photo(theme)
+            if not self._path("images/" + theme.image).exists():
+                # A saved theme owns its wallpaper independently of the downloadable pack.
+                self._store_photo(data)
         _atomic_write(self._path(theme_id + ".json"), theme.to_json())
         return theme_id
+
+    def _collection(self) -> MediaCollection:
+        def personal_path(name: str) -> Path:
+            if not SHA256.fullmatch(name):
+                raise ValueError("Invalid library wallpaper reference.")
+            return self._path("images/" + name)
+
+        return MediaCollection(self.directory / "images/packs", personal_path)
+
+    def wallpapers(self) -> tuple[Media, ...]:
+        return self._collection().entries()
+
+    def replace_wallpapers(self, origin: Origin, sources: Iterable[tuple[Item, Path]]) -> Changes:
+        sources = list(sources)
+        personal = {}
+        for _, source in sources:
+            key = file_sha256(source)
+            path = self._path("images/" + key)
+            if path.is_file():
+                personal[key] = path
+        return self._collection().replace(origin, sources, personal=personal)
 
     def add_image(self, path: Path) -> str:
         data = _read(path, MAX_IMAGE_BYTES)
@@ -59,7 +87,10 @@ class ThemeLibrary:
         return digest
 
     def _photo(self, theme: Theme) -> bytes:
-        data = _read(self._path("images/" + str(theme.image)), MAX_IMAGE_BYTES)
+        path = self._path("images/" + str(theme.image))
+        if not path.exists():
+            path = next((row.path for row in self.wallpapers() if row.digest == theme.image), path)
+        data = _read(path, MAX_IMAGE_BYTES)
         if hashlib.sha256(data).hexdigest() != theme.image:
             raise ValueError("The saved wallpaper has changed.")
         return data
