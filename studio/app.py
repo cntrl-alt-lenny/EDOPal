@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from config import Config
+from config import APP_NAME, Config
 from studio import theme
 from studio.context import AppContext
 from studio.shell import StudioWindow
@@ -15,7 +15,7 @@ from studio.tasks import RunCoro
 def run_app(cfg: Config, version: str, run_coro: RunCoro, apply_choices: Callable) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(True)
-    app.setApplicationName("EDOPro Studio")
+    app.setApplicationName(APP_NAME)
     theme.apply(app)
     image = theme.ASSETS / "app-icon.png"
     if not image.is_file():

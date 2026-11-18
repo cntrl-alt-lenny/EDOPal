@@ -66,6 +66,9 @@ DEFAULTS = {
 
 CONFIG_FILENAME = "config.json"
 # Keep this directory name for compatibility with existing packaged installs.
+# The name players see. The data folder below keeps its original name so
+# existing settings, caches and soundtrack libraries are found unchanged.
+APP_NAME = "EDOPro Studio"
 APP_DATA_NAME = "EDOPro HD Sync"
 
 

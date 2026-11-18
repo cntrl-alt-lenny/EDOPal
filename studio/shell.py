@@ -44,7 +44,7 @@ class StudioWindow(QMainWindow):
         self.ctx = context
         self.ctx.attach(self)
         self.ctx.installations_requested.connect(self.open_picker)
-        self.setWindowTitle("EDOPro Studio")
+        self.setWindowTitle(config.APP_NAME)
         self.settings = QSettings(
             str(Path(context.cfg.config_path).with_suffix(".studio.ini")),
             QSettings.Format.IniFormat,

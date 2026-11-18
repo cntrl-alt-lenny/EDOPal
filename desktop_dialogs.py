@@ -4,6 +4,8 @@ import contextlib
 import os
 import sys
 
+from config import APP_NAME
+
 
 def show_startup_error(message: str) -> None:
     if sys.stderr is not None:
@@ -12,12 +14,12 @@ def show_startup_error(message: str) -> None:
     if sys.platform == "win32":
         import ctypes
 
-        ctypes.windll.user32.MessageBoxW(None, message, "EDOPro Studio", 0x10)
+        ctypes.windll.user32.MessageBoxW(None, message, APP_NAME, 0x10)
         return
     with contextlib.suppress(Exception):
         from tkinter import messagebox
 
-        messagebox.showerror("EDOPro Studio", message)
+        messagebox.showerror(APP_NAME, message)
 
 
 def console_folder_dialog(initial: str) -> tuple[str | None, bool]:

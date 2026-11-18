@@ -2438,7 +2438,7 @@ def main() -> int:
             except ImportError as exc:
                 from desktop_dialogs import show_startup_error
 
-                show_startup_error(f"EDOPro Studio needs PySide6-Essentials. {exc}")
+                show_startup_error(f"{config_module.APP_NAME} needs PySide6-Essentials. {exc}")
                 return 1
             exit_code = run_app(cfg, VERSION, run, _apply_gui_choices)
         elif cfg.cli.legacy_gui:
