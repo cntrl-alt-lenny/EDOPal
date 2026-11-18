@@ -95,11 +95,13 @@ class Catalog:
     entries: dict[str, Entry] = field(default_factory=dict)
     assignments: dict[str, dict[str, str]] = field(default_factory=dict)
     undo: dict[str, dict[str, str]] = field(default_factory=dict)
+    bin: list[str] = field(default_factory=list)
 
     def retain(self, newer: "Catalog") -> None:
         self.entries.update(newer.entries)
         self.assignments.update(newer.assignments)
         self.undo.update(newer.undo)
+        self.bin = list(dict.fromkeys((*self.bin, *newer.bin)))
 
     def encode(self) -> bytes:
         return json.dumps(
@@ -141,6 +143,9 @@ class Catalog:
                         continue
                     raise ValueError("Damaged installation assignment.")
                 getattr(state, attr)[install] = slots
+        state.bin = [
+            ref for ref in obj.get("bin", []) if isinstance(ref, str) and ref in state.entries
+        ]
         return state
 
 

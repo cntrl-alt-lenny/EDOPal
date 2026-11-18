@@ -1,7 +1,7 @@
 """Virtualized gallery with bounded, asynchronous thumbnail decoding."""
 
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,12 +18,16 @@ from studio.tasks import Job, TaskRunner, WorkerContext
 class Tile:
     title: str
     path: Path
+    description: str = ""
 
 
 class _Tiles(QAbstractListModel):
-    def __init__(self, view: QListView, runner: TaskRunner) -> None:
+    def __init__(
+        self, view: QListView, runner: TaskRunner, loader: Callable[[Path, WorkerContext], QImage]
+    ) -> None:
         super().__init__(view)
         self.runner = runner
+        self.loader = loader
         self.view = view
         self.items: tuple[Tile, ...] = ()
         self.cache: OrderedDict[Path, QPixmap] = OrderedDict()
@@ -47,7 +51,7 @@ class _Tiles(QAbstractListModel):
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.AccessibleTextRole):
             return item.title
         if role == Qt.ItemDataRole.ToolTipRole:
-            return str(item.path)
+            return item.description or str(item.path)
         if role != Qt.ItemDataRole.DecorationRole:
             return None
         path = item.path
@@ -56,7 +60,7 @@ class _Tiles(QAbstractListModel):
             return self.cache[path]
         key = (self.generation, path)
         if key not in self.pending.values() and len(self.pending) < 4:
-            job = self.runner.start(lambda ctx: _read_thumbnail(path, ctx))
+            job = self.runner.start(lambda ctx: self.loader(path, ctx))
             self.pending[job] = key
             job.result.connect(self._loaded)
             job.error.connect(self._failed)
@@ -131,7 +135,9 @@ class _TileDelegate(QStyledItemDelegate):
 
 
 class ImageTileGrid(QListView):
-    def __init__(self, runner: TaskRunner) -> None:
+    def __init__(
+        self, runner: TaskRunner, loader: Callable[[Path, WorkerContext], QImage] = _read_thumbnail
+    ) -> None:
         super().__init__()
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setResizeMode(QListView.ResizeMode.Adjust)
@@ -141,7 +147,7 @@ class ImageTileGrid(QListView):
         self.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setGridSize(QSize(*t.TILE_SIZE))
-        self.tiles = _Tiles(self, runner)
+        self.tiles = _Tiles(self, runner, loader)
         self.setModel(self.tiles)
         self.setItemDelegate(_TileDelegate(self))
 
