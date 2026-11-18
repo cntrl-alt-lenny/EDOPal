@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QGridLayout, QHBoxLayout
 from content.catalogue import PackState
 from content.download import Progress
 from studio import theme as t
+from studio.pages.music_sounds_controls import pack_size
 from studio.pages.sounds_model import Downloadable
 from studio.pages.sounds_views import InlineView, button_row, elided
 from studio.widgets import Button, Hero, Notice, Panel, ProgressBlock, glyph, label
@@ -23,7 +24,7 @@ DOWNLOAD_LABELS = {
 
 class LibraryView(InlineView):
     def __init__(self) -> None:
-        super().__init__("Saved sets", "Keep favourite mixes and share them in a single file.")
+        super().__init__("Saved sets", "Keep favorite mixes and share them in a single file.")
         self.import_button = Button("Import a set", "primary", "folder")
         self.actions.addWidget(self.import_button)
         self.hint = Notice()
@@ -39,11 +40,11 @@ class DownloadsView(InlineView):
         super().__init__(
             "Downloadable sets", "Download a set to hear it and use its sounds in a mix."
         )
-        self.refresh = Button("Refresh catalogue", "secondary")
+        self.refresh = Button("Refresh catalog", "secondary")
         self.actions.addWidget(self.refresh)
         self.hint = Notice()
         self.body.addWidget(self.hint)
-        self.empty = Hero("Sound sets", "Catalogue offline", "", "sounds")
+        self.empty = Hero("Sound sets", "Catalog offline", "", "sounds")
         self.body.addWidget(self.empty)
         self.empty.hide()
         self.browse_local = Button("Browse built-in sets", "secondary", "back")
@@ -68,7 +69,7 @@ class DownloadCard(Panel):
         status, action = DOWNLOAD_LABELS[item.status.state]
         if item.error:
             status, action = item.error, "Retry download"
-        self.status = label(status, "small", True)
+        self.status = label(f"{status}  ·  {pack_size(pack.size_bytes)}", "small", True)
         self.body.addLayout(copy)
         self.body.addWidget(label(pack.description, "body", True))
         credit = elided("muted")
@@ -101,12 +102,12 @@ class DownloadCard(Panel):
         if progress.total_bytes:
             self.progress.advance_to(progress.bytes_done, progress.total_bytes)
             self.progress.counts.setText(
-                f"{progress.bytes_done / 1_000_000:.1f} of {progress.total_bytes / 1_000_000:.1f} MB"
+                f"{pack_size(progress.bytes_done)} of {pack_size(progress.total_bytes)}"
             )
             if progress.bytes_done >= progress.total_bytes:
                 self.progress.phase.setText("Verifying…")
         if progress.bytes_per_second:
-            self.progress.detail.setText(f"{progress.bytes_per_second / 1_000_000:.1f} MB/s")
+            self.progress.detail.setText(f"{pack_size(progress.bytes_per_second)}/s")
 
     def interrupted(self, message: str, retry: str) -> None:
         self.progress.hide()

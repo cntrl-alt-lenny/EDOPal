@@ -11,10 +11,11 @@ from content.cache import PackCache
 from content.catalogue import Catalogue, CatalogueSource, PackState, PackStatus
 from content.download import Progress, download_pack
 from content.manifest import Pack
+from music import settings as music_settings
 from sounds.archive import SavedSet
 from sounds.sets import InstalledCue
-from sounds.settings import SoundSettings
-from studio.context import AppContext
+from sounds.settings import _ENABLE, SoundSettings
+from studio.pages.music_sounds_controls import check_game
 
 EVENT_KEYS = tuple(event.stem for event in sounds.EVENTS)
 EVENT_COUNT = len(EVENT_KEYS)
@@ -90,8 +91,10 @@ def write_game(
     action: str,
     draft: sounds.SoundSet,
     snapshot: Snapshot,
+    *,
+    confirmed_closed: bool = False,
 ) -> None:
-    AppContext.require_game_closed(game)
+    check_game(game, confirmed_closed)
     if action == "apply":
         current = {row.key: row for row in sounds.scan_installation(game)}
         for key in draft.assignments:
@@ -103,14 +106,20 @@ def write_game(
             ) != (prior and prior.sha256):
                 raise FilesChanged
         # The game may have been opened during the scan.
-        AppContext.require_game_closed(game)
+        check_game(game, confirmed_closed)
         sounds.apply_set(game, config_path, draft)
     elif action == "undo":
         sounds.undo(game, config_path)
     elif action == "restore":
         sounds.restore(game, config_path)
     else:
-        sounds.set_sound_enabled(game, action == "enable")
+        try:
+            sounds.set_sound_enabled(game, action == "enable")
+        except music_settings.GameProcessUnknown:
+            if not confirmed_closed:
+                raise
+            # The engine checked again. Use its atomic writer for this confirmed switch.
+            music_settings.write_audio_enabled(game, action == "enable", _ENABLE, "enable_sound")
 
 
 def coverage(sound_set: sounds.SoundSet) -> tuple[int, int]:
@@ -153,6 +162,12 @@ def chants_for(draft: sounds.SoundSet, sources: Iterable[Source]) -> tuple[str, 
     for source in sources:
         keys.update(source.sound_set.assignments)
     return tuple(sorted(keys - set(EVENT_KEYS)))
+
+
+def event_description(key: str) -> str:
+    if key in {"token", "reveal", "directattack"}:
+        return "Available to preview. In-duel playback can vary by EDOPro version."
+    return sounds.event_for(key).description
 
 
 def display_text(value: str) -> str:
@@ -205,10 +220,10 @@ async def get_pack(
 
 def catalogue_message(online: OnlineSets) -> str:
     if online.catalogue.source is CatalogueSource.LIVE:
-        return "" if online.packs else "There are no downloadable sound sets in the catalogue yet."
+        return "" if online.packs else "There are no downloadable sound sets in the catalog yet."
     if online.packs:
-        return "The catalogue is offline. Showing the last available list."
-    return "The catalogue is offline. Built-in and saved sounds are still available."
+        return "The catalog is offline. Showing the last available list."
+    return "The catalog is offline. Built-in and saved sounds are still available."
 
 
 def saved_sources(rows: tuple[SavedSet, ...]) -> tuple[Source, ...]:
@@ -219,7 +234,7 @@ def import_message(exc: BaseException, *, clip: bool) -> str:
     if clip:
         if isinstance(exc, OSError):
             return "Could not read that audio file. Check that it still exists and try again."
-        return f"Could not import that sound. {exc}"
+        return "Could not import that sound. Choose a supported audio file and try again."
     if isinstance(exc, OSError):
         return (
             "Could not open or save that set. Check the file and your available space, then retry."

@@ -7,7 +7,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, Qt, QVariantAnimation
+from PySide6.QtCore import QModelIndex, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -24,14 +24,21 @@ from studio import theme as t
 from studio.context import AppContext, GameOpenError, Installation
 from studio.pages.base import Page
 from studio.tasks import Job, WorkerContext
-from studio.widgets import GameClosedBlock, Panel, ProgressBlock, glyph, label, margins
+from studio.widgets import Panel, ProgressBlock, glyph, label, margins
 
 from .music_albums import AlbumViews
 from .music_imports import ImportViews
 from .music_model import SCENES, Library, read_library, track_count
 from .music_packs import MusicPacks
 from .music_preview import Preview
-from .music_widgets import STYLE, AlbumGrid, RecordHero, SceneButton, action
+from .music_sounds_controls import (
+    BANNER_HEIGHT,
+    TITLE_ROW_HEIGHT,
+    AudioGameCheck,
+    check_game,
+    confirm_change,
+)
+from .music_widgets import STYLE, AlbumGrid, RecordHero, SceneButton, action, show_music_error
 
 
 class Stopped(Exception):
@@ -45,6 +52,7 @@ def checkpoint(worker: WorkerContext) -> None:
 
 class MusicPage(Page):
     id, title, icon = "music", "Music", "music"
+    compact_changed = Signal(bool)
 
     def __init__(self, context: AppContext) -> None:
         super().__init__(context)
@@ -124,20 +132,15 @@ class MusicPage(Page):
         if self.active and self.state != "packs":
             self.refresh()
 
+    def confirm(self, action: str, message: str) -> bool:
+        return confirm_change(self, action, message)
+
     def escape(self) -> bool:
-        if self.job:
-            if self.progress.cancel.isVisible():
-                self.progress.cancel.click()
-            return True
-        if self.state == "packs" and self.packs.progress:
-            cancel = self.packs.progress.cancel
-            if cancel.isVisible() and cancel.isEnabled():
-                cancel.click()
+        if self.job or (self.state == "packs" and self.packs.progress):
             return True
         if self.back:
             self.back()
-            return True
-        return False
+        return True
 
     def screen(
         self,
@@ -212,6 +215,7 @@ class MusicPage(Page):
         *,
         lock: bool = False,
         writes_game: bool = False,
+        confirmed_closed: bool = False,
         destination: Path | None = None,
         cancellable: bool = True,
         fallback: Callable | None = None,
@@ -230,9 +234,12 @@ class MusicPage(Page):
         self.progress = ProgressBlock()
         self.progress.begin(title)
         self.progress.detail.setText(
-            "Keep this installation selected until the change finishes."
+            "You can change folders when this finishes."
             if lock
             else "Reading the selected installation and your library."
+        )
+        self.progress.cancel.setText(
+            "Cancel " + ("import" if title.startswith(("Import", "Adding")) else "operation")
         )
         self.progress.cancel.setVisible(cancellable)
         layout.addWidget(self.progress, 2)
@@ -243,7 +250,7 @@ class MusicPage(Page):
                 # An installed file may still be open while the audio device releases it.
                 with self.preview.lock:
                     self.preview.player.stop()
-                self.ctx.require_game_closed(game)
+                check_game(game, confirmed_closed)
                 checkpoint(worker)
             value = work(worker)
             if not lock:
@@ -277,7 +284,7 @@ class MusicPage(Page):
             if not finish():
                 return
             if isinstance(exc, Stopped):
-                self.message = "Stopped."
+                self.message = "Canceled."
                 fallback()
             else:
                 retry = partial(
@@ -291,7 +298,7 @@ class MusicPage(Page):
                     cancellable=cancellable,
                     fallback=fallback,
                 )
-                self.problem(exc, retry, fallback)
+                self.problem(title, exc, retry, fallback)
 
         job.progress.connect(
             lambda pair: self.progress.advance_to(*pair) if job is self.job else None
@@ -299,44 +306,53 @@ class MusicPage(Page):
         job.result.connect(done)
         job.error.connect(failed)
 
-    def problem(self, error: Exception, retry: Callable, back: Callable) -> None:
+    def problem(self, title: str, error: Exception, retry: Callable, back: Callable) -> None:
         layout = self.screen("error", back)
-        if isinstance(error, GameOpenError):
-            block = GameClosedBlock()
+        error_view = self.scroll.widget()
+        generation = self.generation
+
+        def again(*, confirmed_closed: bool = False) -> None:
+            if self.active and self.generation == generation and self.scroll.widget() is error_view:
+                retry(confirmed_closed=confirmed_closed)
+
+        if isinstance(error, (GameOpenError, settings.GameProcessUnknown)):
+            block = AudioGameCheck()
+            self.back_button.hide()
+            block.back.clicked.connect(back)
+            block.proceed.clicked.connect(lambda: again(confirmed_closed=True))
             layout.addWidget(block)
             layout.addStretch()
-            block.retry.clicked.connect(retry)
-            block.show_reason(str(error))
+            block.retry.clicked.connect(lambda: again())
+            block.explain(error)
             return
-        title = "Music needs attention"
-        message = str(error) or "The soundtrack library could not be read."
-        hero = RecordHero("Music", title, message, "music")
-        hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(hero, 1)
-        retry_button = action("Retry", retry, "primary")
-        layout.addWidget(retry_button, 0, Qt.AlignmentFlag.AlignRight)
-        retry_button.setFocus()
+        show_music_error(layout, title, error, again)
 
     def unavailable(self) -> None:
         install = self.ctx.installation
         layout = self.screen("unavailable")
-        title = "Choose your installation" if not install.path else "Get your game ready"
+        title = "Choose your EDOPro folder" if not install.path else "Finish setting up EDOPro"
         message = (
             "Choose an EDOPro folder to see its music and build playlists."
             if not install.path
-            else "Open EDOPro once to download its card databases, then close the game and select its folder again."
+            else "Open EDOPro and let its updates finish, then choose Check again."
         )
         if install.ready:
             title, message = (
                 "Your soundtrack library",
-                "Reload to read the albums and playlists for this game.",
+                "Refresh to read the albums and playlists for this game.",
             )
         hero = RecordHero("Music", title, message, "music")
         hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(hero, 1)
         choose = action(
-            "Reload" if install.ready else "Choose folder",
-            self.refresh if install.ready else self.ctx.installations_requested.emit,
+            "Refresh" if install.ready else "Check again" if install.path else "Choose folder",
+            self.refresh
+            if install.ready
+            else (
+                partial(self.ctx.select_installation_requested.emit, install.path)
+                if install.path
+                else self.ctx.installations_requested.emit
+            ),
             "primary",
             "folder",
         )
@@ -356,18 +372,18 @@ class MusicPage(Page):
         if self.data.enabled is False:
             self.setting_bar(layout)
         self.hero = RecordHero(
+            "Music",
             "Music library",
-            "Duel soundtrack",
             "Choose what plays from the main menu to the final turn.",
             "music",
         )
-        self.hero.setMinimumHeight(t.TILE_SIZE[1])
-        self.hero.setMaximumHeight(t.HERO_MIN + t.TILE_H)
-        self.hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(self.hero, 3)
+        self.hero.setFixedHeight(BANNER_HEIGHT)
+        layout.addWidget(self.hero)
+        self.home_title = label("Music library", "display")
+        layout.addWidget(self.home_title)
         self.feedback(layout)
         header = QHBoxLayout()
-        header.addWidget(label("What the game will play", "heading", True), 1)
+        header.addWidget(label("EDOPro playlists", "heading", True), 1)
         self.browse = action("Browse games", self.albums.gallery, "primary", "library")
         self.manage = action("Add music", lambda: self.imports.open_tools(self.home), icon="folder")
         header.addWidget(self.manage)
@@ -397,19 +413,23 @@ class MusicPage(Page):
             empty = Panel(t.LG)
             empty.body.addWidget(label("No music assigned yet", "subheading"))
             empty.body.addWidget(
-                label("Browse an album and add a recording to a scene.", "muted", True)
+                label("Browse an album and add a track to a scene.", "muted", True)
             )
             layout.addWidget(empty)
             for button in self.scene_buttons.values():
                 button.hide()
         self._columns = 0
         layout.addLayout(self.scene_grid)
+        if self.data.enabled is not False:
+            self.setting_bar(layout)
         self.shelf = QWidget()
         shelf_layout = QVBoxLayout(self.shelf)
         margins(shelf_layout, 0)
         shelf_layout.addWidget(label("Albums with music", "heading"))
         grid = AlbumGrid(self.ctx.tasks)
-        grid.populate(self.data.browse("", has_music=True))
+        albums = self.data.browse("", has_music=True)
+        self.has_albums = bool(albums)
+        grid.populate(albums)
 
         def open_album(index: QModelIndex) -> None:
             if self.state == "home":
@@ -419,18 +439,24 @@ class MusicPage(Page):
         grid.clicked.connect(open_album)
         shelf_layout.addWidget(grid)
         layout.addWidget(self.shelf, 3)
+        layout.addStretch()
         self.reflow()
-        if self.data.enabled is not False:
-            self.setting_bar(layout)
         if self.data.enabled is False:
             self.toggle_music.setFocus()
         else:
             self.browse.setFocus()
 
     def reflow(self) -> None:
+        short = self.window().height() <= TITLE_ROW_HEIGHT
+        self.home_title.setVisible(short)
+        self.hero.setVisible(not short)
         self.shelf.setVisible(
-            self.width() >= t.WIDE_CONTENT and self.height() >= t.TALL_HEIGHT - t.TILE_H
+            self.has_albums
+            and self.width() >= t.COMPACT_WIDTH - t.RAIL_COMPACT
+            and self.window().height() >= 800
         )
+        layout = self.scroll.widget().layout()
+        layout.setStretch(layout.count() - 1, int(self.shelf.isHidden()))
         cols = 4 if self.width() >= t.COMPACT_WIDTH - t.RAIL_COMPACT else 2
         if self._columns == cols:
             return
@@ -440,6 +466,7 @@ class MusicPage(Page):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        self.compact_changed.emit(self.window().height() <= TITLE_ROW_HEIGHT)
         if self.state == "home" and hasattr(self, "shelf"):
             self.reflow()
 
@@ -464,7 +491,7 @@ class MusicPage(Page):
                 lambda: self.toggle(not enabled),
                 "quiet" if enabled else "primary",
             )
-        line.addWidget(action("Reload", self.refresh, "quiet"))
+        line.addWidget(action("Refresh", self.refresh, "quiet"))
         if enabled is not None:
             line.addWidget(self.toggle_music)
         box.body.addLayout(line)

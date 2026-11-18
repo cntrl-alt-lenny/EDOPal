@@ -99,9 +99,9 @@ def test_select_mix_audition_and_use_keyboard(sound_window, qtbot):
     assert not page.bar.apply.isEnabled()
     card = page.cards["builtin:Thonk"]
     card.play.click()
-    assert card.play.text() == "Stop sampler"
+    assert card.play.text() == "Stop preview"
     page.cards["builtin:Synth"].play.click()
-    assert card.play.text() == "Play sampler"
+    assert card.play.text() == "Preview set"
     assert page.audio.player.calls == [("sampler", "Thonk"), ("sampler", "Synth")]
     page.overview.mix.click()
     assert page.audio.player.active is None
@@ -127,6 +127,8 @@ def test_select_mix_audition_and_use_keyboard(sound_window, qtbot):
     page.cards["builtin:Thonk"].play.click()
     assert window.navigate("music")
     assert page.audio.player.active is None
+    qtbot.waitUntil(lambda: window.current.state == "home")
+    idle(qtbot, page)
 
 
 def test_installation_states_and_stale_scan(sound_window, qtbot, monkeypatch, tmp_path):
@@ -145,7 +147,7 @@ def test_installation_states_and_stale_scan(sound_window, qtbot, monkeypatch, tm
     try:
         qtbot.waitUntil(begin.is_set)
         page.ctx.set_installation(Installation())
-        assert page.overview.installed.toolTip() == "Choose an installation"
+        assert page.overview.installed.toolTip() == "Choose your EDOPro folder"
         assert page.overview.choose.isVisible()
         page.ctx.set_installation(Installation(str(root), False))
         assert "Finish setting up" in page.overview.installed.toolTip()
@@ -171,6 +173,10 @@ def test_overview_reflows_from_compact_to_wide(sound_window, qtbot):
     window.resize(960, 600)
     qtbot.waitUntil(lambda: page.overview.compact_tools)
     assert page.views["overview"].horizontalScrollBar().maximum() == 0
+    assert page.overview.hero.isHidden() and page.overview.compact_title.isVisible()
+    window.resize(1280, 800)
+    qtbot.waitUntil(lambda: page.overview.hero.isVisible())
+    assert page.overview.hero.height() <= 160
     window.resize(3840, 2160)
     qtbot.waitUntil(lambda: page.bar.parentWidget() is page.overview)
     assert page.bar.isVisible()
@@ -217,7 +223,7 @@ def test_apply_retry_busy_drift_undo_and_restore(sound_window, qtbot, monkeypatc
         assert not window.change.isEnabled()
         assert not window.navigate("music")
         assert not page.bar.apply.isEnabled()
-        assert "switch folders" in page.feedback.copy.text()
+        assert "change folders" in page.feedback.copy.text()
     finally:
         release.set()
         idle(qtbot, page)
@@ -227,6 +233,7 @@ def test_apply_retry_busy_drift_undo_and_restore(sound_window, qtbot, monkeypatc
 
     audio_file(draw, 660)
     changed = draw.read_bytes()
+    monkeypatch.setattr(page, "confirm", lambda *_: True)
     page.bar.undo.click()
     idle(qtbot, page)
     assert "changed outside" in page.feedback.copy.text()
@@ -238,7 +245,6 @@ def test_apply_retry_busy_drift_undo_and_restore(sound_window, qtbot, monkeypatc
 
     page.bar.apply.click()
     idle(qtbot, page)
-    monkeypatch.setattr(window, "confirm", lambda *_: True)
     page.bar.restore.click()
     idle(qtbot, page)
     assert draw.read_bytes() == original
@@ -264,7 +270,7 @@ def test_import_clip_and_chant_then_enable_effects(sound_window, qtbot, monkeypa
     idle(qtbot, page)
     data = (root / "config/system.conf").read_bytes()
     assert data == b"enable_sound = 1\nsound_volume = 0\nsound_backend = miniaudio\n"
-    assert page.overview.toggle.text() == "Turn off effects"
+    assert page.overview.toggle.text() == "Turn sound effects off"
     page.overview.chants.click()
     assert page.chants.status.text() == "No card chants are installed."
     page.chants.forms["summon"].click()
@@ -330,7 +336,7 @@ def test_save_rename_duplicate_export_import_and_delete(sound_window, qtbot, mon
     library.import_button.click()
     idle(qtbot, page)
     assert "fresh export" in page.feedback.copy.text()
-    monkeypatch.setattr(window, "confirm", lambda *_: True)
+    monkeypatch.setattr(page, "confirm", lambda *_: True)
     click_text(library, "Delete")
     idle(qtbot, page)
     assert len(page.collections.saved) == 2
@@ -375,7 +381,7 @@ def test_offline_catalogue_download_cancel_retry_and_use(sound_window, qtbot, mo
     monkeypatch.setattr(sounds_collections, "get_pack", transfer)
     page.overview.downloads.click()
     idle(qtbot, page)
-    assert page.collections.downloads.empty.headline.text() == "Catalogue offline"
+    assert page.collections.downloads.empty.headline.text() == "Catalog offline"
     available = Catalogue(Manifest(1, ()), CatalogueSource.LIVE)
     page.collections.downloads.refresh.click()
     idle(qtbot, page)
@@ -393,9 +399,9 @@ def test_offline_catalogue_download_cancel_retry_and_use(sound_window, qtbot, mo
     idle(qtbot, page)
     card = page.collections.pack_cards["night"]
     assert "Downloaded" in card.status.text()
-    click_text(card, "Play sampler")
+    click_text(card, "Preview set")
     assert page.audio.player.calls[-1] == ("sampler", "Night duel")
-    click_text(card, "Use set")
+    click_text(card, "Select set")
     assert page.state == "overview"
     assert page.draft.name == "Night duel"
 
@@ -416,7 +422,7 @@ def test_mixer_keeps_edit_column_and_stops_replaced_preview(
     qtbot.keyClick(last.edit, Qt.Key.Key_Home)
     assert QApplication.focusWidget() is first.edit
     first.edit.click()
-    click_text(page.picker, "Play")
+    click_text(page.picker, "Preview")
     assert page.audio.player.active is not None
     page.events.fill_picker()
     assert page.audio.player.active is None

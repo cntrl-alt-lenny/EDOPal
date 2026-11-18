@@ -24,6 +24,7 @@ from studio.tasks import WorkerContext
 from studio.widgets import Button, Panel, SearchField, label
 
 from .music_model import SCENES, SOURCES, Album, change_order, term, track_count
+from .music_sounds_controls import TITLE_ROW_HEIGHT
 from .music_widgets import (
     AlbumGrid,
     RecordHero,
@@ -101,7 +102,7 @@ class AlbumViews:
         body = p.screen("gallery", self.playlist if from_scene else p.home, "Browse games")
         self.field = SearchField("Find a game or track")
         self.field.setText(self.search)
-        self.only = Button("Has music")
+        self.only = Button("Has tracks")
         self.only.setCheckable(True)
         self.only.setStyleSheet(
             f"QPushButton:checked {{background:{t.ACTIVE};color:{t.GOLD};border-color:{t.GOLD};}}"
@@ -193,6 +194,13 @@ class AlbumViews:
         body = p.screen("album", self.album_back)
         hero = AlbumHero(p, a)
         body.addWidget(hero)
+        title = label(f"{a.game.title}  ·  {track_count(len(a.tracks))}", "heading", True)
+        body.addWidget(title)
+        short = p.window().height() <= TITLE_ROW_HEIGHT
+        hero.setHidden(short)
+        title.setVisible(short)
+        p.compact_changed.connect(hero.setHidden)
+        p.compact_changed.connect(title.setVisible)
         if a.cover_origin:
             body.addWidget(label("Cover · " + credit_text(a.cover_origin), "muted", True))
         if not a.tracks:
@@ -200,7 +208,7 @@ class AlbumViews:
             body.setStretchFactor(hero, 1)
             panel = Panel(t.LG)
             prompt = label(
-                "No recordings yet. Add files from your collection to this album.", "body", True
+                "No tracks yet. Add files from your collection to this album.", "body", True
             )
             add = action("Add files", partial(p.imports.files, self.key), "primary", "folder")
             panel.body.addLayout(row(prompt, add))
@@ -209,21 +217,27 @@ class AlbumViews:
             add.setFocus()
             return
         head = row(
-            label("Recordings", "subheading"),
+            label("Tracks", "subheading"),
             action("Add files", partial(p.imports.files, self.key), icon="folder"),
         )
         head.setStretch(0, 1)
-        whole = action("Use this whole game", lambda: self.destination(None))
+        whole = action("Replace a playlist with this album", lambda: self.destination(None))
         whole.setEnabled(bool(a.tracks))
         head.addWidget(whole)
         body.addLayout(head)
-        self.tracks = table(("Track", "Source", "Playlist"), "Album recordings")
+        self.tracks = table(("Track", "Source", "Playlist"), "Album tracks")
         self.tracks.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.tracks.setColumnWidth(2, t.TILE_SIZE[0])
+        self.tracks.setColumnWidth(
+            2,
+            max(
+                t.TILE_SIZE[0],
+                self.tracks.fontMetrics().horizontalAdvance("Add to playlist…") + 2 * t.LG,
+            ),
+        )
         for tr in a.tracks:
             i = cells(self.tracks, (tr.title, SOURCES[tr.source], ""))
-            btn = action("Add to scene…", partial(self.destination, tr), "quiet")
-            btn.setAccessibleName(f"Add {tr.title} to a scene")
+            btn = action("Add to playlist…", partial(self.destination, tr), "quiet")
+            btn.setAccessibleName(f"Add {tr.title} to a playlist")
             self.tracks.setCellWidget(i, 2, btn)
         body.addWidget(self.tracks, 1)
         body.addWidget(p.preview)
@@ -258,7 +272,7 @@ class AlbumViews:
             "destination",
             self.album,
             track.title if track else a.game.title,
-            "ADD A TRACK" if track else "USE THIS WHOLE GAME",
+            "ADD A TRACK" if track else "REPLACE A PLAYLIST",
         )
         layout.addWidget(
             label(
@@ -278,7 +292,7 @@ class AlbumViews:
                 name,
                 symbol,
                 track_count(len(tracks)),
-                tracks[0].title if tracks else "No tracks selected",
+                tracks[0].title if tracks else "No tracks in this playlist",
             )
             already = track and any(r.digest == track.digest for r in tracks)
             if already:
@@ -295,8 +309,8 @@ class AlbumViews:
         album = p.data.albums[self.key]
         name = SCENES[scene][0]
         if track is None:
-            if not p.ctx.confirm(
-                "Use this whole game?",
+            if not p.confirm(
+                "Replace playlist",
                 f"Replace the playlist for “{name}” with {album.game.title}? Undo will put the previous playlist back.",
             ):
                 return
@@ -330,10 +344,14 @@ class AlbumViews:
                 progress=progress,
             )
 
+        def saved(_: object) -> None:
+            p.message = "Playlist updated. Restart EDOPro to use it."
+            p.refresh(self.playlist)
+
         p.run(
             "Updating the playlist",
             write,
-            lambda _: p.refresh(self.playlist),
+            saved,
             lock=True,
             writes_game=True,
             fallback=back,
@@ -344,7 +362,8 @@ class AlbumViews:
         key = p.scene
         scene = p.data.scenes[key]
         title, symbol = SCENES[key]
-        layout = p.screen("playlist", p.home, title, "WHAT THE GAME WILL PLAY")
+        layout = p.screen("playlist", p.home, title, "EDOPRO PLAYLISTS")
+        p.feedback(layout)
         panel = Panel(t.LG)
         head = row(
             label(track_count(len(scene.tracks)), "subheading"),
@@ -359,8 +378,8 @@ class AlbumViews:
         if not scene.tracks:
             hero = RecordHero(
                 "Playlist",
-                "No tracks here yet",
-                "Browse a game and choose a recording for this scene.",
+                "No tracks in this playlist",
+                "Browse a game and choose a track for this scene.",
                 "music",
             )
             hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -369,7 +388,7 @@ class AlbumViews:
         self.list.setVisible(bool(scene.tracks))
         self.up = action("Move up", partial(self.edit, -1))
         self.down = action("Move down", partial(self.edit, 1))
-        self.remove = action("Remove", partial(self.edit, 0))
+        self.remove = action("Remove track", partial(self.edit, 0))
         self.clear = action("Clear playlist", self.clear_playlist, "quiet")
         tools = row(self.up, self.down, self.remove)
         tools.addStretch()
@@ -383,8 +402,10 @@ class AlbumViews:
         footer.body.addWidget(
             label("Changes take effect next time you start EDOPro.", "body", True)
         )
-        self.undo = action("Undo last change", partial(self.recover, False))
-        self.restore = action("Restore original music", partial(self.recover, True))
+        self.undo = action("Undo last playlist change", partial(self.recover, False))
+        self.restore = action(
+            "Restore original music for this playlist", partial(self.recover, True)
+        )
         self.undo.setVisible(scene.undo)
         self.undo.setEnabled(scene.undo)
         self.restore.setVisible(scene.restore)
@@ -430,8 +451,8 @@ class AlbumViews:
 
     def clear_playlist(self) -> None:
         p = self.page
-        if p.ctx.confirm(
-            "Clear this playlist?",
+        if p.confirm(
+            "Clear playlist",
             f"Remove every track for “{SCENES[p.scene][0]}”? Undo will put the playlist back.",
         ):
             self.save((), self.playlist)
@@ -440,13 +461,18 @@ class AlbumViews:
         p = self.page
         work: Callable
         if original:
-            if not p.ctx.confirm(
-                "Restore original music?",
-                "Put this scene’s original game files back in their original folders?",
+            if not p.confirm(
+                "Restore original music for this playlist",
+                f"Put the original files for “{SCENES[p.scene][0]}” back in {p.game}?",
             ):
                 return
             work = partial(engine.restore_playlist, p.game, p.scene)
         else:
+            if not p.confirm(
+                "Undo last playlist change",
+                f"Put the previous playlist for “{SCENES[p.scene][0]}” back in {p.game}?",
+            ):
+                return
             work = partial(engine.undo_playlist, p.game, p.scene, root=p.root)
         from .music import checkpoint
 

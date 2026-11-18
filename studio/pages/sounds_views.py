@@ -3,7 +3,6 @@
 from collections.abc import Callable, Iterable
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -16,7 +15,15 @@ from PySide6.QtWidgets import (
 from studio import theme as t
 from studio.context import Installation
 from studio.pages.card_views import page_layout
-from studio.pages.sounds_model import EVENT_COUNT, Snapshot, Source, coverage, display_text
+from studio.pages.music_sounds_controls import BANNER_HEIGHT
+from studio.pages.sounds_model import (
+    EVENT_COUNT,
+    FilesChanged,
+    Snapshot,
+    Source,
+    coverage,
+    display_text,
+)
 from studio.widgets import (
     Button,
     ElidedLabel,
@@ -60,7 +67,10 @@ class Overview(QWidget):
             "Hear the difference from the first draw to the final attack.",
             "sounds",
         )
+        self.hero.setFixedHeight(BANNER_HEIGHT)
         body.addWidget(self.hero)
+        self.compact_title = label("Duel sound effects", "display")
+        body.addWidget(self.compact_title)
         self.current = Panel(t.LG)
         current_row = QHBoxLayout()
         current_row.setSpacing(t.XL)
@@ -84,10 +94,16 @@ class Overview(QWidget):
         current_row.addWidget(copy, 1)
         self.choose = Button("Choose folder", "secondary", "folder")
         self.rescan = Button("Check again", "secondary")
-        self.toggle = Button("Enable effects", "secondary")
+        self.toggle = Button("Turn sound effects on", "secondary")
         for button in (self.choose, self.rescan, self.toggle):
             current_row.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
             button.hide()
+        self.technical = Button("Technical details", "quiet")
+        self.technical.setCheckable(True)
+        self.backend_info = label("", "muted", True)
+        self.technical.toggled.connect(self.backend_info.setVisible)
+        self.current.body.addWidget(self.technical, 0, Qt.AlignmentFlag.AlignLeft)
+        self.current.body.addWidget(self.backend_info)
         body.addWidget(self.current)
 
         self.mix = Button("Mix your own", "secondary", "settings")
@@ -114,17 +130,6 @@ class Overview(QWidget):
         self.wide_actions = QVBoxLayout()
         body.addLayout(self.wide_actions)
         body.addStretch(1)
-        self.compact_banner = False
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        self.size_banner()
-
-    def size_banner(self) -> None:
-        height = t.HERO_MIN + (t.HUGE + t.XXL if self.width() >= t.WIDE_CONTENT else 0)
-        if self.compact_banner and not self.compact_tools:
-            height -= t.HUGE + t.SM
-        self.hero.setFixedHeight(height)
 
     def place_tools(self, compact: bool) -> None:
         self.compact_tools = compact
@@ -140,12 +145,12 @@ class Overview(QWidget):
     def show_status(
         self, install: Installation, snapshot: Snapshot | None, title: str, failed: bool
     ) -> None:
-        self.choose.setVisible(not install.ready)
+        self.choose.setVisible(not install.path)
         self.choose.setText("Change folder" if install.path else "Choose folder")
-        instructions = "Audition and save sounds here. Choose a game folder to use them in EDOPro."
+        instructions = "Preview and save sounds here. Choose a game folder to use them in EDOPro."
         if install.path and not install.ready:
             title = "Finish setting up EDOPro"
-            instructions = "Open EDOPro once to finish setup, then select its folder again."
+            instructions = "Open EDOPro and let its updates finish, then choose Check again."
         elif install.ready and snapshot is None:
             title = "Could not read sounds" if failed else "Reading game sounds…"
             instructions = (
@@ -153,7 +158,7 @@ class Overview(QWidget):
                 if failed
                 else "Looking at the selected installation."
             )
-        self.rescan.setVisible(failed)
+        self.rescan.setVisible(failed or bool(install.path and not install.ready))
         self.toggle.hide()
         warnings = {}
         if snapshot:
@@ -161,16 +166,15 @@ class Overview(QWidget):
             enabled = {
                 True: "Effects on",
                 False: "Effects off",
-                None: "Effects setting unavailable",
+                None: "Check Sound Effects in EDOPro’s audio settings.",
             }
             parts = [enabled[settings.enabled]]
             if settings.volume is not None:
                 parts.append(f"{settings.volume}% volume")
-            if settings.backend:
-                parts.append(f"Audio: {settings.backend}")
+
             instructions = "  ·  ".join(parts)
             if settings.enabled is False:
-                warnings[self.effects_warning] = "Enable effects here with EDOPro closed."
+                warnings[self.effects_warning] = "Turn sound effects on here with EDOPro closed."
             if settings.volume == 0:
                 warnings[self.volume_warning] = (
                     "Raise the sound effects volume in EDOPro’s audio settings."
@@ -178,12 +182,16 @@ class Overview(QWidget):
             if settings.backend == "none":
                 warnings[self.backend_warning] = "Choose an audio output in EDOPro to hear effects."
             self.toggle.setText(
-                "Enable effects" if settings.enabled is False else "Turn off effects"
+                "Turn sound effects on" if settings.enabled is False else "Turn sound effects off"
             )
             self.toggle.setVisible(settings.enabled is not None)
             self.toggle.setToolTip("Changes the effects switch and preserves your volume.")
         self.installed.set_value(title, display_text(title))
         self.settings.setText(instructions)
+        backend = snapshot.settings.backend if snapshot else None
+        self.technical.setVisible(bool(backend))
+        self.backend_info.setText(f"Audio backend: {backend}" if backend else "")
+        self.backend_info.setVisible(bool(backend) and self.technical.isChecked())
         for warning in (
             self.effects_warning,
             self.volume_warning,
@@ -232,27 +240,27 @@ class SetCard(Panel):
         name.set_value(sound_set.name, display_text(sound_set.name))
         self.body.addWidget(name)
         playable, silent = coverage(sound_set)
-        count = f"{playable} of {EVENT_COUNT} events with sound"
+        count = f"{playable} of {EVENT_COUNT} sound slots have a clip"
         if silent:
             count += f"  ·  {silent} silent"
         self.body.addWidget(label(count, "body", True))
         credits = sound_set.credits
         credit = elided("muted")
         attribution = (
-            f"{credits.author or 'Author unknown'}  ·  {credits.license or 'Licence undocumented'}"
+            f"{credits.author or 'Author unknown'}  ·  {credits.license or 'License undocumented'}"
         )
         credit.set_value(
             "\n".join(filter(None, (attribution, credits.attribution))), display_text(attribution)
         )
         self.body.addWidget(credit)
         self.body.addStretch(1)
-        self.play = Button("Play sampler", "secondary")
-        self.play.setAccessibleName(f"Play sampler for {display_text(sound_set.name)}")
+        self.play = Button("Preview set", "secondary")
+        self.play.setAccessibleName(f"Preview set for {display_text(sound_set.name)}")
         self.play.setEnabled(any(sound_set.assignments.values()))
         buttons = button_row(self.play)
         self.use = None
         if use is not None:
-            self.use = Button("Use set", "quiet")
+            self.use = Button("Select set", "quiet")
             self.use.clicked.connect(use)
             buttons.addWidget(self.use)
         buttons.addStretch(1)
@@ -262,7 +270,7 @@ class SetCard(Panel):
         if self.objectName() == ("chosenSound" if selected else ""):
             return
         if self.use is not None:
-            self.use.setText("Selected" if selected else "Use set")
+            self.use.setText("Selected" if selected else "Select set")
         self.setObjectName("chosenSound" if selected else "")
         self.setStyleSheet(
             f"QFrame#chosenSound {{ border: {t.HAIR}px solid {t.GOLD}; background: {t.ACTIVE}; }}"
@@ -285,11 +293,11 @@ class ActionBar(Panel):
         body.addWidget(self.detail)
         body.addWidget(self.restart)
         row.addWidget(copy, 1)
-        self.save = Button("Save mix", "secondary")
-        self.apply = Button("Apply to game", "primary", "check")
+        self.save = Button("Save sound set", "secondary")
+        self.apply = Button("Apply sound effects", "primary", "check")
         row.addLayout(button_row(self.save, self.apply))
         self.body.addLayout(row)
-        self.undo = Button("Undo last change", "quiet")
+        self.undo = Button("Undo last sound change", "quiet")
         self.restore = Button("Restore original sounds", "quiet")
         self.history = QWidget()
         history_body = page_layout(self.history)
@@ -323,31 +331,61 @@ class Feedback(Panel):
         self.copy = label("", "notice", True)
         row.addWidget(self.copy, 1)
         self.dismiss = Button("Dismiss", "quiet")
+        self.more = Button("Technical details", "quiet")
+        self.more.setCheckable(True)
+        row.addWidget(self.more)
         row.addWidget(self.dismiss)
         self.body.addLayout(row)
+        self.details = label("", "muted", True)
+        self.body.addWidget(self.details)
+        self.more.toggled.connect(self.details.setVisible)
         self.hide()
 
-    def show_message(self, message: str, pending: bool = False) -> None:
+    def show_message(self, message: str, pending: bool = False, *, details: str = "") -> None:
+        self.more.setChecked(False)
+        self.more.setVisible(bool(details))
+        self.details.setText(details)
+        self.details.hide()
         self.copy.setText(message)
         self.copy.setToolTip("")
         self.dismiss.setVisible(not pending)
         self.setVisible(bool(message))
 
+    def write_failed(self, action: str, exc: BaseException) -> None:
+        if isinstance(exc, FilesChanged):
+            self.show_message(
+                "The game’s sounds changed outside the app. Your files were kept. Check the installed sounds before applying again."
+            )
+        elif "changed after installation" in str(exc):
+            self.show_message(
+                "A sound changed outside the app. Put back its previous file before using sound history.",
+                details=str(exc),
+            )
+        elif action in ("enable", "disable"):
+            self.show_message(
+                "Could not change the effects switch. Use EDOPro’s audio settings to change it."
+            )
+        else:
+            self.show_message(
+                "Check that the EDOPro folder is writable and retry the sound change.",
+                details=str(exc),
+            )
+
 
 class NameView(InlineView):
     def __init__(self) -> None:
-        super().__init__("Save mix", "Give this mix a name so you can find it again.")
+        super().__init__("Save sound set", "Give this mix a name so you can find it again.")
         form = Panel(t.XL)
-        name_label = label("Set name", "subheading")
+        name_label = label("Sound set name", "subheading")
         self.name = QLineEdit()
         self.name.setMinimumHeight(t.BUTTON_H)
         self.name.setMaxLength(120)
         self.name.setPlaceholderText("For example, Saturday night duels")
-        self.name.setAccessibleName("Set name")
+        self.name.setAccessibleName("Sound set name")
         name_label.setBuddy(self.name)
         form.body.addWidget(name_label)
         form.body.addWidget(self.name)
-        self.submit = Button("Save mix", "primary", "check")
+        self.submit = Button("Save sound set", "primary", "check")
         form.body.addWidget(self.submit, 0, Qt.AlignmentFlag.AlignRight)
         self.body.addWidget(form)
         self.body.addStretch(1)
