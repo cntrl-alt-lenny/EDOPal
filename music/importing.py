@@ -95,11 +95,15 @@ def _suggest_game(hints: Iterable[str], games: dict[str, Game]) -> tuple[str | N
     return None, "low"
 
 
-def _index(root: Path, games: dict[str, Game]) -> dict[str, Path]:
+def _index(
+    root: Path, games: dict[str, Game], checkpoint: Callable[[], None] | None = None
+) -> dict[str, Path]:
     result = {}
     for key in games:
         for scene in SCENES:
             for path in _audio(root / key / scene):
+                if checkpoint:
+                    checkpoint()
                 try:
                     result.setdefault(_digest(path), path)
                 except OSError:
@@ -108,15 +112,22 @@ def _index(root: Path, games: dict[str, Game]) -> dict[str, Path]:
     return result
 
 
-def plan_import(sources: Path | Iterable[Path], *, root: Path | None = None) -> list[ImportItem]:
+def plan_import(
+    sources: Path | Iterable[Path],
+    *,
+    root: Path | None = None,
+    checkpoint: Callable[[], None] | None = None,
+) -> list[ImportItem]:
     """Read only. Use dataclasses.replace to confirm/correct game and scene, or omit a row."""
     root = root or library_root()
     games = catalog(root=root)
-    known = _index(root, games)
+    known = _index(root, games, checkpoint)
     existing = set(known)
     seen = set()
     plan = []
     for path, folders, error in _inputs([sources] if isinstance(sources, Path) else sources):
+        if checkpoint:
+            checkpoint()
         if path.absolute() in seen:
             continue
         seen.add(path.absolute())
@@ -158,6 +169,7 @@ def execute_import(
     root: Path | None = None,
     progress: Callable[[int, int], None] | None = None,
     dedup_library: bool = True,
+    cancelled: Callable[[], bool] | None = None,
 ) -> list[ImportResult]:
     """Per-file outcomes. Recheck contents and duplicates at confirmation time."""
     root = root or library_root()
@@ -169,6 +181,8 @@ def execute_import(
         known = _index(root, catalog(root=root)) if dedup_library else None
         results = []
         for item in plan:
+            if cancelled and cancelled():
+                break
             try:
                 result = _import_one(item, root, known)
             except Exception as exc:

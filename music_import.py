@@ -24,6 +24,7 @@ __all__ = [
 ]
 
 Progress = Callable[[int, int], None]
+Created = Callable[[Path], None]
 
 # Entries in the three original Voice.dat indices. Effect and dialogue records are skipped.
 _GAMES = {
@@ -57,7 +58,12 @@ _NIBBLES = bytes((i >> 4 | i << 4) & 255 for i in range(256))
 
 
 def import_library(
-    folder: Path, *, root: Path | None = None, progress: Progress | None = None
+    folder: Path,
+    *,
+    root: Path | None = None,
+    progress: Progress | None = None,
+    created: Created | None = None,
+    checkpoint: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
     """Import a local game/scene collection; skip hidden, unsupported and unrelated files."""
     folder = folder.resolve(strict=True)
@@ -65,10 +71,16 @@ def import_library(
     destination = root or library_root()
     custom = personal_games(folder)
     for game in custom.values():
+        if checkpoint:
+            checkpoint()
         current = destination / game.id / "game.json"
         if not current.exists():
             save_personal_game(game, destination)
+            if created:
+                created(current)
     for key in catalog(root=destination):
+        if checkpoint:
+            checkpoint()
         for scene in SCENES:
             base = folder / key / scene
             if not base.is_dir():
@@ -88,27 +100,39 @@ def import_library(
         raise ValueError(
             "Choose a soundtracks folder copied from another installation. Each recording belongs in a game-id/scene folder."
         )
-    return _store(files, root, progress)
+    return _store(files, root, progress, created)
 
 
 def export_library(
-    destination: Path, *, root: Path | None = None, progress: Progress | None = None
+    destination: Path,
+    *,
+    root: Path | None = None,
+    progress: Progress | None = None,
+    created: Created | None = None,
+    checkpoint: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
     """Copy the portable game manifests and recordings into a transfer folder."""
     source = (root or library_root()).resolve()
     if destination.resolve().is_relative_to(source):
         raise ValueError("Choose an export folder outside the source library.")
-    return import_library(source, root=destination, progress=progress)
+    return import_library(
+        source, root=destination, progress=progress, created=created, checkpoint=checkpoint
+    )
 
 
 def _store(
-    files: list[tuple[Path, str, str]], root: Path | None, progress: Progress | None
+    files: list[tuple[Path, str, str]],
+    root: Path | None,
+    progress: Progress | None,
+    created: Created | None = None,
 ) -> tuple[int, int]:
     added = duplicates = 0
     failures = []
     for i, (path, key, scene) in enumerate(files, 1):
         try:
-            _, new = store_track(path, key, scene, root=root)
+            stored, new = store_track(path, key, scene, root=root)
+            if new and created:
+                created(stored)
             added += int(new)
             duplicates += int(not new)
         except Exception as exc:
@@ -123,7 +147,9 @@ def _store(
     return added, duplicates
 
 
-def _read_game(stream: BinaryIO, length: int, temporary: Path) -> list[tuple[Path, str, str]]:
+def _read_game(
+    stream: BinaryIO, length: int, temporary: Path, checkpoint: Callable[[], None] | None = None
+) -> list[tuple[Path, str, str]]:
     header = stream.read(12)
     if len(header) != 12 or header[:8] != b"KCEJYUGI":
         return []
@@ -164,6 +190,8 @@ def _read_game(stream: BinaryIO, length: int, temporary: Path) -> list[tuple[Pat
         with destination.open("xb") as out:
             remaining = size
             while remaining:
+                if checkpoint:
+                    checkpoint()
                 chunk = stream.read(min(remaining, 1024 * 1024))
                 if not chunk:
                     raise ValueError("The game soundtrack ends unexpectedly.")
@@ -174,7 +202,12 @@ def _read_game(stream: BinaryIO, length: int, temporary: Path) -> list[tuple[Pat
 
 
 def import_power_of_chaos(
-    source: Path, *, root: Path | None = None, progress: Progress | None = None
+    source: Path,
+    *,
+    root: Path | None = None,
+    progress: Progress | None = None,
+    created: Created | None = None,
+    checkpoint: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
     """Read original PCM WAV recordings. A trilogy ZIP is opened without unpacking the games."""
     with tempfile.TemporaryDirectory(prefix="edopro-game-music-") as tmp:
@@ -194,16 +227,16 @@ def import_power_of_chaos(
                         if bank.file_size > 1024**3:
                             raise ValueError("Choose an original Power of Chaos Voice.dat archive.")
                         with archive.open(bank) as stream:
-                            files.extend(_read_game(stream, bank.file_size, temporary))
+                            files.extend(_read_game(stream, bank.file_size, temporary, checkpoint))
             except (BadZipFile, RuntimeError, NotImplementedError) as exc:
                 raise ValueError(
                     "The ZIP could not be read. Try the original Voice.dat file."
                 ) from exc
         else:
             with source.open("rb") as stream:
-                files = _read_game(stream, source.stat().st_size, temporary)
+                files = _read_game(stream, source.stat().st_size, temporary, checkpoint)
         if not files:
             raise ValueError(
                 "Choose Voice.dat from Yugi the Destiny, Kaiba the Revenge or Joey the Passion, or a ZIP containing one of those games."
             )
-        return _store(files, root, progress)
+        return _store(files, root, progress, created)
