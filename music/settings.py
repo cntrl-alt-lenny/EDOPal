@@ -10,8 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from music.discovery import _sound_path
-from state_lock import locked
+from state_lock import appearance_lock
 
 _ENABLE_MUSIC = re.compile(
     rb"(?m)^(?:\xef\xbb\xbf)?[ \t]*enable_music[ \t]*=[ \t]*([01])(?=[ \t]*(?:[#;][^\r\n]*)?\r?$)"
@@ -81,7 +80,7 @@ def write_music_enabled(game: Path, enabled: bool) -> None:
     conf = root / "config" / "system.conf"
     if not conf.resolve().is_relative_to(root) or conf.is_symlink():
         raise OSError("The EDOPro settings file points outside the selected installation.")
-    with locked(_sound_path(game, ".edopro-hd-sync"), ".audio-settings.lock"):
+    with appearance_lock(root):
         original = conf.read_bytes()
         matches = list(_ENABLE_MUSIC.finditer(original))
         if not matches:
