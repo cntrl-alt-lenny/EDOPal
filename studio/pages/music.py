@@ -21,20 +21,17 @@ from PySide6.QtWidgets import (
 import music_library as engine
 from music import settings
 from studio import theme as t
-from studio.context import AppContext, Installation
+from studio.context import AppContext, GameOpenError, Installation
 from studio.pages.base import Page
 from studio.tasks import Job, WorkerContext
-from studio.widgets import Panel, ProgressBlock, glyph, label, margins
+from studio.widgets import GameClosedBlock, Panel, ProgressBlock, glyph, label, margins
 
 from .music_albums import AlbumViews
 from .music_imports import ImportViews
 from .music_model import SCENES, Library, read_library, track_count
+from .music_packs import MusicPacks
 from .music_preview import Preview
 from .music_widgets import STYLE, AlbumGrid, RecordHero, SceneButton, action
-
-
-class GameOpen(Exception):
-    pass
 
 
 class Stopped(Exception):
@@ -74,6 +71,7 @@ class MusicPage(Page):
         self.preview.hide()
         self.albums = AlbumViews(self)
         self.imports = ImportViews(self)
+        self.packs = MusicPacks(self)
         self.data: Library | None = None
         self.job: Job | None = None
         self.active = self.locked = False
@@ -91,7 +89,8 @@ class MusicPage(Page):
 
     def shown(self) -> None:
         self.active = True
-        self.refresh()
+        if self.state != "packs":
+            self.refresh()
 
     def hidden(self) -> bool:
         if self.locked:
@@ -108,6 +107,8 @@ class MusicPage(Page):
             self.job = None
 
     def request_close(self) -> bool:
+        if self.packs.job:
+            self.packs.job.cancel()
         if self.job:
             self.job.cancel()
         self.preview.stop()
@@ -120,13 +121,18 @@ class MusicPage(Page):
         self.albums.reset()
         self.imports.reset()
         self.scene, self.message = "duel", ""
-        if self.active:
+        if self.active and self.state != "packs":
             self.refresh()
 
     def escape(self) -> bool:
         if self.job:
             if self.progress.cancel.isVisible():
                 self.progress.cancel.click()
+            return True
+        if self.state == "packs" and self.packs.progress:
+            cancel = self.packs.progress.cancel
+            if cancel.isVisible() and cancel.isEnabled():
+                cancel.click()
             return True
         if self.back:
             self.back()
@@ -159,8 +165,8 @@ class MusicPage(Page):
         if back or title:
             top = QHBoxLayout()
             if back:
-                go = action("Back", back, "quiet", "back")
-                top.addWidget(go)
+                self.back_button = action("Back", back, "quiet", "back")
+                top.addWidget(self.back_button)
             top.addWidget(label(section, "goldKicker"))
             top.addStretch()
             layout.addLayout(top)
@@ -237,8 +243,7 @@ class MusicPage(Page):
                 # An installed file may still be open while the audio device releases it.
                 with self.preview.lock:
                     self.preview.player.stop()
-                if settings._game_running(game):
-                    raise GameOpen
+                self.ctx.require_game_closed(game)
                 checkpoint(worker)
             value = work(worker)
             if not lock:
@@ -296,13 +301,15 @@ class MusicPage(Page):
 
     def problem(self, error: Exception, retry: Callable, back: Callable) -> None:
         layout = self.screen("error", back)
-        running = isinstance(error, GameOpen)
-        title = "Close EDOPro to continue" if running else "Music needs attention"
-        message = (
-            "Close the selected game, then retry this change."
-            if running
-            else str(error) or "The soundtrack library could not be read."
-        )
+        if isinstance(error, GameOpenError):
+            block = GameClosedBlock()
+            layout.addWidget(block)
+            layout.addStretch()
+            block.retry.clicked.connect(retry)
+            block.show_reason(str(error))
+            return
+        title = "Music needs attention"
+        message = str(error) or "The soundtrack library could not be read."
         hero = RecordHero("Music", title, message, "music")
         hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(hero, 1)
@@ -346,6 +353,8 @@ class MusicPage(Page):
             self.unavailable()
             return
         layout = self.screen("home")
+        if self.data.enabled is False:
+            self.setting_bar(layout)
         self.hero = RecordHero(
             "Music library",
             "Duel soundtrack",
@@ -357,11 +366,11 @@ class MusicPage(Page):
         self.hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.hero, 3)
         self.feedback(layout)
-        if self.data.enabled is False:
-            self.setting_bar(layout)
         header = QHBoxLayout()
         header.addWidget(label("What the game will play", "heading", True), 1)
         self.browse = action("Browse games", self.albums.gallery, "primary", "library")
+        self.manage = action("Add music", lambda: self.imports.open_tools(self.home), icon="folder")
+        header.addWidget(self.manage)
         header.addWidget(self.browse)
         layout.addLayout(header)
         self.scene_grid = QGridLayout()
@@ -369,18 +378,32 @@ class MusicPage(Page):
         self.scene_buttons = {}
         for key, (name, icon) in SCENES.items():
             tracks = self.data.scenes[key].tracks
+            games = {track.game for track in tracks}
+            status = track_count(len(tracks)) if tracks else ""
+            if len(games) > 1:
+                status += f" · {len(games)} games"
             scene = SceneButton(
                 name,
                 icon,
-                track_count(len(tracks)),
-                tracks[0].title if tracks else "No tracks selected",
+                status,
+                tracks[0].title if tracks else "No music assigned",
             )
+            if tracks:
+                scene.setToolTip("\n".join([name, *(track.title for track in tracks)]))
             scene.clicked.connect(partial(self.open_scene, key))
             self.scene_buttons[key] = scene
-        self.manage = SceneButton("Add music", "folder", "Library", "Import and manage music")
-        self.manage.clicked.connect(lambda: self.imports.open_tools(self.home))
+        configured = any(s.tracks or s.restore or s.undo for s in self.data.scenes.values())
+        if not configured:
+            empty = Panel(t.LG)
+            empty.body.addWidget(label("No music assigned yet", "subheading"))
+            empty.body.addWidget(
+                label("Browse an album and add a recording to a scene.", "muted", True)
+            )
+            layout.addWidget(empty)
+            for button in self.scene_buttons.values():
+                button.hide()
         self._columns = 0
-        layout.addLayout(self.scene_grid, 2)
+        layout.addLayout(self.scene_grid)
         self.shelf = QWidget()
         shelf_layout = QVBoxLayout(self.shelf)
         margins(shelf_layout, 0)
@@ -399,7 +422,10 @@ class MusicPage(Page):
         self.reflow()
         if self.data.enabled is not False:
             self.setting_bar(layout)
-        self.browse.setFocus()
+        if self.data.enabled is False:
+            self.toggle_music.setFocus()
+        else:
+            self.browse.setFocus()
 
     def reflow(self) -> None:
         self.shelf.setVisible(
@@ -409,7 +435,7 @@ class MusicPage(Page):
         if self._columns == cols:
             return
         self._columns = cols
-        for i, btn in enumerate((*self.scene_buttons.values(), self.manage)):
+        for i, btn in enumerate(self.scene_buttons.values()):
             self.scene_grid.addWidget(btn, i // cols, i % cols)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -438,8 +464,9 @@ class MusicPage(Page):
                 lambda: self.toggle(not enabled),
                 "quiet" if enabled else "primary",
             )
-            line.addWidget(self.toggle_music)
         line.addWidget(action("Reload", self.refresh, "quiet"))
+        if enabled is not None:
+            line.addWidget(self.toggle_music)
         box.body.addLayout(line)
         layout.addWidget(box)
 

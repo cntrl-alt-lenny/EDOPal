@@ -78,7 +78,7 @@ def render_sounds(
     page.clear_feedback()
     page.escape()
 
-    with patch.object(sounds_model, "_game_running", return_value=True):
+    with patch("music.settings._game_running", return_value=True):
         page.bar.apply.click()
         idle()
     shot("08-close-edopro")
@@ -92,10 +92,10 @@ def render_sounds(
             real_apply(*args)
 
     with (
-        patch.object(sounds_model, "_game_running", return_value=False),
+        patch("music.settings._game_running", return_value=False),
         patch.object(sounds, "apply_set", side_effect=block),
     ):
-        page.feedback.retry.click()
+        page.closed.retry.click()
         try:
             settle(started.is_set)
             shot("09-applying")
@@ -105,7 +105,7 @@ def render_sounds(
     shot("10-applied-and-history")
     draw = sound / "draw.wav"
     draw.write_bytes(b"Changed outside the app")
-    with patch.object(sounds_model, "_game_running", return_value=False):
+    with patch("music.settings._game_running", return_value=False):
         page.bar.undo.click()
         idle()
     shot("11-external-change")

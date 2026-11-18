@@ -54,7 +54,7 @@ class MixerView(InlineView):
             if chants
             else (
                 "Mix your own",
-                "Choose a sound for each event. Use ↑ and ↓ to move and Enter or Space to listen.",
+                "Choose a sound for each event. Use ↑ and ↓ between events. Tab to Play or Choose sound.",
             )
         )
         super().__init__(title, hint)
@@ -123,13 +123,16 @@ class MixerView(InlineView):
         if (
             isinstance(event, QKeyEvent)
             and event.type() == QEvent.Type.KeyPress
-            and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down)
+            and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Home, Qt.Key.Key_End)
         ):
             rows = list(self.rows.values())
             current = next(i for i, row in enumerate(rows) if watched in (row.play, row.edit))
             offset = -1 if event.key() == Qt.Key.Key_Up else 1
-            row = rows[max(0, min(len(rows) - 1, current + offset))]
-            focus = row.play if row.play.isEnabled() else row.edit
+            target = {Qt.Key.Key_Home: 0, Qt.Key.Key_End: len(rows) - 1}.get(
+                event.key(), max(0, min(len(rows) - 1, current + offset))
+            )
+            row = rows[target]
+            focus = row.play if watched is rows[current].play and row.play.isEnabled() else row.edit
             focus.setFocus(Qt.FocusReason.OtherFocusReason)
             if self.scroller:
                 self.scroller.ensureWidgetVisible(row)
