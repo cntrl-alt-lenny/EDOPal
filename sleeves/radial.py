@@ -1,12 +1,30 @@
 """Central medallions and instruments, constructed around the optical centre."""
 
 import math
+from functools import lru_cache
 
-from PySide6.QtGui import QPainter
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QPainter, QPolygonF
 
-from .drawing import Inks, mix, oval, path, polar, polygon, star
+from .drawing import CLEAR, Inks, mix, oval, path, pen, polar, polygon, star
 
 TAU = math.tau
+
+
+@lru_cache(maxsize=8)
+def _guilloche_lines(count: int, lobes: int, samples: int) -> tuple[QPolygonF, ...]:
+    # Only the ink changes across a shelf of colourways. These read-only polygons
+    # can be shared by workers without sharing a paint device or caching bitmaps.
+    angles = [TAU * j / samples for j in range(samples + 1)]
+    return tuple(
+        QPolygonF(
+            [
+                QPointF(*polar(102 + 38 * math.cos(lobes * a + k * 0.1) + k * 0.82, a))
+                for a in angles
+            ]
+        )
+        for k in range(count)
+    )
 
 
 def radial_plate(p: QPainter, key: str, c: Inks, density: float, v: float, extent: float) -> None:
@@ -85,12 +103,11 @@ def radial_plate(p: QPainter, key: str, c: Inks, density: float, v: float, exten
             for j in range(4):
                 oval(p, 0, side * (130 + j * 20), 6 - j, 6 - j, ink if j % 2 else paper, ink)
     elif key == "guilloche":
-        for k in range(round(41 * density)):
-            pts = [
-                polar(102 + 38 * math.cos(round(v) * a + k * 0.1) + k * 0.82, a)
-                for a in (TAU * j / 420 for j in range(421))
-            ]
-            path(p, pts, mix(ink, foil, k / (42 * density)), 0.8)
+        samples = 196 if p.device().height() <= 254 else 420
+        p.setBrush(CLEAR)
+        for k, curve in enumerate(_guilloche_lines(round(41 * density), round(v), samples)):
+            p.setPen(pen(mix(ink, foil, k / (42 * density)), 0.8))
+            p.drawPolyline(curve)
     elif key == "compass":
         for r in (79, 83, 121, 126, 139):
             oval(p, 0, 0, r, r, None, ink if r in (83, 126) else shade, 1.5)

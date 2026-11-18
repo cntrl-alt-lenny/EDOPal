@@ -8,10 +8,16 @@ from PySide6.QtGui import QImage, QLinearGradient, QPainter
 from .catalog import COMMON, FRAMES, PALETTES, PATTERNS, Recipe
 from .drawing import Inks, mix
 from .imaging import HEIGHT, WIDTH, colour, ensure_gui
+from .industrial import INDUSTRIAL
+from .insignia import INSIGNIA
 from .landscapes import scene_plate
+from .materials import MATERIALS
+from .natural_history import NATURAL_HISTORY
 from .ornaments import draw_emblem, draw_frame
 from .plates import repeat_plate
 from .radial import radial_plate
+
+_ILLUSTRATIONS = {**INSIGNIA, **NATURAL_HISTORY, **MATERIALS, **INDUSTRIAL}
 
 
 def inks(palette: tuple[str, ...]) -> Inks:
@@ -27,8 +33,8 @@ def inks(palette: tuple[str, ...]) -> Inks:
     return tuple(stops)
 
 
-def render(recipe: Recipe) -> QImage:
-    """Render a version-one recipe to an opaque 708 by 1016 QImage."""
+def render(recipe: Recipe, *, thumbnail: bool = False) -> QImage:
+    """Render directly to an opaque 708 × 1016 print or a 177 × 254 gallery preview."""
     ensure_gui()
     if recipe.version != 1 or recipe.pattern not in PATTERNS or recipe.frame not in FRAMES:
         raise ValueError("Choose a supported pattern, frame and recipe version.")
@@ -47,11 +53,13 @@ def render(recipe: Recipe) -> QImage:
         raise ValueError("Use a whole number as the design seed.")
     c = inks(recipe.palette or PALETTES[spec.palette])
     c = tuple(mix(c[0], ink, params["contrast"]) for ink in c)
-    image = QImage(WIDTH, HEIGHT, QImage.Format.Format_RGB888)
+    divisor = 4 if thumbnail else 1
+    # Qt's native four-byte raster path is faster for antialiased line work.
+    image = QImage(WIDTH // divisor, HEIGHT // divisor, QImage.Format.Format_RGB32)
     image.fill(c[0])
     with QPainter(image) as p:
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.scale(2, 2)
+        p.scale(2 / divisor, 2 / divisor)
         wash = QLinearGradient(0, 0, 354, 508)
         for stop, amount in ((0, 0.53), (0.43, 0.04), (1, 0.22)):
             wash.setColorAt(stop, mix(c[0], c[1], amount))
@@ -63,7 +71,9 @@ def render(recipe: Recipe) -> QImage:
         detail = params[spec.parameters[len(COMMON)].key]
         extent = math.hypot(177, 254) / params["scale"] + 10
         args = (p, recipe.pattern, c, params["density"], detail, extent)
-        if recipe.pattern in (
+        if illustration := _ILLUSTRATIONS.get(recipe.pattern):
+            illustration(p, c, params["density"], detail, extent)
+        elif recipe.pattern in (
             "fans",
             "weave",
             "stars",
@@ -91,4 +101,4 @@ def render(recipe: Recipe) -> QImage:
         draw_frame(p, recipe.frame, c)
         if recipe.emblem:
             draw_emblem(p, recipe.emblem, c)
-    return image
+    return image.convertToFormat(QImage.Format.Format_RGB888)
