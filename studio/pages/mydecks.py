@@ -10,8 +10,6 @@ from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
-    QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -21,9 +19,11 @@ from decks import DeckIndexer, Library, Preview, SavedDeck, Sections, encode_ydk
 from decks.duplicates import DuplicateIndex
 from decks.history import DeckStore, Ledger, Track
 from studio import theme as t
-from studio.context import AppContext, Installation
+from studio.context import AppContext, GameOpenError, Installation
 from studio.pages.base import Page
+from studio.pages.decks_dialogs import confirm_deck_change
 from studio.pages.decks_handoff import HD_ARTWORK, saved_deck_selection
+from studio.pages.decks_layout import DeckPageScroll
 from studio.pages.mydecks_checks import Comparison, FormatCheck
 from studio.pages.mydecks_copies import CopyReview
 from studio.pages.mydecks_duplicates import DuplicatesScreen
@@ -38,9 +38,9 @@ from studio.pages.mydecks_history import HistoryScreen, MissingDecks
 from studio.pages.mydecks_library import Collection
 from studio.pages.mydecks_logic import file_problem, quantity, scan_collection
 from studio.pages.mydecks_odds import OddsScreen
-from studio.pages.mydecks_widgets import Contents, DeckHero, Screen, button
+from studio.pages.mydecks_widgets import Contents, Screen, button
 from studio.tasks import Job, WorkerContext
-from studio.widgets import ElidedLabel, Panel, label, margins
+from studio.widgets import ElidedLabel, GameClosedBlock, Panel, SectionHeader, label, margins
 from tournament_decks import DeckError
 
 
@@ -61,6 +61,7 @@ class MyDecksPage(Page):
         self.receipts: dict[Path, Receipt] = {}
         self.pending_selection: tuple[Path, ...] = ()
         self.retry_action: Callable | None = None
+        self.blocked_action: Callable[[], None] | None = None
         body = QVBoxLayout(self)
         margins(body, 0)
         body.setSpacing(0)
@@ -73,12 +74,22 @@ class MyDecksPage(Page):
         status_row = QHBoxLayout()
         self.message = label("", "body", True)
         status_row.addWidget(self.message, 1)
-        self.retry = button("Retry", self._retry, "primary")
+        self.retry = button("Retry", self._retry)
         status_row.addWidget(self.retry)
         status_panel.body.addLayout(status_row)
         self.status.hide()
         body.addWidget(self.status)
-        self.scroll = QScrollArea()
+        self.blocked = QWidget()
+        recovery = QVBoxLayout(self.blocked)
+        recovery.setContentsMargins(t.XXL, t.XL, t.XXL, t.XL)
+        self.game_block = GameClosedBlock()
+        self.game_block.setMaximumWidth(t.CONTENT_MAX - 2 * t.XXL)
+        self.game_block.retry.clicked.connect(self._retry_block)
+        recovery.addWidget(self.game_block)
+        recovery.addStretch()
+        self.blocked.hide()
+        body.addWidget(self.blocked, 1)
+        self.scroll = DeckPageScroll()
         self.scroll.setWidgetResizable(True)
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.slide = QPropertyAnimation(self)
@@ -98,7 +109,7 @@ class MyDecksPage(Page):
         if selection.paths:
             self.pending_selection, selection.paths = selection.paths, ()
             self.refresh()
-        elif len(self.history) < 2:
+        elif len(self.history) < 2 and self.blocked_action is None:
             self.refresh()
 
     def hidden(self) -> bool:
@@ -111,6 +122,7 @@ class MyDecksPage(Page):
 
     def installation_changed(self, installation: Installation) -> None:
         self._cancel_scan()
+        self._clear_block()
         self.epoch += 1
         self.pending_selection = ()
         self.index = DeckIndexer(Path(installation.path)) if installation.path else None
@@ -136,6 +148,7 @@ class MyDecksPage(Page):
         screen.deleteLater()
 
     def _push(self, screen: Screen, *, root: bool = False) -> None:
+        self._clear_block()
         self.slide.stop()
         old = self.scroll.takeWidget()
         if old:
@@ -145,8 +158,10 @@ class MyDecksPage(Page):
             for previous in self.history:
                 self._forget(previous)
             self.history.clear()
+        if screen.back is not None and self.history:
+            screen.back.setText(self.view.return_name)
         self.history.append(screen)
-        self.scroll.setWidget(screen)
+        self._display(screen)
         self.scroll.verticalScrollBar().setValue(0)
         self.status.hide()
         if screen.initial:
@@ -164,34 +179,55 @@ class MyDecksPage(Page):
     def escape(self) -> bool:
         if self.writing or self._saving_odds():
             return True
+        if self.blocked_action is not None:
+            self._clear_block()
+            if self.view.initial:
+                self.view.initial.setFocus()
+            return True
         if len(self.history) < 2:
             return False
         self.slide.stop()
         self.scroll.takeWidget()
         self._forget(self.history.pop())
         self.status.hide()
-        self.scroll.setWidget(self.view)
+        self._display(self.view)
         if self.view.initial:
             self.view.initial.setFocus()
         self._slide_in(-t.XL)
         return True
 
+    def _display(self, screen: Screen) -> None:
+        fixed = isinstance(
+            screen,
+            (
+                Collection,
+                HistoryScreen,
+                OddsScreen,
+                DuplicatesScreen,
+                MissingDecks,
+                CopyReview,
+                FormatCheck,
+                Comparison,
+            ),
+        ) or hasattr(screen, "contents")
+        self.scroll.setWidgetResizable(not fixed)
+        self.scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff if fixed else Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.scroll.setWidget(screen)
+
     def _state(
         self, title: str, description: str, action: str = "", callback: Callable | None = None
     ) -> None:
         screen = Screen()
-        hero = DeckHero(description)
-        hero.headline.setText(title)
-        hero.setMinimumHeight(t.HERO_MIN)
-        hero.setMaximumHeight(t.HERO_MAX)
-        hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        screen.body.addWidget(hero, 1)
+        screen.body.addWidget(SectionHeader(title, description))
         if action and callback:
             screen.initial = button(action, callback, "primary")
             screen.body.addWidget(screen.initial, 0, Qt.AlignmentFlag.AlignLeft)
+        screen.body.addStretch()
         self._push(screen, root=True)
 
-    def refresh(self) -> None:
+    def refresh(self, *, after: Callable[[], None] | None = None) -> None:
         if self.writing:
             return
         self.epoch += 1
@@ -253,9 +289,11 @@ class MyDecksPage(Page):
             )
             self._push(view, root=True)
             current_paths = {d.path for d in lib.decks}
-            if latest := next(
-                (r for r in reversed(self.receipts.values()) if r.path in current_paths),
-                None,
+            if not lib.issues and (
+                latest := next(
+                    (r for r in reversed(self.receipts.values()) if r.path in current_paths),
+                    None,
+                )
             ):
                 self._receipt_bar(view, latest)
             if self.pending_selection:
@@ -265,6 +303,8 @@ class MyDecksPage(Page):
                 self.pending_selection = ()
             if not state_available:
                 self._notice("Deck history and card groups are unavailable. Refresh to try again.")
+            if after:
+                after()
 
         job.progress.connect(tools_ready)
         job.result.connect(ready)
@@ -300,7 +340,21 @@ class MyDecksPage(Page):
         )
 
     def check(self, deck: SavedDeck | None = None, selected: int = 0) -> None:
-        self._push(FormatCheck(self.lib, self.ctx.tasks, self.escape, self.check, deck, selected))
+        def scanned() -> None:
+            current = next((d for d in self.lib.decks if deck and d.path == deck.path), None)
+            self.check(current)
+
+        self._push(
+            FormatCheck(
+                self.lib,
+                self.ctx.tasks,
+                self.escape,
+                self.check,
+                deck,
+                selected,
+                lambda: self.refresh(after=scanned),
+            )
+        )
 
     def compare(self) -> None:
         self._push(Comparison(self.lib, self.ctx.tasks, self.escape))
@@ -316,9 +370,7 @@ class MyDecksPage(Page):
         self._push(MissingDecks(self.ledger.missing, self.lib.game, self.escape, self.show_history))
 
     def show_odds(self, track: Track, deck: Preview) -> None:
-        self._push(
-            OddsScreen(track, deck, self.store, self.ctx.tasks, self.escape, self.ctx.confirm)
-        )
+        self._push(OddsScreen(track, deck, self.store, self.ctx.tasks, self.escape, self._confirm))
 
     def show_duplicates(self, deck: SavedDeck | None = None) -> None:
         self._push(
@@ -330,12 +382,13 @@ class MyDecksPage(Page):
     def import_code(self, deck: SavedDeck | None = None) -> None:
         screen = CopyReview(self.lib, self.ctx.tasks, self.escape, self._save, deck)
         if deck is None:
-            screen.code.textChanged.connect(self.status.hide)
-        screen.name.textChanged.connect(self.status.hide)
+            screen.code.textChanged.connect(self._clear_write_notice)
+        screen.name.textChanged.connect(self._clear_write_notice)
         self._push(screen)
 
     def detail(self, deck: SavedDeck) -> None:
         screen = Screen(deck.name, self.escape)
+        screen.return_name = "Deck details"
         path = ElidedLabel()
         path.set_value(str(deck.path), deck.path.relative_to(self.lib.game).as_posix())
         screen.body.addWidget(path)
@@ -360,13 +413,6 @@ class MyDecksPage(Page):
                 buttons.addWidget(button("Repair a copy", lambda: self.import_code(deck)))
         buttons.addStretch()
         buttons.addWidget(button("Check format", lambda: self.check(deck), "secondary", "check"))
-        if deck.preview:
-            artwork = button(HD_ARTWORK, lambda: self._art(deck), "primary", "download")
-            artwork.setEnabled(self.ctx.installation.ready)
-            artwork.setToolTip(
-                "Open EDOPro to download its cards first." if not artwork.isEnabled() else ""
-            )
-            buttons.addWidget(artwork)
         panel.body.addLayout(buttons)
         track = self.ledger.active.get(deck.path)
         similar = deck.path in self.duplicates.by_path
@@ -399,9 +445,20 @@ class MyDecksPage(Page):
                 )
             )
             screen.body.addStretch()
-        screen.body.addWidget(
-            label("To edit cards, open Deck Edit in EDOPro and choose this deck.", "muted", True)
-        )
+        if deck.preview:
+            footer = QHBoxLayout()
+            footer.addWidget(
+                label(
+                    "To edit cards, open Deck Edit in EDOPro and choose this deck.", "muted", True
+                ),
+                1,
+            )
+            artwork = button(HD_ARTWORK, lambda: self._art(deck), "primary", "download")
+            artwork.setEnabled(self.ctx.installation.ready)
+            if not artwork.isEnabled():
+                artwork.setToolTip("Open EDOPro to download its cards first.")
+            footer.addWidget(artwork)
+            screen.body.addLayout(footer)
         self._push(screen)
         if receipt := self.receipts.get(deck.path):
             self._receipt_bar(screen, receipt)
@@ -426,6 +483,25 @@ class MyDecksPage(Page):
     def _retry(self) -> None:
         if self.retry_action and not self.writing:
             self.retry_action()
+
+    def _clear_block(self) -> None:
+        self.blocked_action = None
+        self.blocked.hide()
+        self.scroll.show()
+
+    def _clear_write_notice(self) -> None:
+        self.retry_action = None
+        self.status.hide()
+        self._clear_block()
+
+    def _retry_block(self) -> None:
+        if self.blocked_action is not None and not self.writing:
+            action = self.blocked_action
+            self._clear_block()
+            action()
+
+    def _confirm(self, action: str, message: str) -> bool:
+        return confirm_deck_change(self, action, message)
 
     def _reveal(self, path: Path) -> None:
         epoch = self.epoch
@@ -477,8 +553,8 @@ class MyDecksPage(Page):
         screen.body.insertLayout(1, row)
 
     def _undo(self, receipt: Receipt) -> None:
-        if not self.ctx.confirm(
-            "Remove saved copy?", f"Remove only {receipt.path.name} from your deck library?"
+        if not self._confirm(
+            "Remove saved copy", f"Remove only {receipt.path.name} from your deck library?"
         ):
             return
         game = self.lib.game
@@ -510,7 +586,18 @@ class MyDecksPage(Page):
 
         def failed(error: BaseException) -> None:
             release()
-            self._notice(str(error), lambda: self._write(title, work, done))
+
+            def retry() -> None:
+                self._write(title, work, done)
+
+            if isinstance(error, GameOpenError):
+                self.status.hide()
+                self.scroll.hide()
+                self.blocked_action = retry
+                self.blocked.show()
+                self.game_block.show_reason(str(error))
+            else:
+                self._notice(str(error), retry)
 
         job.result.connect(success)
         job.error.connect(failed)

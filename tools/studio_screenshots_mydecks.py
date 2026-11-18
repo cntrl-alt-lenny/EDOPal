@@ -305,7 +305,7 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
             "studio.pages.mydecks_files._game_running",
             side_effect=lambda _: gate.wait(5) and False,
         ):
-            page.retry.click()
+            page.game_block.retry.click()
             try:
                 shot("18-saving", held=True)
             finally:
@@ -330,6 +330,9 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         lib_view = page.view
         lib_view.refresh.click()
         lib_view = collection()
+        lib_view.duplicates.click()
+        shot("41-no-duplicates")
+        page.escape()
         lib_view.check.click()
         shot("25-no-lists")
         page.escape()
@@ -353,8 +356,11 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         (Path(selected.path) / "lflists").mkdir(exist_ok=True)
         (Path(selected.path) / "lflists/incomplete.conf").write_text("unfinished", encoding="utf-8")
         page.view.refresh.click()
-        collection().issue_btn.click()
+        collection()
+        shot("40-scan-warning-indicator")
+        page.view.issue_btn.click()
         shot("28-scan-warning")
+        page.view.issue_btn.click()
         lib_view = page.view
         deck = page.lib.search("Empty Jar - Athens")[0]
         old = deck.preview.sections

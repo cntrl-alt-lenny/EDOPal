@@ -11,6 +11,7 @@ from artwork_flow import valid_decks
 from card_databases import installed_card_names
 from goat_versions import GoatVersions, installed_aliases, installed_whitelist
 from music.settings import _game_running
+from studio.pages.decks_dialogs import GAME_CHECK_DETAIL, GAME_OPEN_DETAIL
 from tournament_decks import (
     PAGE_SIZE,
     Deck,
@@ -106,11 +107,9 @@ def require_game_closed(game: Path) -> None:
     try:
         opened = _game_running(game)
     except OSError as exc:
-        raise GameOpen(
-            "Couldn’t check whether EDOPro is open. Close EDOPro, then try again."
-        ) from exc
+        raise GameOpen(GAME_CHECK_DETAIL) from exc
     if opened:
-        raise GameOpen("Close EDOPro, then choose Retry.")
+        raise GameOpen(GAME_OPEN_DETAIL)
 
 
 @dataclass(frozen=True)
@@ -148,6 +147,7 @@ class ImportReceipt:
     historical_changes: int
     review: tuple[GoatMatch, ...]
     indexed: bool
+    game_open: bool = False
 
     @property
     def paths(self) -> tuple[Path, ...]:
@@ -175,6 +175,7 @@ def import_decks(
     unresolved: set[int] = set()
     matched = goat_changes = 0
     blocked = ""
+    game_open = False
     local: dict[int, str] = {}
     goat = None
     historical = batch.historical and is_goat(batch.event)
@@ -192,6 +193,7 @@ def import_decks(
                 goat = GoatVersions(limits, local, installed_aliases(game, local))
     except (OSError, DeckError) as exc:
         blocked = str(exc)
+        game_open = isinstance(exc, GameOpen)
 
     for deck in batch.decks:
         if blocked or cancel.is_set():
@@ -216,6 +218,7 @@ def import_decks(
             saved = publish_deck(game, batch.event, deck, cards, goat_versions=historical)
         except GameOpen as exc:
             blocked = str(exc)
+            game_open = True
             break
         except (DeckError, OSError) as exc:
             entries.append(ImportEntry(deck, reason=str(exc)))
@@ -258,6 +261,7 @@ def import_decks(
         goat_changes,
         tuple(review),
         bool(local),
+        game_open,
     )
 
 
@@ -288,6 +292,7 @@ def resume_import(
         receipt.historical_changes + retry.historical_changes,
         receipt.review + retry.review,
         receipt.indexed or retry.indexed,
+        retry.game_open,
     )
 
 

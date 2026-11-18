@@ -34,17 +34,15 @@ class DuplicatesScreen(Screen):
         self.job: Job | None = None
         self.generation = 0
         if not duplicates.groups:
-            empty = self.panel()
-            empty.body.addStretch()
-            empty.body.addWidget(label("No identical or similar decks", "heading", True))
-            empty.body.addWidget(
+            self.body.addWidget(label("No identical or similar decks", "subheading", True))
+            self.body.addWidget(
                 label(
                     f"Similar decks are up to {NEAR_EDITS} card changes apart. Refresh after saving new copies in EDOPro.",
                     "body",
                     True,
                 )
             )
-            empty.body.addStretch()
+            self.body.addStretch()
             return
         panel = self.panel()
         filters = QHBoxLayout()
@@ -96,7 +94,7 @@ class DuplicatesScreen(Screen):
         )
         actions.addWidget(self.open)
         actions.addWidget(self.folder)
-        panel.body.addLayout(actions)
+        self.body.addLayout(actions)
         self.files.itemActivated.connect(lambda _: self.open.click())
         self.files.currentRowChanged.connect(self._compare)
         self.search.textChanged.connect(self._filter)

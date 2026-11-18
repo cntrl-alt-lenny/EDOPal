@@ -5,15 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QSizePolicy
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 from decks import Library, Preview, SavedDeck, preview_repair, preview_ydke
 from decks.sharing import MAX_CODE
 from studio import theme as t
+from studio.pages.mydecks_checks import ReadingPane
 from studio.pages.mydecks_logic import card_name
 from studio.pages.mydecks_widgets import Contents, Screen, button
 from studio.tasks import Job, TaskRunner, WorkerContext
-from studio.widgets import Hero, Panel, label
+from studio.widgets import Panel, SectionHeader, label, margins
 
 CODE_HELP = "Paste a sharing code to review the Main, Extra and Side decks."
 
@@ -57,24 +59,28 @@ class CopyReview(Screen):
         self.name.setPlaceholderText("New deck name")
         self.name.setText(f"{deck.name} repaired" if deck else "Imported deck")
         self.save_btn = button("Save new copy", self.submit, "primary", "download")
+        self.review_area = QWidget()
+        self.review_body = QVBoxLayout(self.review_area)
+        margins(self.review_body, 0)
+        self.body.addWidget(self.review_area, 1)
+        self.actions = Panel(t.MD)
+        self.body.addWidget(self.actions)
         row = QHBoxLayout()
         row.addWidget(label("New deck name", "muted"))
         row.addWidget(self.name, 1)
         row.addWidget(self.save_btn)
-        self.form.body.addLayout(row)
+        self.actions.body.addLayout(row)
         self.note = label("", "muted", True)
-        self.form.body.addWidget(self.note)
+        self.actions.body.addWidget(self.note)
         self.save_btn.setEnabled(False)
         self.name.textChanged.connect(self.enable_save)
         self.name.returnPressed.connect(self.submit)
-        self.guide = Hero(
-            "Sharing codes",
+        self.guide = SectionHeader(
             "Share from a deck",
             "In My decks, open a saved deck and choose Copy code. Another player can paste that code here.",
-            "deck",
         )
-        self.body.addWidget(self.guide, 1)
-        self.guide.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.review_body.addWidget(self.guide, 0, Qt.AlignmentFlag.AlignTop)
+        self.review_body.addStretch()
         self.enable_save()
         if deck:
             repair = preview_repair(deck.preview, lib.catalog)
@@ -90,6 +96,12 @@ class CopyReview(Screen):
             self.message.setText(
                 "\n".join(lines) or "Every card in this deck is already recognised."
             )
+            if len(lines) > 2:
+                report = ReadingPane("Suggested card replacements")
+                report.setPlainText(self.message.text())
+                report.setMaximumHeight(t.TILE_H + t.XL)
+                self.message.hide()
+                self.form.body.addWidget(report)
             self.display(repair.copy)
             if not repair.changes:
                 self.reviewed = None
@@ -98,6 +110,7 @@ class CopyReview(Screen):
     def enable_save(self) -> None:
         name = self.name.text().strip()
         self.save_btn.setEnabled(bool(self.reviewed and name))
+        self.actions.setVisible(self.reviewed is not None)
         notes = []
         if self.reviewed and self.duplicate:
             notes.append(f"These cards are already saved in {self.duplicate}.")
@@ -115,7 +128,7 @@ class CopyReview(Screen):
         self.reviewed = None
         self.enable_save()
         if self.contents:
-            self.body.removeWidget(self.contents)
+            self.review_body.removeWidget(self.contents)
             self.contents.hide()
             self.contents.deleteLater()
             self.contents = None
@@ -188,4 +201,4 @@ class CopyReview(Screen):
         self.enable_save()
         self.contents = Contents(self.runner, self.lib.game, reviewed)
         self.guide.hide()
-        self.body.insertWidget(self.body.count() - 1, self.contents, 1)
+        self.review_body.insertWidget(0, self.contents, 1)

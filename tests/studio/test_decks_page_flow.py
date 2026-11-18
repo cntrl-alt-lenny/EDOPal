@@ -148,7 +148,7 @@ def test_game_reopens_between_downloads_and_retry_preserves_undo(
     batch = flow.ImportBatch(tmp_path, GOAT, DECKS)
     client = library(monkeypatch, download)
     receipt = flow.import_decks(batch, client, CancelEvent(), lambda _: None)
-    assert receipt.blocked == "Close EDOPro, then choose Retry."
+    assert receipt.game_open and receipt.blocked == "EDOPro is open in the selected game folder."
     assert len(receipt.created) == 1
     assert len(list((tmp_path / "deck").iterdir())) == 1
     opened = False

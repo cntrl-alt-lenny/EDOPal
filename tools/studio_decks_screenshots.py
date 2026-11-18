@@ -240,15 +240,12 @@ def render_decks(
             browser.standings.itemActivated.emit(item, 0)
 
     def capture_preview(name: str) -> None:
-        scroll = page.scrolls[browser]
-        saved_scroll = scroll.verticalScrollBar().value()
         if browser.layout_mode == "stacked":
-            scroll.ensureWidgetVisible(page.preview)
+            browser.show_preview()
         cards = page.preview.contents.cards
         if page.preview.contents.isVisible() and cards.verticalScrollBar().value() == 0:
             settle(lambda: len(cards.thumbnails.cache) >= 3)
         capture(name)
-        scroll.verticalScrollBar().setValue(saved_scroll)
 
     def scroll_cards(group: str) -> None:
         cards = page.preview.contents.cards
@@ -277,7 +274,7 @@ def render_decks(
         capture("02-awaiting-cards")
         window.ctx.set_installation(selected)
         settle(lambda: browser.standings.topLevelItemCount() > 0 and page.goat_available)
-        settle(page.preview.contents.isVisible)
+        settle(lambda: 1 in page.preview_cache)
         capture("03-standings")
         cards = page.preview.contents.cards
         capture_preview("04-preview")
@@ -286,6 +283,7 @@ def render_decks(
         scroll_cards("Side")
         capture_preview("17-side")
         cards.scrollToTop()
+        browser.show_standings()
         if browser.open_events.isVisible():
             browser.open_events.click()
             capture("24-browse-events")
@@ -301,7 +299,7 @@ def render_decks(
         settle(page.preview.contents.isVisible)
 
         focus_deck(2)
-        settle(lambda: page.preview.message.title.text() == "Format Library is unreachable")
+        settle(lambda: page.preview.message.title.text() == "Format Library offline")
         capture_preview("22-preview-offline")
         archive.details_status.pop(3)
         focus_deck(3)
@@ -309,7 +307,7 @@ def render_decks(
         capture_preview("23-decklist-unpublished")
         archive.details_status.pop(4)
         focus_deck(0)
-        page.scrolls[browser].verticalScrollBar().setValue(0)
+        browser.show_standings()
 
         select(1)
         capture("06-no-public-decks")
@@ -324,10 +322,10 @@ def render_decks(
 
         archive.goat_open = True
         browser.save.click()
-        settle(lambda: page.view is page.results and not window.ctx.busy)
+        settle(lambda: page.view is page.blocked and not window.ctx.busy)
         capture("10-close-edopro")
         archive.goat_open = False
-        page.results.back.click()
+        page.escape()
         browser.goat.setChecked(True)
         browser.select_all.click()
         capture_preview("25-batch-with-preview")
@@ -353,20 +351,24 @@ def render_decks(
         browser.save.click()
         settle(lambda: page.view is page.results and not window.ctx.busy)
         capture("14-saved")
+        page.results.back.click()
+        settle(lambda: 3 in page.preview_cache)
+        capture("26-saved-selection")
+        browser.recent.click()
         page.results.open_saved.click()
         mydecks = window.pages["mydecks"]
         settle(lambda: isinstance(mydecks.view, Collection))
         window.animation.setCurrentTime(theme.MOTION_MS)
         shot("decks-20-selected-in-my-decks")
         window.navigate("decks")
-        with patch.object(window.ctx, "confirm", return_value=True):
+        with patch("studio.pages.decks_import.confirm_deck_change", return_value=True):
             page.results.undo.click()
             settle(lambda: page.results.title.value == "Import undone")
         capture("18-undone")
         page.results.back.click()
-        archive.fail = 5
-        browser.standings.setCurrentItem(browser.standings.topLevelItem(3))
-        browser.standings.topLevelItem(4).setSelected(True)
+        archive.fail = 6
+        browser.standings.setCurrentItem(browser.standings.topLevelItem(4))
+        browser.standings.topLevelItem(5).setSelected(True)
         browser.save.click()
         settle(lambda: page.view is page.results and not window.ctx.busy)
         page.results.rows.setCurrentItem(page.results.rows.topLevelItem(1))

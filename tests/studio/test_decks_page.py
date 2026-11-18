@@ -1,7 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event, get_ident
-from urllib.error import URLError
 
 import pytest
 from PySide6.QtCore import Qt
@@ -15,15 +14,20 @@ from studio.pages.decks import DecksPage
 from studio.pages.mydecks_library import Collection
 from studio.shell import StudioWindow
 from tools.studio_decks_screenshots import Archive, _install_preview_cards
-from tournament_decks import Deck, DeckError, DeckPreview
+from tournament_decks import Deck, DeckPreview
 
 
 def open_browser(
-    window: StudioWindow, monkeypatch: pytest.MonkeyPatch, archive: Archive | None = None
+    window: StudioWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    archive: Archive | None = None,
+    *,
+    size: tuple[int, int] = (1280, 800),
 ) -> tuple[DecksPage, Archive]:
     archive = archive or Archive()
     monkeypatch.setattr(tournament_decks, "_fetch", archive.response)
     monkeypatch.setattr(decks_flow, "_game_running", lambda _: archive.goat_open)
+    window.resize(*size)
     window.nav["decks"].click()
     page = window.current
     assert isinstance(page, DecksPage)
@@ -82,7 +86,8 @@ def test_search_paging_errors_cache_and_stale_events(
     b.next.click()
     qtbot.waitUntil(lambda: b.event_message.title.text() == "No tournaments found")
     assert b.page_number.text() == "Page 2" and not b.next.isEnabled()
-    b.previous.click()
+    assert not b.paging.isVisible()
+    b.event_message.retry.click()
     qtbot.waitUntil(lambda: bool(page.selection.decks))
     assert sum("page=1" in url for url in calls) == 1
     assert sum(url.endswith("/events/GFC-41") for url in calls) == 1
@@ -94,12 +99,13 @@ def test_search_paging_errors_cache_and_stale_events(
             if term == "Slow":
                 qtbot.waitUntil(entered.is_set)
                 assert b.event_message.title.text() == "Finding tournaments…"
-        qtbot.waitUntil(lambda: b.event_message.title.text() == "Format Library is unreachable")
+        qtbot.waitUntil(lambda: b.event_message.title.text() == "Format Library offline")
         assert b.event_message.retry.isVisible()
+        assert not b.standings_panel.isVisible() and not page.preview.isVisible()
     finally:
         release.set()
     qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
-    assert b.event_message.title.text() == "Format Library is unreachable"
+    assert b.event_message.title.text() == "Format Library offline"
     b.search.setText("Error")
     b.submit.click()
     qtbot.waitUntil(lambda: b.event_message.title.text() == "Search unavailable")
@@ -115,6 +121,7 @@ def test_search_paging_errors_cache_and_stale_events(
     qtbot.keyClick(b.events, Qt.Key.Key_Return)
     qtbot.waitUntil(lambda: b.standings_message.title.text() == "No public decklists")
     assert not b.save.isEnabled()
+    assert not page.preview.isVisible() and b.standings_message.retry.text() == "Browse events"
 
 
 def test_keyboard_preview_and_historical_artwork_handoff(
@@ -195,26 +202,28 @@ def test_game_open_retry_then_undo_is_scoped(
     qtbot.waitUntil(lambda: bool(page.selection.decks))
     archive.goat_open = True
     b.save.click()
-    qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
-    assert page.results.retry.isVisible()
+    qtbot.waitUntil(lambda: page.view is page.blocked and not window.ctx.busy)
+    assert page.blocked.block.retry.hasFocus()
+    assert not b.save.isVisible() and not page.results.isVisible()
+    assert page.imports.receipt is None
     assert set((game / "deck").iterdir()) == existing
     archive.goat_open = False
-    page.results.retry.click()
+    page.blocked.block.retry.click()
     qtbot.waitUntil(lambda: page.view is page.results and not window.ctx.busy)
     assert page.results.undo.isVisible()
     page.results.back.click()
+    assert not b.save.isEnabled() and b.save.text() == "Saved"
     b.recent.click()
-    monkeypatch.setattr(window.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr("studio.pages.decks_import.confirm_deck_change", lambda *_: True)
     archive.goat_open = True
     page.results.undo.click()
-    qtbot.waitUntil(
-        lambda: "Close EDOPro" in page.results.notice.message.text() and not window.ctx.busy
-    )
-    assert page.results.retry.isVisible()
+    qtbot.waitUntil(lambda: page.view is page.blocked and not window.ctx.busy)
     archive.goat_open = False
-    page.results.retry.click()
+    page.blocked.block.retry.click()
     qtbot.waitUntil(lambda: page.results.title.value == "Import undone")
     assert set((game / "deck").iterdir()) == existing
+    page.results.back.click()
+    assert b.save.isEnabled()
 
 
 def test_cancel_batch_blocks_navigation_and_preserves_completed_files(
@@ -247,18 +256,11 @@ def test_failed_preview_retry_and_moved_deck_refuses_handoff(
     make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
-    page, _ = open_browser(window, monkeypatch)
-    real_preview = page.library.preview
-    fail = True
-
-    def preview(deck: Deck) -> DeckPreview:
-        if fail:
-            raise DeckError("Published list temporarily unavailable.")
-        return real_preview(deck)
-
-    monkeypatch.setattr(page.library, "preview", preview)
+    archive = Archive()
+    archive.details_status[1] = "error"
+    page, _ = open_browser(window, monkeypatch, archive)
     qtbot.waitUntil(lambda: page.preview.message.retry.isVisible())
-    fail = False
+    archive.details_status.clear()
     page.preview.message.retry.click()
     qtbot.waitUntil(page.preview.contents.isVisible)
     page.browser.save.click()
@@ -295,6 +297,14 @@ def test_last_save_keeps_artwork_and_selects_the_saved_batch(
     qtbot.waitUntil(lambda: isinstance(mine.view, Collection))
     view = mine.view
     assert {view.model.rows[i.row()].deck.path for i in view.rows.selectedIndexes()} == paths
+    imported = {
+        view.model.rows[i.row()].title: view.model.rows[i.row()].tournament
+        for i in view.rows.selectedIndexes()
+    }
+    assert imported == {
+        "Chaos Control": "GFC-41 · Place 1 · Kai Sato",
+        "Goat Control": "GFC-41 · Place 2 · Morgan Ellis",
+    }
     qtbot.keyClick(view.rows, Qt.Key.Key_Return)
     qtbot.waitUntil(lambda: bool(mine.view.contents.cards.sections))
     main = mine.view.contents.cards.sections[0]
@@ -324,7 +334,7 @@ def test_preview_can_finish_off_page_and_retry_skips_completed_saves(
     make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
-    page, archive = open_browser(window, monkeypatch)
+    page = window.pages["decks"]
     entered, release = Event(), Event()
     load = page.library.preview
 
@@ -334,6 +344,7 @@ def test_preview_can_finish_off_page_and_retry_skips_completed_saves(
         return load(deck)
 
     monkeypatch.setattr(page.library, "preview", held)
+    _, archive = open_browser(window, monkeypatch)
     try:
         qtbot.waitUntil(entered.is_set)
         assert window.navigate("settings")
@@ -358,7 +369,7 @@ def test_inline_preview_discards_stale_deck_and_reuses_successes(
     make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
-    page, _ = open_browser(window, monkeypatch)
+    page = window.pages["decks"]
     load = page.library.preview
     entered, release = Event(), Event()
     calls: list[int] = []
@@ -371,6 +382,7 @@ def test_inline_preview_discards_stale_deck_and_reuses_successes(
         return load(deck)
 
     monkeypatch.setattr(page.library, "preview", held)
+    open_browser(window, monkeypatch)
     rows = page.browser.standings
     try:
         qtbot.waitUntil(entered.is_set)
@@ -393,39 +405,46 @@ def test_inline_preview_offline_and_unpublished(
     make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
-    page, _ = open_browser(window, monkeypatch)
-
-    def preview(deck: Deck) -> DeckPreview:
-        if deck.id == 1:
-            raise DeckError("Check your connection.") from URLError("offline")
-        raise DeckError("This decklist isn’t publicly available.")
-
-    monkeypatch.setattr(page.library, "preview", preview)
+    archive = Archive()
+    archive.details_status = {1: "offline", 2: "private"}
+    page, _ = open_browser(window, monkeypatch, archive)
     message = page.preview.message
-    qtbot.waitUntil(lambda: message.title.text() == "Format Library is unreachable")
+    qtbot.waitUntil(lambda: message.title.text() == "Format Library offline")
     assert message.retry.isVisible()
     rows = page.browser.standings
     rows.setFocus()
     qtbot.keyClick(rows, Qt.Key.Key_Down)
     qtbot.waitUntil(lambda: message.title.text() == "No public decklist")
     assert rows.hasFocus() and not message.retry.isVisible()
+    assert not page.browser.save.isEnabled()
+    assert page.selected_batch() is None
+    rows.topLevelItem(0).setSelected(True)
     assert page.browser.save.isEnabled()
+    assert page.browser.selection_count.text() == "2 selected · 1 unpublished"
+    assert [deck.id for deck in page.selected_batch().decks] == [1]
 
 
-def test_preview_stacks_at_minimum_size_and_reflows_wide(
+def test_preview_opens_in_place_at_minimum_size_and_reflows_wide(
     make_window: Callable[..., StudioWindow], qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
-    window.resize(960, 600)
-    page, _ = open_browser(window, monkeypatch)
+    page, _ = open_browser(window, monkeypatch, size=(960, 600))
     browser = page.browser
-    qtbot.waitUntil(page.preview.contents.isVisible)
+    qtbot.waitUntil(lambda: bool(page.preview_cache) and browser.layout_mode == "stacked")
     cards = page.preview.contents.cards
     assert browser.layout_mode == "stacked"
-    assert page.preview.y() > browser.standings_panel.y()
+    scroll = page.scrolls[browser]
+    assert not page.preview.isVisible() and browser.save.isVisible()
+    assert scroll.verticalScrollBar().maximum() == 0
+    assert (
+        scroll.viewport()
+        .rect()
+        .contains(browser.save.mapTo(scroll.viewport(), browser.save.rect().bottomRight()))
+    )
     browser.standings.setFocus()
     qtbot.keyClick(browser.standings, Qt.Key.Key_Return)
-    assert cards.hasFocus() and page.scrolls[browser].verticalScrollBar().value() > 0
+    assert browser.preview_back.hasFocus() and cards.isVisible() and browser.save.isVisible()
+    assert not browser.standings.isVisible() and scroll.verticalScrollBar().maximum() == 0
     qtbot.keyClick(cards, Qt.Key.Key_Escape)
     assert browser.standings.hasFocus()
 

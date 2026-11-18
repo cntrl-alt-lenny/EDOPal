@@ -9,7 +9,14 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from config import APP_NAME
 from decks import Catalog, Sections, compare, preview
@@ -106,9 +113,10 @@ class HistoryScreen(Screen):
         name.set_value(str(track.path), track.path.stem)
         self.body.addWidget(name)
         panel = self.panel()
+        self.history_panel = panel
         self.status = label("", "body", True)
         panel.body.addWidget(self.status)
-        self.retry = button("Retry", self.load)
+        self.retry = button("Retry", self.load, "primary")
         panel.body.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignLeft)
         area = QHBoxLayout()
         self.rows = QListWidget()
@@ -126,8 +134,7 @@ class HistoryScreen(Screen):
         area.addLayout(right, 3)
         panel.body.addLayout(area, 1)
         self.empty = label("", "body", True)
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        panel.body.addWidget(self.empty, 1)
+        panel.body.addWidget(self.empty)
         self.actions = Panel(t.MD)
         row = QHBoxLayout()
         self.name = QLineEdit()
@@ -137,7 +144,6 @@ class HistoryScreen(Screen):
         self.restore = button("Restore as a copy", self._restore, "primary", "download")
         row.addWidget(self.restore)
         self.actions.body.addLayout(row)
-        self.body.addWidget(self.actions)
         self.body.addWidget(
             label(
                 f"{APP_NAME} keeps up to {VERSIONS_PER_DECK} previous versions per deck for {RETENTION_DAYS} days.",
@@ -145,6 +151,9 @@ class HistoryScreen(Screen):
                 True,
             )
         )
+        self.body.addWidget(self.actions)
+        self.filler = QWidget()
+        self.body.addWidget(self.filler, 1)
         self.rows.currentRowChanged.connect(self._select)
         self.name.textChanged.connect(lambda text: self.restore.setEnabled(bool(text.strip())))
         self.load()
@@ -158,6 +167,8 @@ class HistoryScreen(Screen):
         for widget in (self.rows, self.report, self.compared_to, self.actions):
             widget.setVisible(visible)
         self.empty.setVisible(not visible)
+        self.filler.setVisible(not visible)
+        self.body.setStretchFactor(self.history_panel, int(visible))
 
     def load(self) -> None:
         self.leave()
@@ -208,7 +219,7 @@ class HistoryScreen(Screen):
         if not self.versions:
             self.status.setText("No previous versions yet")
             self.empty.setText(
-                f"{APP_NAME} has recorded this deck. After you save changes in EDOPro, refresh My decks to see the earlier version."
+                "Save changes in EDOPro, then refresh My decks to see the previous version."
             )
             return
         if timeline.missing:
