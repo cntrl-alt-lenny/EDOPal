@@ -1,6 +1,7 @@
 """One restore point per game. Record only files an artwork worker is about to publish."""
 
 import hashlib
+import logging
 import os
 import re
 import sqlite3
@@ -72,15 +73,11 @@ def _reconcile(conn: sqlite3.Connection, root: Path) -> bool:
     name, before, after, first, stage = row
     dest = _target(root, name)
     current = extras._signature(dest)
-    if current not in (before, after):
-        raise ArtworkStorageError(
-            f"{name} changed during sync. Your edit and restore data were kept."
-        )
     if stage:
         if not re.fullmatch(r"[0-9a-f]{32}", stage):
             raise ArtworkStorageError("Unrecognized staging file in the artwork restore data.")
         temp = extras._regular_path(root, dest.with_name(f".{dest.name}.{stage}.part"))
-        temp.unlink(missing_ok=True)
+        extras._unlink_stage(temp)
     with conn:
         if current == after:
             if first:
@@ -90,6 +87,10 @@ def _reconcile(conn: sqlite3.Connection, root: Path) -> bool:
                 "ON CONFLICT(name) DO UPDATE SET after=excluded.after"
             )
         conn.execute("DELETE FROM pending")
+    if current not in (before, after):
+        logging.getLogger(__name__).warning(
+            "Kept the newer edit to %s during artwork recovery.", name
+        )
     return current == after
 
 
@@ -149,26 +150,34 @@ class _Journal:
             except (ValueError, OSError, sqlite3.Error) as exc:
                 raise ArtworkStorageError(str(exc)) from exc
 
-    def prepare(
-        self, path: str | Path, data: bytes | bytearray | None, stage: str | None = None
-    ) -> Path | None:
+    def lock_installation(self) -> None:
+        """Acquire the artwork lock before entering any appearance writer."""
         if self.failure:
             raise self.failure
         if getattr(self.cfg, "dry_run", False) or getattr(self.cfg, "stats", False):
             raise ArtworkStorageError("Artwork cannot be changed during a preview.")
+        root = Path(self.cfg.edopro_path).resolve()
+        if self.root is None:
+            self.stack.enter_context(_lock(root))
+            self.root = root
+        elif self.root != root:
+            raise ArtworkStorageError("The installation changed during artwork sync.")
+
+    def prepare(
+        self, path: str | Path, data: bytes | bytearray | None, stage: str | None = None
+    ) -> Path | None:
         root = Path(self.cfg.edopro_path).resolve()
         location = Path(path)
         selected = Path(self.cfg.edopro_path)
         name = location.relative_to(
             selected if location.is_relative_to(selected) else root
         ).as_posix()
-        dest = _target(root, name)
+        _target(root, name)
+        self.lock_installation()
         if self.conn is None:
             db = _history(self.cfg)
             if db.resolve() != db:
                 raise OSError("The artwork restore folder links to another location.")
-            self.stack.enter_context(_lock(root))
-            self.root = root
             db.parent.mkdir(parents=True, exist_ok=True)
             self.conn = self.stack.enter_context(closing(sqlite3.connect(db)))
             self.conn.execute("PRAGMA auto_vacuum=FULL")
@@ -179,8 +188,6 @@ class _Journal:
             )
             # A previous process may have died between the replace and its SQLite commit.
             _reconcile(self.conn, root)
-        elif self.root != root:
-            raise OSError("The installation changed during artwork sync.")
         self.finish()
         dest = _target(root, name)
         old = dest.read_bytes() if dest.is_file() else None
@@ -218,9 +225,10 @@ class _Journal:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with temp.open("xb") as handle:
                     handle.write(data)
-                if dest.is_file():
-                    temp.chmod(dest.stat().st_mode)
+                mode = dest.stat().st_mode if dest.is_file() else None
                 os.replace(temp, extras._regular_path(self.root, dest))
+                if mode is not None:
+                    dest.chmod(mode)
             self.finish()
             return True
         except (ValueError, OSError, sqlite3.Error) as exc:
@@ -255,7 +263,7 @@ def remember_changes(cfg: config.Config) -> Iterator[_Journal]:
                 _active.reset(token)
 
 
-def restore_artwork(cfg: config.Config) -> int:
+def restore_artwork(cfg: config.Config, *, skipped: list[str] | None = None) -> int:
     if getattr(cfg, "dry_run", False):
         return 0
     root = Path(cfg.edopro_path).resolve()
@@ -273,44 +281,55 @@ def restore_artwork(cfg: config.Config) -> int:
             ).fetchone():
                 locks.enter_context(appearance_lock(root))
 
-            # Check the whole change before restoring any files. Recheck each write as
-            # the player may have edited their game or interrupted a previous restore.
-            def entries() -> Iterator[tuple[str, Path, bytes | None, bool]]:
-                for name, original, before, after in conn.execute(
-                    "SELECT name, original, before, after FROM changes"
-                ):
-                    dest = _target(root, name)
-                    current = extras._signature(dest)
-                    if current not in (before, after):
-                        raise ValueError(
-                            f"{dest.name} has changed since this sync. Your edit has been kept."
-                        )
-                    if _digest(original) != before:
-                        raise ValueError(f"The restore copy of {dest.name} could not be verified.")
-                    yield name, dest, original, current != before
+            # Verify every backup before changing files. An edited destination only
+            # affects its own row and can be retried after a partial restore.
+            for name, original, before in conn.execute(
+                "SELECT name, original, before FROM changes"
+            ):
+                dest = _target(root, name)
+                if _digest(original) != before:
+                    raise ValueError(f"The restore copy of {dest.name} could not be verified.")
 
-            for _ in entries():
-                pass
             restored = 0
+            completed = []
+            edited = []
             ids = set()
-            for name, dest, original, needed in entries():
-                if name.startswith("pics/") and not name.startswith("pics/field/"):
-                    ids.add(dest.stem)
-                if needed:
+            for name, original, before, after in conn.execute(
+                "SELECT name, original, before, after FROM changes ORDER BY name"
+            ):
+                dest = _target(root, name)
+                current = extras._signature(dest)
+                if current not in (before, after):
+                    edited.append(name)
+                    continue
+                if current != before:
                     if original is None:
                         dest.unlink()
                     else:
                         extras._atomic_write(dest, original)
                     restored += 1
-        # A reverted era image must be eligible for the next artwork-policy refresh.
-        applied = config._load_config_file(cfg.config_path).get("era_art_applied", {})
-        folder = os.path.normcase(os.path.abspath(cfg.edopro_path))
-        if isinstance(applied, dict) and isinstance(applied.get(folder), dict):
-            policies = applied[folder]
-            if ids.intersection(policies):
-                applied[folder] = {key: val for key, val in policies.items() if key not in ids}
-                if not config.save_setting(cfg.config_path, "era_art_applied", applied):
-                    raise OSError("Could not finish saving artwork preferences. Retry the restore.")
-            cfg.era_art_applied = applied
-        db.unlink()
+                completed.append(name)
+                if name.startswith("pics/") and not name.startswith("pics/field/"):
+                    ids.add(dest.stem)
+            # A reverted era image must be eligible for the next artwork-policy refresh.
+            applied = config._load_config_file(cfg.config_path).get("era_art_applied", {})
+            folder = os.path.normcase(os.path.abspath(cfg.edopro_path))
+            if isinstance(applied, dict) and isinstance(applied.get(folder), dict):
+                policies = applied[folder]
+                if ids.intersection(policies):
+                    applied[folder] = {key: val for key, val in policies.items() if key not in ids}
+                    if not config.save_setting(cfg.config_path, "era_art_applied", applied):
+                        raise OSError(
+                            "Could not finish saving artwork preferences. Retry the restore."
+                        )
+                cfg.era_art_applied = applied
+            if edited:
+                with conn:
+                    conn.executemany(
+                        "DELETE FROM changes WHERE name=?", ((name,) for name in completed)
+                    )
+        if not edited:
+            db.unlink()
+        elif skipped is not None:
+            skipped.extend(edited)
         return restored

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from collections.abc import Callable
 from contextlib import ExitStack
 from functools import partial
@@ -40,16 +41,29 @@ def _backup_dir(root: Path, config_path: str | Path) -> Path:
     return Path(config_path).resolve().parent / "extras-backups" / install_id
 
 
+def _unlink_stage(path: Path) -> None:
+    # A stage left by an older writer may carry its destination's Windows read-only bit.
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    # Changing permissions on a link could also change the player's own file.
+    if stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not info.st_mode & stat.S_IWUSR:
+        path.chmod(info.st_mode | stat.S_IWUSR)
+    path.unlink(missing_ok=True)
+
+
 def _atomic_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
         staged = Path(temporary.name)
     try:
         staged.write_bytes(data)
-        staged.chmod(path.stat().st_mode if path.is_file() else 0o644)
+        mode = path.stat().st_mode if path.is_file() else 0o644
         staged.replace(path)
+        path.chmod(mode)
     finally:
-        staged.unlink(missing_ok=True)
+        _unlink_stage(staged)
 
 
 def _publish(root: Path, backups: Path, relative: str | Path, content: bytes) -> None:

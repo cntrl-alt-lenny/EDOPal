@@ -39,6 +39,12 @@ class ParseYdkTests(unittest.TestCase):
 
         self.assertEqual(main.parse_ydk(path), {46986414, 89631139})
 
+    def test_bad_utf8_does_not_hide_other_card_ids(self) -> None:
+        path = os.path.join(self.temp_dir.name, "deck.ydk")
+        with open(path, "wb") as deck:
+            deck.write(b"#name \xff\n101\n3\xff4\n!side\n202\n")
+        self.assertEqual(main.parse_ydk(path), {101, 202})
+
     def test_missing_file_returns_empty_set(self):
         ghost = os.path.join(self.temp_dir.name, "nope.ydk")
         self.assertEqual(main.parse_ydk(ghost), set())
@@ -121,6 +127,13 @@ class PruneOrphansTests(unittest.TestCase):
         self.assertEqual(pruned, 0)
         # All four files should still be there.
         self.assertEqual(len(os.listdir(self.pics)), 4)
+
+    def test_non_ascii_and_formatted_names_do_not_stop_prune(self) -> None:
+        names = {"1_000.jpg", "+100.jpg", "-100.jpg", "１２３.jpg"}
+        for name in names | {"999.jpg"}:
+            self._touch(name)
+        self.assertEqual(main.prune_orphan_images(self.pics, {101}, cfg=self.cfg), 1)
+        self.assertEqual(set(os.listdir(self.pics)), names)
 
     def test_missing_pics_dir_returns_zero(self):
         self.assertEqual(

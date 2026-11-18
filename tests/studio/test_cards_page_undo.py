@@ -70,26 +70,30 @@ def test_real_sync_and_restore_including_extras(
 
 def test_undo_preserves_later_edits_and_retries_after_partial_restore(game: Config) -> None:
     pics = Path(game.pics_path)
-    one, two = pics / "1001.jpg", pics / "2001.jpg"
+    one, two, three = (pics / f"{cid}.jpg" for cid in (1001, 2001, 3001))
     old = one.read_bytes()
     with remember_changes(game):
-        for path in (one, two):
+        for path in (one, two, three):
             record_artwork_change(path, b"new")
             path.write_bytes(b"new")
     with remember_changes(game):
         pass
     two.write_bytes(b"player edit")
-    with pytest.raises(ValueError, match="has changed"):
-        restore_artwork(game)
-    assert one.read_bytes() == b"new" and two.read_bytes() == b"player edit"
-    two.write_bytes(b"new")
-    one.write_bytes(old)
+    three.unlink()  # Already restored by an interrupted undo.
     folder = os.path.normcase(game.edopro_path)
     assert config.save_setting(
         game.config_path, "era_art_applied", {folder: {"1001": "hd-v2", "1002": "original-v1"}}
     )
-    assert restore_artwork(game) == 1
-    assert one.read_bytes() == old and not two.exists()
+    skipped = []
+    assert restore_artwork(game, skipped=skipped) == 1
+    assert skipped == ["pics/2001.jpg"] and has_restore(game)
+    assert one.read_bytes() == old and two.read_bytes() == b"player edit"
+    one.write_bytes(b"later edit to an already restored file")
+    two.write_bytes(b"new")
+    skipped.clear()
+    assert restore_artwork(game, skipped=skipped) == 1
+    assert skipped == [] and not has_restore(game)
+    assert one.read_bytes().startswith(b"later edit") and not two.exists()
     assert config._load_config_file(game.config_path)["era_art_applied"] == {
         folder: {"1002": "original-v1"}
     }
@@ -105,3 +109,45 @@ def test_partial_run_and_installation_boundaries(game: Config, tmp_path: Path) -
         record_artwork_change(tmp_path / "external.jpg", b"wrong folder")
     assert restore_artwork(game) == 1
     assert not addition.exists()
+
+
+def test_journal_finish_error_shows_storage_outcome(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artwork_flow import STORAGE_MESSAGE, ArtworkStorageError
+    from studio.pages.cards_undo import _Journal
+
+    async def partial_sync(_: Config) -> main.DownloadStats:
+        stats = main.DownloadStats()
+        stats.ok_hd = 1
+        return stats
+
+    def refused(_: _Journal) -> None:
+        raise ArtworkStorageError("101.jpg is in use")
+
+    window = make_window(partial_sync)
+    cards = window.current
+    monkeypatch.setattr(_Journal, "finish", refused)
+    cards.options.start.click()
+    qtbot.waitUntil(lambda: cards.state == "results")
+    assert cards.summary.title == "Couldn't save artwork"
+    assert STORAGE_MESSAGE in cards.summary.note and cards.summary.first[0] == "1"
+
+
+def test_partial_undo_shows_edited_file_and_keeps_undo_available(
+    make_window: Callable, qtbot: QtBot
+) -> None:
+    window = make_window()
+    cards = window.current
+    cfg = window.ctx.cfg
+    pics = Path(cfg.pics_path)
+    one, two = pics / "92001.jpg", pics / "92002.jpg"
+    with remember_changes(cfg) as writer:
+        writer.publish(one, b"installed")
+        writer.publish(two, b"installed")
+    two.write_bytes(b"player edit")
+    cards._restore()
+    qtbot.waitUntil(lambda: cards.state == "results")
+    assert "1 file change undone" in cards.summary.note
+    assert "pics/92002.jpg" in cards.summary.note and cards.results.undo.isVisible()
+    assert not one.exists() and two.read_bytes() == b"player edit"
