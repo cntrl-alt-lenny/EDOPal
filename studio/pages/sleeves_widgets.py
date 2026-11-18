@@ -1,8 +1,9 @@
 """Page-local controls for print selection and portrait previews."""
 
+from collections import Counter
 from collections.abc import Iterable
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QModelIndex, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QImage,
@@ -13,7 +14,16 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QSizePolicy, QSlider, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QSizePolicy,
+    QSlider,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from studio import theme as t
 from studio.icons import icon
@@ -47,6 +57,30 @@ class Menu(QComboBox):
             x, y = self.width() - t.LG, self.height() // 2
             painter.drawLine(x - t.XS, y - 2, x, y + 2)
             painter.drawLine(x, y + 2, x + t.XS, y - 2)
+
+
+class _CountDelegate(QStyledItemDelegate):
+    def initStyleOption(self, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        super().initStyleOption(option, index)
+        count = index.data(Qt.ItemDataRole.UserRole)
+        if count is not None:
+            option.text = f"{option.text}   ·   {count:,}"
+
+
+class Facet(Menu):
+    def __init__(self, name: str, names: Iterable[str]) -> None:
+        super().__init__(name, names)
+        self.setItemDelegate(_CountDelegate(self))
+        self.view().setMinimumWidth(t.TILE_LARGE + t.HUGE)
+
+    def set_counts(self, counts: Counter[str]) -> None:
+        for index in range(self.count()):
+            count = counts[self.itemText(index)] if index else counts.total()
+            if self.itemData(index) != count:
+                self.setItemData(index, count)
+                self.setItemData(
+                    index, f"{count:,} sleeves", Qt.ItemDataRole.AccessibleDescriptionRole
+                )
 
 
 class Slider(QSlider):

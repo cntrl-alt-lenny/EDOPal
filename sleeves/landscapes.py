@@ -13,7 +13,7 @@ def scene_plate(
 ) -> None:
     paper, shade, ink, foil = c
     e = math.ceil(extent)
-    xs = range(-e - 6, e + 7, 5)
+    xs = range(-e - 6, e + 7, 9 if p.device().height() <= 254 else 5)
     if key in ("dunes", "alpine"):
         oval(p, -55, -95, 40, 40, foil)
         oval(p, -55, -95, 45, 45, None, ink, 0.8)

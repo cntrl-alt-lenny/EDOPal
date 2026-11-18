@@ -1,9 +1,12 @@
 """Offline proof of the sleeve desk. All game, artwork and cache files are disposable."""
 
+import argparse
 import sqlite3
 import threading
 from contextlib import closing
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from time import perf_counter
 from unittest.mock import patch
 from zipfile import ZipFile
 
@@ -15,6 +18,7 @@ import main
 from sleeves import ArtMissing, ArtUnavailable
 from studio import theme
 from studio.context import AppContext, Installation
+from studio.pages.skins_grid import AppearanceGrid
 from studio.shell import StudioWindow
 from tools.sleeve_contact_sheet import stand_in
 from tools.studio_screenshots import DemoSync, create_demo, settle
@@ -28,16 +32,17 @@ def prepare_overview(window: StudioWindow) -> None:
     if not grid.isVisible():
         return
 
-    def visible_prints_loaded() -> bool:
-        grid.viewport().repaint()
-        area = grid.viewport().rect()
-        return all(
-            item.key in grid.tiles.cache and not grid.tiles.cache[item.key].isNull()
-            for row, item in enumerate(page.gallery.visible)
-            if grid.visualRect(grid.model().index(row, 0)).intersects(area)
-        )
+    settle(lambda: painted(grid), timeout=20)
 
-    settle(visible_prints_loaded, timeout=20)
+
+def painted(grid: AppearanceGrid) -> bool:
+    grid.viewport().repaint()
+    area = grid.viewport().rect()
+    return all(
+        tile.path in grid.tiles.cache and not grid.tiles.cache[tile.path].isNull()
+        for row, tile in enumerate(grid.tiles.items)
+        if grid.visualRect(grid.model().index(row, 0)).intersects(area)
+    )
 
 
 def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
@@ -98,6 +103,18 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     try:
         loaded()
         shot("01-collection")
+        gallery.family.setCurrentText("Ancient motifs")
+        gallery.colour.setCurrentText("Gold")
+        loaded()
+        shot("01b-family-and-color")
+        gallery.clear_filters()
+        gallery.search.setText("Paper crane Relay home")
+        pick(0)
+        page.pair.click()
+        loaded()
+        shot("01c-matching-pair")
+        page.discard()
+        gallery.clear_filters()
         capture_library(page, shot, settle)
         loaded()
         gallery.source.setCurrentText("Pack sleeve")
@@ -125,6 +142,11 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         designer.name.setText("Lotus sun")
         settle(lambda: designer.valid)
         shot("05-designer")
+        for name, menu in (("patterns", designer.pattern), ("palettes", designer.palette)):
+            menu.showPopup()
+            settle(lambda: painted(designer.picker.grid))
+            shot(f"05-{name}")
+            designer.close_picker()
         designer.inks.buttons[2].click()
         designer.inks.sliders[0].setValue(22)
         settle(lambda: designer.valid)
@@ -268,3 +290,82 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
             window.close()
         app.processEvents()
     return files
+
+
+def benchmark() -> tuple[float, float, float]:
+    """Time a cold gallery, forty scrollbar jumps and a cold palette search, in ms."""
+    app = QApplication.instance() or QApplication([])
+    theme.apply(app)
+    with TemporaryDirectory(
+        prefix=".sleeve-benchmark-", dir=Path(__file__).resolve().parents[1]
+    ) as folder:
+        cfg = create_demo(Path(folder))
+        ctx = AppContext(cfg, main.VERSION, DemoSync(), main._apply_gui_choices)
+        window = StudioWindow(ctx, startup=False)
+        ctx.set_installation(Installation.inspect(cfg.edopro_path))
+        window.resize(1280, 800)
+        window.show()
+        app.processEvents()
+        start = perf_counter()
+        window.navigate("sleeves")
+        page = window.current
+        gallery = page.gallery
+        grid = gallery.grid
+
+        def viewport_ready() -> bool:
+            if page.loading or not gallery.visible:
+                return False
+            grid.viewport().repaint()
+            area = grid.viewport().rect()
+            first = grid.indexAt(area.topLeft()).row()
+            if first < 0:
+                cell = grid.gridSize()
+                columns = area.width() // max(1, cell.width())
+                first = max(
+                    0, grid.verticalScrollBar().value() // max(1, cell.height()) * columns - 12
+                )
+            # Bound measurement overhead to the viewport, including its partial edge rows.
+            visible = [
+                tile
+                for i, tile in enumerate(grid.tiles.items[first : first + 100], first)
+                if grid.visualRect(grid.model().index(i, 0)).intersects(area)
+            ]
+            return bool(visible) and all(
+                tile.path in grid.tiles.cache and not grid.tiles.cache[tile.path].isNull()
+                for tile in visible
+            )
+
+        try:
+            settle(viewport_ready, timeout=30)
+            first_paint = perf_counter()
+            bar = grid.verticalScrollBar()
+            for step in range(1, 41):
+                bar.setValue(step * bar.maximum() // 40)
+                app.processEvents()
+                grid.viewport().repaint()
+            settle(viewport_ready, timeout=30)
+            end_scroll = perf_counter()
+            gallery.search.setText("Glacier")
+            settle(viewport_ready, timeout=30)
+            end_filter = perf_counter()
+        finally:
+            window.close()
+            settle(lambda: not ctx.tasks.jobs, timeout=30)
+    return (
+        (first_paint - start) * 1000,
+        (end_scroll - first_paint) * 1000,
+        (end_filter - end_scroll) * 1000,
+    )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        required=True,
+        help="Measure first paint, a full-list scroll and a palette filter at 1280x800",
+    )
+    parser.parse_args()
+    first, scroll, search = benchmark()
+    print(f"First paint {first:.1f} ms   Scroll {scroll:.1f} ms   Filter {search:.1f} ms")

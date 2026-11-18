@@ -12,6 +12,7 @@ from studio.widgets import Button, label, margins
 from .sleeves_collection import Choice
 from .sleeves_editor import Editor
 from .sleeves_inks import Inks
+from .sleeves_picker import PrintPicker, VisualMenu
 from .sleeves_widgets import Menu, Slider
 
 
@@ -35,15 +36,21 @@ class Designer(Editor):
     def __init__(self, tasks: TaskRunner, library: Library, choice: Choice | None) -> None:
         super().__init__(tasks, "Design a sleeve")
         self.library = library
-        self.pattern = Menu("Pattern")
+        self.pattern = VisualMenu("Pattern")
         for key, spec in PATTERNS.items():
             self.pattern.addItem(spec.name, key)
-        self.palette = palette_menu("Palette")
+        self.palette = VisualMenu("Palette", PALETTES)
         self.palette.setPlaceholderText("Custom colors")
         self.frame = Menu("Frame")
         for frame in FRAMES:
             self.frame.addItem("Thin border" if frame == "keyline" else frame.title(), frame)
         self.emblem = Menu("Emblem", ("None", *(s.title() for s in EMBLEMS)))
+        self.picker = PrintPicker(tasks)
+        self.panel.body.insertWidget(0, self.picker, 1)
+        self.picker.hide()
+        self.picker.chosen.connect(self.pick)
+        self.pattern.requested.connect(lambda: self.open_picker(True))
+        self.palette.requested.connect(lambda: self.open_picker(False))
         self.controls = QGridLayout()
         self.controls.setHorizontalSpacing(t.MD)
         for i, (title, widget) in enumerate(
@@ -80,9 +87,7 @@ class Designer(Editor):
             self.pattern.setCurrentIndex(self.pattern.findData(recipe.pattern))
             self.palette.setCurrentText(choice.palette)
             if recipe.palette and not choice.palette:
-                from sleeves.designer import inks
-
-                self.inks.set_colours(tuple(c.name() for c in inks(recipe.palette)))
+                self.inks.set_colours(recipe.palette)
                 self.palette.setCurrentIndex(-1)
             self.frame.setCurrentIndex(self.frame.findData(recipe.frame))
             self.emblem.setCurrentText(recipe.emblem.shape.title() if recipe.emblem else "None")
@@ -93,6 +98,32 @@ class Designer(Editor):
         self.update_preview()
         self.save.clicked.connect(self.save_design)
         self.initial = self.name.text(), self.recipe()
+
+    def open_picker(self, patterns: bool) -> None:
+        self.scroll.hide()
+        self.randomise.hide()
+        self.picker.present(patterns, self.pattern.currentData(), self.palette.currentText())
+
+    def close_picker(self) -> bool:
+        if self.picker.isHidden():
+            return False
+        self.picker.grid.suspend()
+        self.picker.hide()
+        self.scroll.show()
+        self.randomise.show()
+        (self.pattern if self.picker.patterns else self.palette).setFocus()
+        return True
+
+    def pick(self, key: str) -> None:
+        if self.picker.patterns:
+            # Keep the palette the player saw in the pattern tiles.
+            palette = self.palette.currentText()
+            self.pattern.setCurrentIndex(self.pattern.findData(key))
+            if palette:
+                self.palette.setCurrentText(palette)
+        else:
+            self.palette.setCurrentText(key)
+        self.close_picker()
 
     @property
     def dirty(self) -> bool:
@@ -141,7 +172,7 @@ class Designer(Editor):
         emblem = self.emblem.currentText().lower()
         return Recipe(
             self.pattern.currentData(),
-            self.inks.values,
+            PALETTES.get(self.palette.currentText(), self.inks.values),
             {k: s.value() / mult for k, (s, mult) in self.sliders.items()},
             self.seed,
             self.frame.currentData(),

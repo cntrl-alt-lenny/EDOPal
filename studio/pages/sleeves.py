@@ -5,9 +5,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt
 from PySide6.QtGui import QImage, QResizeEvent
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QMenu, QStackedWidget, QVBoxLayout, QWidget
 
-from sleeves import Entry, Layout, Library
+from sleeves import Entry, Layout, Library, render
 from studio import theme as t
 from studio.context import AppContext, GameOpenError, Installation
 from studio.icons import icon
@@ -16,7 +16,7 @@ from studio.widgets import Button, label, margins
 from . import sleeves_work as work
 from .skins_feedback import AppearancePage
 from .skins_packs import PackBrowser
-from .sleeves_collection import Choice, saved
+from .sleeves_collection import PARTNERS, TEAMS, Choice, recolored, saved
 from .sleeves_design import Designer
 from .sleeves_editor import Editor
 from .sleeves_gallery import Gallery
@@ -86,6 +86,25 @@ class SleevesPage(AppearancePage):
         self.setup_feedback()
         margins(self.controls, 0)
         self.controls.addWidget(self.status, 1)
+        self.similar = Button("More like this", "quiet")
+        options = QMenu(self.similar)
+        self.by_pattern = options.addAction("Same pattern in other palettes")
+        self.by_palette = options.addAction("Same palette on other patterns")
+        self.similar.setMenu(options)
+        self.by_pattern.triggered.connect(
+            lambda: self.gallery.more_like("pattern", self.selected_print())
+        )
+        self.by_palette.triggered.connect(
+            lambda: self.gallery.more_like("palette", self.selected_print())
+        )
+        options.addSeparator()
+        for team in TEAMS:
+            action = options.addAction(f"Match {team} home and away")
+            action.triggered.connect(lambda checked=False, name=team: self.match_pair(name))
+        self.pair = Button("Matching pair")
+        self.pair.clicked.connect(lambda: self.match_pair())
+        self.controls.addWidget(self.similar)
+        self.controls.addWidget(self.pair)
         self.retry = Button("Retry")
         self.retry.clicked.connect(self.run_retry)
         self.same = Button("Use for both")
@@ -327,6 +346,17 @@ class SleevesPage(AppearancePage):
                 if self.snapshot and self.snapshot.active_name
                 else "Changes take effect next time you start EDOPro."
             )
+        item = self.selected_print()
+        selectable = bool(item and item.recipe and not self.editor)
+        self.similar.setVisible(selectable)
+        self.similar.setEnabled(available)
+        self.by_palette.setEnabled(bool(item and item.palette))
+        partner = PARTNERS.get(item.palette, "") if selectable else ""
+        self.pair.setVisible(bool(partner and selectable))
+        self.pair.setEnabled(available)
+        if partner:
+            self.pair.setText(f"Match {item.palette.rsplit(' ', 1)[0]} pair")
+            self.pair.setToolTip(f"Stage {item.palette} and {partner} for opposite slots.")
         self.status.setText(caption)
         if self.editor:
             self.footer.setVisible(bool(self.message and not self.saving))
@@ -356,6 +386,29 @@ class SleevesPage(AppearancePage):
             job.error.connect(lambda exc: self.ctx.notify(str(exc)))
         else:
             self.ctx.installations_requested.emit()
+
+    def selected_print(self) -> Choice | None:
+        slot = self.snapshot.slots.get(self.target) if self.snapshot else None
+        return self.pending.get(self.target) or (slot.choice if slot else None)
+
+    def match_pair(self, team: str = "") -> None:
+        item = self.selected_print()
+        if self.writing or not item or not item.recipe:
+            return
+        palette = item.palette
+        if team and not palette.startswith(team + " "):
+            palette = f"{team} home"
+        if palette not in PARTNERS:
+            return
+        other = "opponent" if self.target == "mine" else "mine"
+        self.pending.update(
+            {self.target: recolored(item, palette), other: recolored(item, PARTNERS[palette])}
+        )
+        self.message = ""
+        self.retry_action = None
+        self.load_pick(self.target)
+        self.load_pick(other)
+        self.update_controls()
 
     def select_slot(self, slot: str) -> None:
         if self.writing:
@@ -387,7 +440,13 @@ class SleevesPage(AppearancePage):
                 self.images[slot] = img
                 self.update_controls()
 
-        job = self.ctx.tasks.start(lambda worker: thumbs(item.key, worker))
+        job = self.ctx.tasks.start(
+            lambda worker: (
+                render(item.recipe, thumbnail=True)
+                if item.recipe and not item.entry
+                else thumbs(item.key, worker)
+            )
+        )
         job.result.connect(ready)
         job.error.connect(
             lambda _: (
@@ -478,6 +537,8 @@ class SleevesPage(AppearancePage):
         return True
 
     def back_from_editor(self) -> None:
+        if isinstance(self.editor, Designer) and self.editor.close_picker():
+            return
         if self.guard_edits(include_slots=False):
             self.close_editor()
 

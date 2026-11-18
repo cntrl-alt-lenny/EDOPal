@@ -4,7 +4,7 @@ import math
 from collections.abc import Iterable
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
 
 Point = tuple[float, float]
 Inks = tuple[QColor, ...]
@@ -28,6 +28,28 @@ def pen(c: QColor, width: float = 1) -> QPen:
 
 def polar(radius: float, angle: float) -> Point:
     return radius * math.cos(angle), radius * math.sin(angle)
+
+
+def contour(
+    p: QPainter,
+    start: Point,
+    segments: Iterable[tuple[float, ...]],
+    fill: QColor | QBrush | None = None,
+    edge: QColor | None = None,
+    width: float = 1,
+) -> None:
+    """Ink a silhouette from straight endpoints and cubic Bézier segments."""
+    outline = QPainterPath(QPointF(*start))
+    for segment in segments:
+        if len(segment) == 2:
+            outline.lineTo(*segment)
+        else:
+            outline.cubicTo(*segment)
+    if fill is not None:
+        outline.closeSubpath()
+    p.setBrush(CLEAR if fill is None else fill)
+    p.setPen(NONE if edge is None else pen(edge, width))
+    p.drawPath(outline)
 
 
 def path(p: QPainter, pts: Iterable[Point], ink: QColor, width: float = 1) -> None:

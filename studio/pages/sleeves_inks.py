@@ -4,6 +4,7 @@ from PySide6.QtCore import QSignalBlocker, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
+from sleeves.designer import inks
 from studio import theme as t
 from studio.widgets import Button, label, margins
 
@@ -50,8 +51,8 @@ class Inks(QWidget):
         self.details.hide()
 
     def set_colours(self, colours: tuple[str, ...]) -> None:
-        self.values = colours
-        for btn, value in zip(self.buttons, colours, strict=True):
+        self.values = tuple(color.name() for color in inks(colours))
+        for btn, value in zip(self.buttons, self.values, strict=True):
             swatch = QPixmap(t.ICON, t.ICON)
             swatch.fill(QColor(value))
             btn.setIcon(QIcon(swatch))

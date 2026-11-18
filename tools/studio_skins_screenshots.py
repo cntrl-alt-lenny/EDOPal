@@ -286,6 +286,9 @@ def render_skins(
                 view.preview.completed is not None and view.preview.completed == view.preview.wanted
             )
         )
+        grid = page.maker.wall_grid
+        if grid.isVisible():
+            settle(lambda: grid.drawn == grid.palette_key())
         shot("skins-" + name)
 
     def choose(name: str) -> None:
@@ -293,6 +296,10 @@ def render_skins(
 
     gallery_ready()
     shot("skins-gallery")
+    gallery.contrast.click()
+    gallery_ready()
+    shot("skins-clear-signals")
+    gallery._browse()
     folder = page.store.library.directory
     folder.mkdir(parents=True, exist_ok=True)
     (folder / ("a" * 32 + " (incoming).json")).write_bytes(b"incomplete")
@@ -331,6 +338,9 @@ def render_skins(
     view.scroll.ensureWidgetVisible(page.maker.swatches["positive"])
     frame("maker-overrides")
     view.scroll.verticalScrollBar().setValue(view.scroll.verticalScrollBar().maximum())
+    page.maker.wall_toggle.setChecked(True)
+    settle(lambda: page.maker.wall_grid.drawn == page.maker.wall_grid.palette_key())
+    view.scroll.ensureWidgetVisible(page.maker.wall_grid, 0, 0)
     frame("maker-wallpapers")
     with patch.object(
         QFileDialog,

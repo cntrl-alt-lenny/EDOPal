@@ -1,14 +1,16 @@
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from threading import Event
 from unittest.mock import AsyncMock
 
 import pytest
 from pytestqt.qtbot import QtBot
 
-from content import catalogue, libraries
+from content import catalogue, download, libraries
+from content.cache import PackCache
 from content.download import DownloadError, DownloadFailure, Progress
-from content.manifest import Manifest
+from content.manifest import Manifest, Pack, Preview
 from studio.context import Installation
 from studio.shell import StudioWindow
 from tools.studio_skins_screenshots import library_archive
@@ -84,17 +86,21 @@ def test_pack_browser_install_use_and_remove(
         kwargs["phase"]("downloading")
         kwargs["progress"](Progress(100, 200, 20))
         entered.set()
-        assert kwargs["cancel"].wait(4)
+        kwargs["cancel"].wait()
         raise DownloadError(DownloadFailure.CANCELLED, "Cancelled")
 
     with monkeypatch.context() as patch:
         patch.setattr(libraries, "make_available", stalled)
         browser.action.click()
-        qtbot.waitUntil(lambda: entered.is_set() and browser.progress.value() == 50)
-        assert window.navigate("cards")
-        assert window.navigate(section)
-        assert browser.isVisible() and browser.cancel.isEnabled() and page.escape()
-        browser.cancel.click()
+        try:
+            qtbot.waitUntil(lambda: entered.is_set() and browser.progress.value() == 50)
+            assert window.navigate("cards")
+            assert window.navigate(section)
+            assert browser.isVisible() and browser.cancel.isEnabled() and page.escape()
+            browser.cancel.click()
+        finally:
+            if browser.job:
+                browser.job.cancel()
         qtbot.waitUntil(
             lambda: (
                 not browser.job
@@ -111,10 +117,35 @@ def test_pack_browser_install_use_and_remove(
     folder = browser.cache.root / ("pack-" + pack.id)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{pack.version}--{pack.sha256}.zip").write_bytes(body)
-    browser.refresh.click()
-    qtbot.waitUntil(lambda: browser.action.text() == "Add to library")
-    browser.action.click()
-    qtbot.waitUntil(lambda: browser.rows[0].state == "Available in library")
+    preview_started, release_preview = Event(), Event()
+
+    async def overlapping_preview(
+        cache: PackCache, pack: Pack, preview: Preview, *, cancel: Event
+    ) -> Path:
+        # Both fetch_preview and use_pack enter this non-blocking cache lock.
+        with cache._lock("mutations"):
+            preview_started.set()
+            release_preview.wait()
+        return cache.root / ("preview-" + pack.id) / (preview.sha256 + ".image")
+
+    qtbot.waitUntil(lambda: browser.preview_job is None)
+    with monkeypatch.context() as patch:
+        patch.setattr(download, "fetch_preview", overlapping_preview)
+        try:
+            browser.refresh.click()
+            qtbot.waitUntil(
+                lambda: (
+                    preview_started.is_set()
+                    and browser.action.isEnabled()
+                    and browser.action.text() == "Add to library"
+                )
+            )
+            preview_job = browser.preview_job
+            browser.action.click()
+            assert preview_job.cancel_event.is_set()
+        finally:
+            release_preview.set()
+        qtbot.waitUntil(lambda: browser.rows[0].state == "Available in library")
     assert browser.action.text() == "View in collection"
     browser.action.click()
     if section == "skins":
@@ -131,7 +162,9 @@ def test_pack_browser_install_use_and_remove(
         theme = page.look.theme
         page.escape()
     else:
-        qtbot.waitUntil(lambda: not page.loading)
+        qtbot.waitUntil(
+            lambda: page.gallery.isVisible() and not page.loading and bool(page.gallery.visible)
+        )
         assert page.gallery.source.currentText() == "Pack sleeve"
         assert [item.name for item in page.gallery.visible] == ["Evening lake"]
         assert pack.attribution in page.gallery.visible[0].tooltip
@@ -141,8 +174,11 @@ def test_pack_browser_install_use_and_remove(
     monkeypatch.setattr(
         catalogue, "fetch_catalogue", AsyncMock(side_effect=ValueError("Invalid catalog URL"))
     )
+    qtbot.waitUntil(page.gallery.more.isEnabled)
     page.gallery.more.click()
-    qtbot.waitUntil(lambda: not browser.loading)
+    qtbot.waitUntil(
+        lambda: browser.isVisible() and not browser.loading and browser.rows[0].status is None
+    )
     assert "Offline" in browser.source_hint.text() and browser.rows[0].status is None
     assert browser.remove.isEnabled() and pack.attribution in browser.credits.text()
     browser.remove.click()

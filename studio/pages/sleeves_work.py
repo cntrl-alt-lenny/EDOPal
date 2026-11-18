@@ -2,7 +2,6 @@
 
 import colorsys
 import re
-from contextlib import suppress
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -41,14 +40,7 @@ class Thumbnails:
         if ctx.cancel.is_set():
             return QImage()
         if item := prints().get(key):
-            path = self.library.root / "print-previews-v1" / key.with_suffix(".png")
-            image = QImage(str(path))
-            if image.isNull():
-                image = small(sleeves.render(item.recipe))
-                # A thumbnail cache write is optional, including while another reader has it open.
-                with suppress(OSError):
-                    extras._atomic_write(path, sleeves.png_bytes(image))
-            return image
+            return sleeves.render(item.recipe, thumbnail=True)
         return QImage(str(self.library.thumbnail(key.name)))
 
     def colours(self, items: list[Choice], ctx: WorkerContext) -> dict[Path, str]:

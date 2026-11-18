@@ -1,6 +1,6 @@
 """The preview workspace, with a scrolling inspector beside the game scene."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -228,7 +228,7 @@ class Workspace(QWidget):
         margins(stack, 0)
         self.inspector = Inspector()
         self.maker_panel = Panel(t.LG)
-        self.maker = Maker()
+        self.maker = Maker(ctx.tasks)
         self.maker_panel.body.addWidget(self.maker)
         self.form = Panel()
         self.form_title = label("", "subheading")
@@ -245,6 +245,7 @@ class Workspace(QWidget):
             stack.addWidget(item)
         stack.addStretch()
         self.scroll.setWidget(side)
+        self.maker.wall_toggle.toggled.connect(self.reveal_wallpapers)
         actions = QHBoxLayout()
         actions.addStretch()
         actions.addWidget(self.maker.copy_btn)
@@ -257,6 +258,13 @@ class Workspace(QWidget):
         actions.addWidget(self.game_actions)
         body.addLayout(actions)
         self.show_panel(self.inspector)
+
+    def reveal_wallpapers(self, expanded: bool) -> None:
+        if expanded:
+            # The inspector's scroll range changes when the palette opens.
+            QTimer.singleShot(
+                0, self, lambda: self.scroll.ensureWidgetVisible(self.maker.wall_grid, 0, 0)
+            )
 
     def show_panel(self, panel: QWidget) -> None:
         for item in self.panels:

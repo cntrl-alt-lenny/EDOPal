@@ -3,16 +3,18 @@
 from dataclasses import replace
 from functools import partial
 
-from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLineEdit, QSlider, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QSlider, QVBoxLayout, QWidget
 
 import themes
 from content.media import Media
 from studio import theme as t
+from studio.tasks import TaskRunner
 from studio.widgets import Button, Panel, ToggleSwitch, label, margins
 
 from .skins_model import BASE, EXTRA, surprise
+from .skins_wallpapers import StyleGrid
 from .sleeves_widgets import Menu
 
 
@@ -95,7 +97,7 @@ class Maker(QWidget):
     save = Signal()
     save_as = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, tasks: TaskRunner) -> None:
         super().__init__()
         self.theme = themes.PRESETS[0]
         self.field = "accent"
@@ -155,29 +157,34 @@ class Maker(QWidget):
         )
         self.highlight.toggled.connect(lambda on: self.update_theme(highlight_turn=on))
         adv.addWidget(self.highlight)
-        adv.addWidget(label("Wallpaper", "subheading"))
-        styles = QGridLayout()
-        self.styles: dict[str, Button] = {}
-        for i, style in enumerate(themes.STYLES):
-            button = Button(style.title())
-            button.setIconSize(QSize(t.HUGE, t.XXL))
-            button.clicked.connect(partial(self._wall, style))
-            styles.addWidget(button, i // 2, i % 2)
-            self.styles[style] = button
-        adv.addLayout(styles)
+        self.wall_toggle = Button("Wallpaper", "secondary")
+        self.wall_toggle.setCheckable(True)
+        body.insertWidget(body.indexOf(self.fine), self.wall_toggle)
+        self.wall_section = QWidget()
+        walls = QVBoxLayout(self.wall_section)
+        margins(walls, 0)
+        walls.setSpacing(t.SM)
+        self.wall_grid = StyleGrid(tasks)
+        self.wall_grid.picked.connect(self._wall)
+        self.styles = self.wall_grid.buttons
+        self.samples = self.wall_grid.timer
+        walls.addWidget(self.wall_grid)
+        body.insertWidget(body.indexOf(self.fine), self.wall_section)
+        self.wall_section.hide()
+        self.wall_toggle.toggled.connect(self.wall_section.setVisible)
         self.inherit = Button("Use game backgrounds")
         self.inherit.clicked.connect(partial(self._wall, "inherit"))
-        adv.addWidget(self.inherit)
+        walls.addWidget(self.inherit)
         self.photo = Button("Use my own image…", "secondary", "folder")
         self.photo.clicked.connect(self.choose_image)
-        adv.addWidget(self.photo)
+        walls.addWidget(self.photo)
         self.wallpapers = Menu("Downloaded wallpapers")
         self.wallpapers.activated.connect(self.pick_wallpaper)
-        adv.addWidget(self.wallpapers)
+        walls.addWidget(self.wallpapers)
         self.wallpapers.hide()
         self.credit = label("", "muted", True)
         self.credit.setTextFormat(Qt.TextFormat.PlainText)
-        adv.addWidget(self.credit)
+        walls.addWidget(self.credit)
         self.credit.hide()
         self.font = ToggleSwitch("Use Inter font", "Off keeps the game’s fonts.", False)
         self.font.toggled.connect(lambda on: self.update_theme(font="inter" if on else "inherit"))
@@ -191,10 +198,6 @@ class Maker(QWidget):
         self.copy_btn = Button("Save as…")
         self.save_btn.clicked.connect(self.save)
         self.copy_btn.clicked.connect(self.save_as)
-        self.samples = QTimer(self)
-        self.samples.setSingleShot(True)
-        self.samples.timeout.connect(self.update_samples)
-        self.fine.toggled.connect(lambda on: self.update_samples() if on else None)
         self.reset(self.theme)
 
     def set_wallpapers(self, rows: tuple[Media, ...]) -> None:
@@ -224,14 +227,6 @@ class Maker(QWidget):
     def pick_wallpaper(self, index: int) -> None:
         if digest := self.wallpapers.itemData(index):
             self.update_theme(wallpaper="image", image=digest)
-
-    def update_samples(self) -> None:
-        if self.fine.isChecked() and self.isVisible():
-            for style, button in self.styles.items():
-                sample = themes.wallpaper(
-                    replace(self.theme, wallpaper=style, image=None), (96, 60)
-                )
-                button.setIcon(QIcon(QPixmap.fromImage(sample)))
 
     def _swatch(self, key: str, name: str) -> Button:
         button = Button(name)
@@ -278,6 +273,7 @@ class Maker(QWidget):
     def reset(self, theme: themes.Theme) -> None:
         self.mixer.hide()
         self.advanced_mixer.hide()
+        self.wall_toggle.setChecked(False)
         self.fine.setChecked(False)
         self.advanced.hide()
         self.name.setText(theme.name)
@@ -305,10 +301,8 @@ class Maker(QWidget):
         ):
             with QSignalBlocker(control):
                 control.setChecked(on)
-        for style, button in self.styles.items():
-            button.setText(style.title() + (" ✓" if style == theme.wallpaper else ""))
-        if self.fine.isChecked() and self.isVisible():
-            self.samples.start(t.MOTION_MS)
+        self.wall_toggle.setText(f"Wallpaper · {theme.wallpaper.title()}")
+        self.wall_grid.set_theme(theme)
         self._select_wallpaper()
         self.inherit.setText(
             "Use game backgrounds" + (" ✓" if theme.wallpaper == "inherit" else "")
