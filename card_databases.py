@@ -269,17 +269,19 @@ def read_artwork_index(
     return id_to_name, name_to_official, rush_ids, field_ids
 
 
-def installed_card_names(game: Path) -> dict[int, str]:
-    """Index locally playable IDs. Read-only connections cannot create missing databases."""
-    cards = {}
+def iter_installed_printings(game: Path) -> Iterator[tuple[int, str, int | None]]:
+    """Read card identities in database override order, including legacy name-only databases."""
     for path in get_db_files(str(game.resolve())):
         try:
             with closing(sqlite3.connect(Path(path).as_uri() + "?mode=ro", uri=True)) as db:
-                cards.update(
-                    db.execute(
-                        "SELECT datas.id, texts.name FROM datas JOIN texts USING(id) WHERE typeof(texts.name) = 'text'"
-                    )
+                columns = {col[1] for col in db.execute("PRAGMA table_info(datas)")}
+                kind = "datas.type" if "type" in columns else "NULL"
+                yield from db.execute(
+                    f"SELECT datas.id, texts.name, {kind} FROM datas JOIN texts USING(id) WHERE typeof(texts.name) = 'text'"
                 )
         except sqlite3.Error:
             continue
-    return cards
+
+
+def installed_card_names(game: Path) -> dict[int, str]:
+    return {code: name for code, name, _ in iter_installed_printings(game)}

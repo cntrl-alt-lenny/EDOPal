@@ -1,2 +1,5 @@
 # The release ReadMe is opened in Notepad on Windows, so keep it CRLF.
 release_assets/ReadMe-Windows.txt text eol=crlf
+
+# Bundled format data is hashed byte-for-byte; never convert its line endings.
+assets/formats/** -text

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from studio import theme as t
 
 PATHS = {
+    "formats": "M3 4h7l2 2 2-2h7v14h-7l-2 2-2-2H3z M12 6v14 M5 8h4 M15 8h4 M5 11h4 M15 11h4",
     "practice": "M4 20h16v-3H6l3-5 4-2-3-2-4 3-3-3 6-6 5 2 4 6v7 M9 5l1-1",
     "mydecks": "M3 9l9-5 9 5-9 5z M3 13l9 5 9-5 M3 17l9 5 9-5 M9 8l3-1.5L15 8",
     "replays": "M3 5h18v14H3z M3 9h18 M6 5l3 4 M12 5l3 4 M10 12l4 2-4 2z",

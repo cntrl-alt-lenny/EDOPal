@@ -1,0 +1,4576 @@
+[
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 1,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 2,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 93,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 89,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 3,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 94,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 102,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 4,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 109,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 5,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 6,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 7,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The GOAT preset includes the first turn draw. The 999-card limit stands in for an uncapped deck. Community rulings still apply.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 8,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The 2005 preset covers several earlier rulebooks. World Championship and regional rulings can differ.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 9,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 10,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 11,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 12,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 92,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 119,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 13,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 96,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 14,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 15,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "GOAT",
+  "caveats": [
+   "The early deck sizes match. The dates of changes to attack replays, Traps and triggers are uncertain.",
+   "Agree to use either no Side Deck or exactly 15 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 16,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Some Damage Step windows, LP costs and card rulings differ. Keep the preset’s other settings, including the unchecked single-chain Damage Step option."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 17,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "OCG Ignition Priority",
+    "on": false
+   },
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "Trigger even if private knowledge",
+    "on": true
+   },
+   {
+    "label": "0 ATK vs 0 ATK destroys both monsters",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Some Damage Step windows, LP costs and card rulings differ. Keep the preset’s other settings, including the unchecked single-chain Damage Step option."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 18,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "OCG Ignition Priority",
+    "on": false
+   },
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "Trigger even if private knowledge",
+    "on": true
+   },
+   {
+    "label": "0 ATK vs 0 ATK destroys both monsters",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Some Damage Step windows, LP costs and card rulings differ. Keep the preset’s other settings, including the unchecked single-chain Damage Step option."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 19,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "OCG Ignition Priority",
+    "on": false
+   },
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "Trigger even if private knowledge",
+    "on": true
+   },
+   {
+    "label": "0 ATK vs 0 ATK destroys both monsters",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Some Damage Step windows, LP costs and card rulings differ. Keep the preset’s other settings, including the unchecked single-chain Damage Step option."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 20,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "OCG Ignition Priority",
+    "on": false
+   },
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "Trigger even if private knowledge",
+    "on": true
+   },
+   {
+    "label": "0 ATK vs 0 ATK destroys both monsters",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Some Damage Step windows, LP costs and card rulings differ. Keep the preset’s other settings, including the unchecked single-chain Damage Step option."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 98,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "OCG Ignition Priority",
+    "on": false
+   },
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "Trigger even if private knowledge",
+    "on": true
+   },
+   {
+    "label": "0 ATK vs 0 ATK destroys both monsters",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Some Damage Step windows, LP costs and card rulings differ. Keep the preset’s other settings, including the unchecked single-chain Damage Step option."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 99,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "OCG Ignition Priority",
+    "on": false
+   },
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "Trigger even if private knowledge",
+    "on": true
+   },
+   {
+    "label": "0 ATK vs 0 ATK destroys both monsters",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Some Damage Step windows, LP costs and card rulings differ. Keep the preset’s other settings, including the unchecked single-chain Damage Step option."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 22,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "OCG Ignition Priority",
+    "on": false
+   },
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "Trigger even if private knowledge",
+    "on": true
+   },
+   {
+    "label": "0 ATK vs 0 ATK destroys both monsters",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Some Damage Step windows, LP costs and card rulings differ. Keep the preset’s other settings, including the unchecked single-chain Damage Step option.",
+   "The 0 ATK setting assumes this event preceded the ruling change."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 23,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "OCG Ignition Priority",
+    "on": false
+   },
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "Trigger even if private knowledge",
+    "on": true
+   },
+   {
+    "label": "0 ATK vs 0 ATK destroys both monsters",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Xyz Summons and early TCG priority apply. Damage Step timing and individual trigger locations can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 24,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   },
+   {
+    "label": "GOAT Ignition Priority",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 26,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 27,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 113,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 28,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 29,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 30,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 31,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 64,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Keep ignition priority off. The first player draws and only one Field Spell stays face up. Damage Step timing and Union effects can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 32,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 33,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 120,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 35,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 36,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 37,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 38,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 39,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 40,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 41,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 42,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 43,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 3",
+  "caveats": [
+   "Separate scales, two Field Spells and the opening draw rule match. Individual card texts and rulings can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 44,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   },
+   {
+    "label": "SEGOC: First triggered effect first in chain",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 111,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 200,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 47,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 48,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 49,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 50,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 201,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 52,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 53,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 54,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 55,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Link placement and integrated scales match. Current card scripts and the simulator clock can differ from tournament play."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 65,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Fusion, Synchro and Xyz Monsters can use ordinary zones. Adoption of these changes at individual Remote Duel events is uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 56,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "Fusion Synchro Xyz summonable anywhere",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Fusion, Synchro and Xyz Monsters can use ordinary zones. Adoption of these changes at individual Remote Duel events is uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 57,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "Fusion Synchro Xyz summonable anywhere",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Fusion, Synchro and Xyz Monsters can use ordinary zones. Adoption of these changes at individual Remote Duel events is uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 66,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "Fusion Synchro Xyz summonable anywhere",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Fusion, Synchro and Xyz Monsters can use ordinary zones. Adoption of these changes at individual Remote Duel events is uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 67,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "Fusion Synchro Xyz summonable anywhere",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 4",
+  "caveats": [
+   "Fusion, Synchro and Xyz Monsters can use ordinary zones. Adoption of these changes at individual Remote Duel events is uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 68,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "Fusion Synchro Xyz summonable anywhere",
+    "on": true
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 69,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 83,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 84,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 85,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 90,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 86,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 208,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 123,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 115,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 114,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 125,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 124,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 187,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 188,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 203,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 204,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 205,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 206,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Card scripts follow current OCG rulings. The response clock differs from a tournament match timer."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 207,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Choose the current matching game list. The game and Format Library can update on different dates."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 58,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Agree on the points list and check the 100-point budget across the deck yourselves."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 202,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "Pendulum Zones",
+    "on": false
+   },
+   {
+    "label": "Extra Monster Zones",
+    "on": false
+   },
+   {
+    "label": "Fusion Synchro Xyz summonable anywhere",
+    "on": false
+   },
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rules (2020)",
+  "caveats": [
+   "Choose the current matching game list. The game and Format Library can update on different dates."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 59,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "TCG SEGOC",
+    "on": true
+   }
+  ],
+  "types": []
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "The reconstructed LP-based deck-out result, early battle resolution and Trap behaviour require agreement.",
+   "Agree to use either no Side Deck or exactly 10 cards."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 135,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   10
+  ],
+  "switches": [
+   {
+    "label": "First turn draw",
+    "on": false
+   },
+   {
+    "label": "Unlimited hand size",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 136,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 137,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 138,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 139,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 140,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 141,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 142,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 143,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 144,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 145,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 146,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 147,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 148,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 149,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 150,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 151,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 152,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 153,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 131,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 127,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "Early OCG priority, individual switches and the period’s Side Deck rules need confirmation."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   999
+  ],
+  "fidelity": "Approximate",
+  "hand": 5,
+  "id": 132,
+  "lp": 8000,
+  "main": [
+   40,
+   999
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Synchro",
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "The board, first draw and OCG priority match. Damage Step timing and the 0 ATK cutoff are uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 128,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "The board, first draw and OCG priority match. Damage Step timing and the 0 ATK cutoff are uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 133,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "The board, first draw and OCG priority match. Damage Step timing and the 0 ATK cutoff are uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 129,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "The board, first draw and OCG priority match. Damage Step timing and the 0 ATK cutoff are uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 134,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "The board, first draw and OCG priority match. Damage Step timing and the 0 ATK cutoff are uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 130,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 1",
+  "caveats": [
+   "The board, first draw and OCG priority match. Damage Step timing and the 0 ATK cutoff are uncertain."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 154,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Xyz",
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Xyz, the opening draw and a single Field Spell match. Damage Step timing and period card scripts can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 183,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Xyz, the opening draw and a single Field Spell match. Damage Step timing and period card scripts can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 190,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Xyz, the opening draw and a single Field Spell match. Damage Step timing and period card scripts can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 189,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Xyz, the opening draw and a single Field Spell match. Damage Step timing and period card scripts can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 191,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Xyz, the opening draw and a single Field Spell match. Damage Step timing and period card scripts can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 192,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Xyz, the opening draw and a single Field Spell match. Damage Step timing and period card scripts can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 193,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ },
+ {
+  "base": "Master Rule 2",
+  "caveats": [
+   "Xyz, the opening draw and a single Field Spell match. Damage Step timing and period card scripts can differ."
+  ],
+  "client": "41.0.2",
+  "draw": 1,
+  "extra": [
+   0,
+   15
+  ],
+  "fidelity": "Close",
+  "hand": 5,
+  "id": 194,
+  "lp": 8000,
+  "main": [
+   40,
+   60
+  ],
+  "side": [
+   0,
+   15
+  ],
+  "switches": [
+   {
+    "label": "6 substeps Battle Step",
+    "on": true
+   }
+  ],
+  "types": [
+   "No Pendulum",
+   "No Link"
+  ]
+ }
+]

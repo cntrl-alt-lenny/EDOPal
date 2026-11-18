@@ -28,6 +28,7 @@ from studio.pages.backup import BackupPage
 from studio.pages.base import Page
 from studio.pages.cards import CardsPage
 from studio.pages.decks import DecksPage
+from studio.pages.formats import FormatsPage
 from studio.pages.health import HealthPage
 from studio.pages.music import MusicPage
 from studio.pages.mydecks import MyDecksPage
@@ -48,6 +49,7 @@ PAGES = (
     MusicPage,
     DecksPage,
     MyDecksPage,
+    FormatsPage,
     PracticePage,
     ReplaysPage,
     BackupPage,

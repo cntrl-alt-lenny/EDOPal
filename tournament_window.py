@@ -10,7 +10,6 @@ import webbrowser
 from pathlib import Path
 from tkinter import ttk
 
-from card_databases import installed_card_names
 from config import APP_NAME
 from goat_versions import GoatVersions, installed_aliases, installed_whitelist
 from tournament_decks import (
@@ -20,6 +19,7 @@ from tournament_decks import (
     DeckError,
     Event,
     FormatLibrary,
+    local_deck_printings,
     match_local_printings,
     save_deck,
 )
@@ -786,7 +786,7 @@ class TournamentWindow(tk.Toplevel):
         def import_selected():
             saved = []
             error = ""
-            local = installed_card_names(self.game_path)
+            local = local_deck_printings(self.game_path)
             matched = 0
             missing = set()
             goat = None

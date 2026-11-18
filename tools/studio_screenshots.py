@@ -40,6 +40,7 @@ from tools.studio_shell_shots import (  # noqa: E402
 from tools.studio_skins_screenshots import render_skins  # noqa: E402
 
 PAGE_RENDERERS = {"decks": render_decks}
+PAGE_RENDERERS["formats"] = import_module("tools.studio_formats_screenshots").render_formats
 
 PAGE_PROOFS = {"sleeves": "tools.studio_sleeves_shots"}
 
