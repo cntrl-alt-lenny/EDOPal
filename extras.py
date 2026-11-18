@@ -34,7 +34,7 @@ _TURN_ELEMENTS = ("DUELFIELD_TURNPLAYER_OUTLINE_COLOR", "DUELFIELD_TURNPLAYER_CO
 _COLOR_ATTR = re.compile(rb"(\s([argb])\s*=\s*)([\"'])(\d+)\3")
 
 
-def _backup_dir(root: Path, config_path: str) -> Path:
+def _backup_dir(root: Path, config_path: str | Path) -> Path:
     install_id = hashlib.sha256(os.fsencode(root)).hexdigest()[:16]
     return Path(config_path).resolve().parent / "extras-backups" / install_id
 
@@ -78,7 +78,11 @@ def install(edopro_path: str, config_path: str, group: str) -> None:
 def _install(edopro_path: str, config_path: str, group: str) -> None:
     root = Path(edopro_path).resolve()
     backups = _backup_dir(root, config_path)
-    files = sorted(p for p in (ASSETS / group).rglob("*") if p.is_file())
+    directory = ASSETS / group
+    if group == "sound":
+        _install_effects(root, config_path, "Synth")
+        directory /= "BGM"
+    files = sorted(p for p in directory.rglob("*") if p.is_file())
     if not files:
         raise FileNotFoundError(f"The optional {group} files are missing from this build.")
     for source in files:
@@ -299,13 +303,17 @@ _UNDO_GROUPS = {"sleeves", "effects", "music"}
 _SHA256 = re.compile(r"[a-f0-9]{64}")
 
 
-def _group_dir(root: Path, config_path: str, group: str) -> Path:
+def _group_dir(root: Path, config_path: str | Path, group: str) -> Path:
     if group not in _UNDO_GROUPS:
         raise ValueError("Unknown appearance category.")
     return _backup_dir(root, config_path) / ("undo-" + group)
 
 
 def can_undo(edopro_path: str, config_path: str, group: str) -> bool:
+    if group == "effects":
+        from sounds.install import can_undo as can_undo_effects
+
+        return can_undo_effects(Path(edopro_path), config_path)
     state = _group_dir(Path(edopro_path).resolve(), config_path, group)
     return any(
         (state / name).is_file() for name in ("last.json", "installing.json", "restoring.json")
@@ -327,10 +335,9 @@ def _group_files(root: Path, group: str) -> set[str]:
             source.relative_to(ASSETS).as_posix()
             for source in (ASSETS / "sound/BGM").rglob("*.flac")
         }
-    with ZipFile(PACKS / "shared.zip") as archive:
-        return set(_pack_sources(archive, "sound/")) | {
-            path.relative_to(ASSETS).as_posix() for path in (ASSETS / "sound").glob("*.wav")
-        }
+    from sounds.catalogue import EVENT_BY_STEM
+
+    return {f"sound/{stem}.wav" for stem in EVENT_BY_STEM}
 
 
 def _regular_path(root: Path, relative: str | Path) -> Path:
@@ -426,6 +433,11 @@ def _change_group(
     prepare: Callable[[dict], None] | None = None,
 ) -> tuple[str, ...]:
     """Install a scope transactionally, or undo its last change with files=None."""
+    if group == "effects":
+        from sounds.install import change_legacy_effects
+
+        change_legacy_effects(root, config_path, files)
+        return ()
     from state_lock import locked
 
     backups = _backup_dir(root, config_path)
@@ -443,8 +455,7 @@ def _change_group(
         else:
             # Separate configurations can point at the same game. Lock the ordinary
             # asset directory so those configurations also serialize their writes.
-            parent = "textures" if group == "sleeves" else "sound"
-            lock = _regular_path(root, Path(parent) / ".edopro-hd-sync.lock")
+            lock = _regular_path(root, "textures/.edopro-hd-sync.lock")
             locks.enter_context(locked(lock.parent, lock.name))
         last = _regular_path(state, "last.json")
         installing = _regular_path(state, "installing.json")
@@ -540,6 +551,12 @@ def apply_sleeve_pngs(
     return _change_group(root, config_path, "sleeves", files, prepare=prepare) if files else ()
 
 
+def _install_effects(root: Path, config_path: str, name: str) -> None:
+    from sounds.sets import bundled_files
+
+    _change_group(root, config_path, "effects", bundled_files(name))
+
+
 @appearance_writer
 def apply_appearance(
     edopro_path: str,
@@ -613,7 +630,7 @@ def apply_appearance(
     if sleeves:
         _install_pack(root, backups, "shared", "textures/")
     if audio == "Thonk":
-        _install_pack(root, backups, "shared", "sound/")
+        _install_effects(root, config_path, "Thonk")
     elif audio == "Synth":
         _install(edopro_path, config_path, "sound")
     if player_sleeve or opponent_sleeve:
@@ -627,18 +644,7 @@ def apply_appearance(
                 opponent=archive.read(SLEEVES[opponent_sleeve]) if opponent_sleeve else None,
             )
     if effects:
-        if effects == "Thonk":
-            with ZipFile(PACKS / "shared.zip") as archive:
-                files = {
-                    name: archive.read(src)
-                    for name, src in _pack_sources(archive, "sound/").items()
-                }
-        else:
-            files = {
-                p.relative_to(ASSETS).as_posix(): p.read_bytes()
-                for p in (ASSETS / "sound").glob("*.wav")
-            }
-        _change_group(root, config_path, "effects", files)
+        _install_effects(root, config_path, effects)
     if synth_music:
         files = {
             p.relative_to(ASSETS).as_posix(): p.read_bytes()

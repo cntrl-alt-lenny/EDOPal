@@ -9,12 +9,16 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from miniaudio import Backend
 
 
 class PreviewPlayer:
     RATE = 44100
 
-    def __init__(self):
+    def __init__(self, *, backends: list[Backend] | None = None) -> None:
         self.path: Path | None = None
         self.duration = 0.0
         self._offset = 0.0
@@ -24,6 +28,7 @@ class PreviewPlayer:
         self._stream = None
         self._process = None
         self._native = True
+        self._backends = backends
 
     @property
     def playing(self) -> bool:
@@ -111,17 +116,38 @@ class PreviewPlayer:
                 self._stream = miniaudio.stream_file(
                     str(path), sample_rate=self.RATE, seek_frame=round(self._offset * self.RATE)
                 )
-                callback = miniaudio.stream_with_callbacks(self._stream, end_callback=self._ended)
-                next(callback)
-                self._device = miniaudio.PlaybackDevice(sample_rate=self.RATE, buffersize_msec=80)
-                self._running = True
-                self._started = time.monotonic()
-                self._device.start(callback)
+                self._start_native()
             except (miniaudio.MiniaudioError, OSError, ValueError) as exc:
                 self.stop()
                 raise OSError(
                     f"Could not play {path.name}. Check your audio output and file format. {exc}"
                 ) from exc
+
+    def play_memory(self, data: bytes, *, duration: float) -> None:
+        """Stream a validated effect without creating a temporary audio file."""
+        import miniaudio
+
+        self.stop()
+        self._native = True
+        self.duration = duration
+        try:
+            self._stream = miniaudio.stream_memory(data, sample_rate=self.RATE)
+            self._start_native()
+        except (miniaudio.MiniaudioError, OSError, ValueError) as exc:
+            self.stop()
+            raise OSError(f"Could not play this cue. Check your audio output. {exc}") from exc
+
+    def _start_native(self) -> None:
+        import miniaudio
+
+        callback = miniaudio.stream_with_callbacks(self._stream, end_callback=self._ended)
+        next(callback)
+        self._device = miniaudio.PlaybackDevice(
+            sample_rate=self.RATE, buffersize_msec=80, backends=self._backends
+        )
+        self._running = True
+        self._started = time.monotonic()
+        self._device.start(callback)
 
     def _play_system(self, path: Path):
         env = os.environ.copy()

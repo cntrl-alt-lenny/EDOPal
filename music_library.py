@@ -48,10 +48,11 @@ from music.discovery import (
     validate_records,
 )
 from music.settings import (
+    _ENABLE_MUSIC,
     _game_running,
     music_disabled,
     music_enabled,
-    write_music_enabled,
+    write_audio_enabled,
 )
 from state_lock import locked
 
@@ -177,9 +178,16 @@ def _clear_staging(state: Path) -> None:
 
 
 def set_music_enabled(game: Path, enabled: bool) -> None:
+    _set_audio_enabled(game, enabled, _ENABLE_MUSIC, "music", "enable_music")
+
+
+def _set_audio_enabled(
+    game: Path, enabled: bool, pattern: re.Pattern[bytes], label: str, key: str
+) -> None:
+    """Shared by the music and sound-effects switches; both need the game closed."""
     if _game_running(game):
-        raise OSError("Close this EDOPro installation before changing its music setting.")
-    write_music_enabled(game, enabled)
+        raise OSError(f"Close this EDOPro installation before changing its {label} setting.")
+    write_audio_enabled(game, enabled, pattern, key)
 
 
 def _write_pending(state: Path, value: dict) -> None:

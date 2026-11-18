@@ -105,16 +105,21 @@ def _game_running(game: Path) -> bool:
 
 def write_music_enabled(game: Path, enabled: bool) -> None:
     """Change only the existing enable_music bit, preserving EDOPro's volume and file bytes."""
+    write_audio_enabled(game, enabled, _ENABLE_MUSIC, "enable_music")
+
+
+def write_audio_enabled(game: Path, enabled: bool, pattern: re.Pattern[bytes], key: str) -> None:
+    """Flip one existing 0/1 audio switch in system.conf, leaving every other byte alone."""
     root = game.resolve(strict=True)
     conf = root / "config" / "system.conf"
     if not conf.resolve().is_relative_to(root) or conf.is_symlink():
         raise OSError("The EDOPro settings file points outside the selected installation.")
     with appearance_lock(root):
         original = conf.read_bytes()
-        matches = list(_ENABLE_MUSIC.finditer(original))
-        if not matches:
+        matches = list(pattern.finditer(original))
+        if not matches or matches[-1][1] not in (b"0", b"1"):
             raise ValueError(
-                "Set Music in EDOPro’s audio settings. This configuration has no recognized enable_music setting."
+                f"This configuration has no recognized {key} switch. Use EDOPro’s audio settings."
             )
         match = matches[-1]
         value = b"1" if enabled else b"0"
