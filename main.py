@@ -14,7 +14,6 @@ import json
 import ntpath
 import os
 import re
-import sqlite3
 import subprocess
 import sys
 from collections.abc import Callable
@@ -33,14 +32,21 @@ from artwork_coverage import JPEG_END as JPEG_END
 from artwork_coverage import JPEG_MAGIC as JPEG_MAGIC
 from artwork_coverage import MIN_IMAGE_BYTES as MIN_IMAGE_BYTES
 from artwork_coverage import PNG_MAGIC as PNG_MAGIC
+from artwork_coverage import (
+    crop_field_face,
+    derived_field,
+    field_source,
+    mark_field_source,
+    scan_artwork_coverage,
+)
 from artwork_coverage import field_art_dir as _field_art_dir
 from artwork_coverage import image_sample as _image_sample
 from artwork_coverage import looks_like_image as _looks_like_image
 from artwork_coverage import looks_like_jpeg as _looks_like_jpeg
-from artwork_coverage import scan_artwork_coverage
 from artwork_flow import format_size as _format_size
 from artwork_flow import record_artwork_change
-from card_databases import FIELD_SPELL_TYPE, get_db_files
+from card_databases import FIELD_SPELL_TYPE as FIELD_SPELL_TYPE
+from card_databases import SMALL_DECK_INDEX_LIMIT, ArtworkIndex, get_db_files, read_artwork_index
 from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, app_version, find_edopro_folder
 from network_tls import create_http_session as _create_http_session
 from state_lock import appearance_lock
@@ -430,79 +436,15 @@ def prompt_for_edopro_path(cfg: Config, *, unreadable: list[str] | None = None) 
         )
 
 
-SMALL_DECK_INDEX_LIMIT = 500
-
-
 def scan_databases(
-    db_files: list[str],
-    *,
-    unreadable: list[str] | None = None,
-    only_ids: set[int] | None = None,
-) -> tuple[dict[int, str], dict[str, list[int]], set[int], set[int]]:
-    """
-    Read every .cdb and return:
-
-      id_to_name       - card_id -> card name (every card we know about)
-      name_to_official - name -> official ids (IDs < 100,000,000 only)
-      rush_ids         - card IDs that came from Rush Duel databases
-      field_ids        - card IDs of Field Spells (they also get playmat art)
-    """
-    id_to_name: dict[int, str] = {}
-    name_to_official: dict[str, list[int]] = {}
-    rush_ids: set[int] = set()
-    field_ids: set[int] = set()
-
-    # Deck passcodes are unbounded Python ints. SQLite only stores signed 64-bit IDs.
-    # Use bound IN queries in sorted batches to retain database/ID precedence.
-    join = " FROM datas d INNER JOIN texts t ON d.id = t.id"
-    queries = [(join + " ORDER BY d.id", ())]
-    if only_ids is not None:
-        ids = sorted(cid for cid in only_ids if 0 < cid <= 2**63 - 1)
-        queries = []
-        for start in range(0, len(ids), SMALL_DECK_INDEX_LIMIT):
-            batch = tuple(ids[start : start + SMALL_DECK_INDEX_LIMIT])
-            placeholders = ",".join("?" for _ in batch)
-            queries.append((f"{join} WHERE d.id IN ({placeholders}) ORDER BY d.id", batch))
-
-    for db in db_files:
-        # Skip empty placeholder files (EDOPro ships a 0-byte cards.cdb)
-        if os.path.getsize(db) == 0:
-            continue
-        is_rush = "rush" in os.path.basename(db).lower()
-        conn = None
-        try:
-            conn = sqlite3.connect(db)
-            for query, batch in queries:
-                try:
-                    rows = conn.execute("SELECT d.id, t.name, d.type" + query, batch).fetchall()
-                except sqlite3.OperationalError:
-                    # Hand-made databases may omit the type column.
-                    rows = conn.execute("SELECT d.id, t.name, 0" + query, batch).fetchall()
-                for card_id, name, card_type in rows:
-                    id_to_name[card_id] = name
-                    if is_rush:
-                        rush_ids.add(card_id)
-                    if (
-                        isinstance(card_type, int)
-                        and (card_type & FIELD_SPELL_TYPE) == FIELD_SPELL_TYPE
-                    ):
-                        field_ids.add(card_id)
-                    if card_id < 100_000_000:
-                        official_ids = name_to_official.setdefault(name, [])
-                        if card_id not in official_ids:
-                            official_ids.append(card_id)
-        except sqlite3.Error as exc:
-            if unreadable is not None:
-                unreadable.append(db)
-            console.print(f"[yellow]Error reading {db}: {exc}[/yellow]")
-        finally:
-            if conn is not None:
-                conn.close()
-
-    for official_ids in name_to_official.values():
-        official_ids.sort()
-
-    return id_to_name, name_to_official, rush_ids, field_ids
+    db_files: list[str], *, unreadable: list[str] | None = None, only_ids: set[int] | None = None
+) -> tuple[ArtworkIndex, dict[str, list[int]], set[int], set[int]]:
+    return read_artwork_index(
+        db_files,
+        unreadable=unreadable,
+        only_ids=only_ids,
+        on_error=lambda message: console.print(f"[yellow]{message}[/yellow]"),
+    )
 
 
 # Name matching
@@ -533,17 +475,6 @@ def find_official_match(
                     console.print(f'[dim]Pre-Errata lookup miss: "{clean}" (from "{name}")[/dim]')
 
     return name_to_official.get(name, []), pre_errata_miss, False
-
-
-def _is_token_name(name: str) -> bool:
-    """Return True when the card name identifies a token placeholder.
-
-    Matches names that end with the word "Token" (e.g. "Machine Token",
-    "Sheep Token", "Fiendsmith Token"). Real cards that merely contain
-    "Token" — "Token Collector", "Token Stampede", "Token Thanksgiving" —
-    don't end with it and stay in the Official bucket.
-    """
-    return name.rstrip().endswith(" Token")
 
 
 def load_manual_map(path: str) -> dict[str, str]:
@@ -663,7 +594,12 @@ def _field_failure_cache_path(cfg: Config) -> str:
     return os.path.join(os.path.dirname(cfg.config_path), FIELD_FAILURE_CACHE_FILENAME)
 
 
-def load_failure_cache(path: str, ttl_days: int = FAILURE_CACHE_TTL_DAYS) -> dict[int, float]:
+def load_failure_cache(
+    path: str,
+    ttl_days: int = FAILURE_CACHE_TTL_DAYS,
+    *,
+    contexts: dict[int, str | int] | None = None,
+) -> dict[int, float]:
     """Return {card_id: last_checked_epoch} for entries still within the TTL window."""
     if not os.path.exists(path):
         return {}
@@ -679,6 +615,10 @@ def load_failure_cache(path: str, ttl_days: int = FAILURE_CACHE_TTL_DAYS) -> dic
     for key, value in raw.items():
         try:
             cid = int(key)
+            if isinstance(value, list) and len(value) == 2:
+                value, context = value
+                if contexts is not None and isinstance(context, (str, int)):
+                    contexts[cid] = context
             ts = float(value)
         except (TypeError, ValueError):
             continue
@@ -687,13 +627,21 @@ def load_failure_cache(path: str, ttl_days: int = FAILURE_CACHE_TTL_DAYS) -> dic
     return fresh
 
 
-def save_failure_cache(path: str, cache: dict[int, float]) -> None:
+def save_failure_cache(
+    path: str, cache: dict[int, float], *, contexts: dict[int, str | int] | None = None
+) -> None:
     """Write the cache atomically; swallow errors so a bad disk never fails a sync."""
-    tmp = f"{path}.part"
+    tmp = f"{path}.{uuid4().hex}.part"
     try:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({str(cid): ts for cid, ts in cache.items()}, f)
+            json.dump(
+                {
+                    str(cid): [ts, contexts[cid]] if contexts and cid in contexts else ts
+                    for cid, ts in cache.items()
+                },
+                f,
+            )
         os.replace(tmp, path)
     except OSError:
         _remove_quietly(tmp)
@@ -705,7 +653,7 @@ def save_failure_cache(path: str, cache: dict[int, float]) -> None:
 class DownloadStats:
     """Counters for the current sync run."""
 
-    def __init__(self, rush_ids: set[int] | None = None):
+    def __init__(self, rush_ids: set[int] | None = None, token_ids: set[int] | None = None) -> None:
         self.success_ids: set[int] = set()
         self.ok_hd = 0
         self.ok_mapped = 0
@@ -719,6 +667,11 @@ class DownloadStats:
         self.failed_cards: list[tuple[int, str]] = []
         self.transient_ids: set[int] = set()
         self.field_ok = 0
+        self.field_derived = 0
+        self.field_local = 0
+        self.published_misses: set[int] = set()
+        self.token_ids = token_ids or set()
+        self.optional_tokens: set[int] = set()
         self.field_failed_cards: list[tuple[int, str]] = []
         self.field_transient_ids: set[int] = set()
         self.unexpected_errors: list[tuple[int, str, str]] = []
@@ -750,33 +703,12 @@ class DownloadStats:
         )
 
     @property
-    def token_failures(self) -> list[tuple[int, str]]:
-        """Official-ID cards whose name marks them as a token placeholder.
-
-        These have no artwork on YGOProDeck or ProjectIgnis by nature — they're
-        counters/tokens that EDOPro stores with official-looking IDs but which
-        Konami has never printed as a real card. Reporting them separately
-        keeps the 'Official' bucket focused on genuine coverage gaps.
-        """
-        return [
-            (cid, name)
-            for cid, name in self.failed_cards
-            if cid < 100_000_000
-            and cid not in self._rush_ids
-            and cid not in self.transient_ids
-            and _is_token_name(name)
-        ]
-
-    @property
     def official_failures(self) -> list[tuple[int, str]]:
         """Official non-Rush, non-token cards that failed — these are actual problems."""
         return [
             (cid, name)
             for cid, name in self.failed_cards
-            if cid < 100_000_000
-            and cid not in self._rush_ids
-            and cid not in self.transient_ids
-            and not _is_token_name(name)
+            if cid < 100_000_000 and cid not in self._rush_ids and cid not in self.transient_ids
         ]
 
     def record_success(self, card_id: int, counter_name: str) -> None:
@@ -788,6 +720,9 @@ class DownloadStats:
                 self.official_backup += 1
 
     def record_failure(self, card_id: int, name: str, transient: bool = False) -> None:
+        if card_id in self.token_ids and not transient:
+            self.optional_tokens.add(card_id)
+            return
         self.failed += 1
         self.failed_cards.append((card_id, name))
         if transient:
@@ -942,6 +877,8 @@ async def _try_download(
     timeout: aiohttp.ClientTimeout,
     max_retries: int,
     is_valid: Callable[[bytes], bool] = _looks_like_jpeg,
+    *,
+    source: str = "",
 ) -> FetchResult:
     """
     Attempt to GET `url` and save to `filepath`.
@@ -967,17 +904,9 @@ async def _try_download(
                             return FetchResult.ERROR
                         content.extend(chunk)
                     if is_valid(content):
-                        # Independent app instances can safely sync the same installation.
-                        # Only a complete, verified image replaces the destination.
-                        tmp_path = f"{filepath}.{uuid4().hex}.part"
-                        try:
-                            with open(tmp_path, "xb") as file_obj:
-                                file_obj.write(content)
-                            record_artwork_change(filepath, content)
-                            os.replace(tmp_path, filepath)
-                        except BaseException:
-                            _remove_quietly(tmp_path)
-                            raise
+                        if source:
+                            content = mark_field_source(content, source)
+                        _write_image(filepath, content)
                         return FetchResult.OK
                     if attempt >= total_attempts:
                         # A 200 with a non-image body is usually an error or
@@ -1000,6 +929,17 @@ async def _try_download(
             await asyncio.sleep(delay)
 
     return FetchResult.ERROR
+
+
+def _write_image(filepath: str, content: bytes | bytearray) -> None:
+    tmp_path = f"{filepath}.{uuid4().hex}.part"
+    try:
+        with open(tmp_path, "xb") as target:
+            target.write(content)
+        record_artwork_change(filepath, content)
+        os.replace(tmp_path, filepath)
+    finally:
+        _remove_quietly(tmp_path)
 
 
 def _remove_quietly(path: str) -> None:
@@ -1048,7 +988,7 @@ def build_download_candidates(
         substitutes.append(("manual-map", f"{official_source}/{manual_match}.jpg"))
     if is_suffix_match:
         for official_id in official_matches:
-            if official_id != card_id:
+            if official_id != card_id and str(official_id) != manual_match:
                 substitutes.append(("name-match", f"{official_source}/{official_id}.jpg"))
     if is_pre_errata_miss and card_id >= 10:
         offset_id = card_id - 10
@@ -1056,6 +996,8 @@ def build_download_candidates(
             substitutes.append(("pre-errata-offset", f"{official_source}/{offset_id}.jpg"))
 
     if original_text and (is_suffix_match or is_pre_errata_miss):
+        if card_id == config_module.HISTORICAL_IGNIS_PRINT:
+            own.reverse()
         return own + substitutes
 
     # Default: pinned/base HD art first, then the era ID on the big CDN,
@@ -1068,6 +1010,12 @@ def build_download_candidates(
 def is_era_entry(name: str, suffixes: list[str] | tuple[str, ...]) -> bool:
     """True for GOAT / Pre-Errata entries - the cards original_text affects."""
     return name.endswith(tuple(suffixes))
+
+
+def era_policy(cid: int, original_text: bool) -> str:
+    if original_text:
+        return "original-v2" if cid == config_module.HISTORICAL_IGNIS_PRINT else "original-v1"
+    return "hd-v3" if str(cid) in config_module.CORRECTED_HD_PRINTS else "hd-v2"
 
 
 async def download_card(
@@ -1137,6 +1085,18 @@ async def download_card(
         progress.advance(task_id)
 
 
+def _local_donor(folder: Path, donor: int) -> Path | None:
+    for ext in ("jpg", "png"):
+        path = folder / f"{donor}.{ext}"
+        try:
+            sample = _image_sample(str(path))
+        except FileNotFoundError:
+            continue
+        if _looks_like_image(sample) and field_source(sample) != "derived":
+            return path
+    return None
+
+
 async def download_field_art(
     session: aiohttp.ClientSession,
     card_id: int,
@@ -1145,45 +1105,85 @@ async def download_field_art(
     stats: DownloadStats,
     progress=None,
     task_id=None,
+    *,
+    donor: int | None = None,
+    layout: str = "card",
 ) -> None:
-    """Download the playmat artwork for one Field Spell.
-
-    YGOProDeck's cropped art (.jpg) first; ProjectIgnis's own field art (.png)
-    as the backup. EDOPro reads either extension from pics/field/.
-    """
+    folder = Path(field_art_dir(cfg))
+    jpeg = folder / f"{card_id}.jpg"
     timeout = aiohttp.ClientTimeout(total=cfg.timeout)
-    saw_transient = False
+    transient = False
+    installed = None
+    for candidate in (card_id, donor):
+        if candidate is None:
+            continue
+        if candidate != card_id and (local := _local_donor(folder, candidate)):
+            with local.open("rb") as handle:
+                content = handle.read(MAX_IMAGE_BYTES + 1)
+            if len(content) <= MAX_IMAGE_BYTES and _looks_like_image(content):
+                installed = jpeg.with_suffix(local.suffix)
+                _write_image(str(installed), mark_field_source(content, f"local:{candidate}"))
+                stats.field_local += 1
+                break
+        for host, ext, validate in (
+            ("field", "jpg", _looks_like_jpeg),
+            ("field_backup", "png", _looks_like_image),
+        ):
+            if host not in cfg.sources:
+                continue
+            path = jpeg.with_suffix("." + ext)
+            result = await _try_download(
+                session,
+                f"{cfg.sources[host]}/{candidate}.{ext}",
+                str(path),
+                timeout,
+                cfg.max_retries,
+                validate,
+                source=f"{host}:{candidate}",
+            )
+            if result is FetchResult.OK:
+                installed = path
+                break
+            transient |= result is FetchResult.ERROR
+        if installed:
+            break
 
-    url = f"{cfg.sources['field']}/{card_id}.jpg"
-    filepath = os.path.join(field_art_dir(cfg), f"{card_id}.jpg")
-    result = await _try_download(session, url, filepath, timeout, cfg.max_retries)
-    if result is FetchResult.ERROR:
-        saw_transient = True
+    if not installed:
+        # Leave a published image intact on force/repair, and avoid rewriting
+        # a valid crop when the scheduled check finds no higher-quality copy.
+        if _local_donor(folder, card_id):
+            stats.skipped += 1
+        elif derived_field(jpeg) and _looks_like_image(_image_sample(str(jpeg))):
+            stats.skipped += 1
+            if not transient:
+                stats.published_misses.add(card_id)
+        else:
+            face = folder.parent / f"{card_id}.jpg"
+            if face.is_file():
+                from sleeves.imaging import ensure_gui
 
-    if result is not FetchResult.OK and "field_backup" in cfg.sources:
-        url = f"{cfg.sources['field_backup']}/{card_id}.png"
-        filepath = os.path.join(field_art_dir(cfg), f"{card_id}.png")
-        result = await _try_download(
-            session, url, filepath, timeout, cfg.max_retries, is_valid=_looks_like_image
-        )
-        if result is FetchResult.ERROR:
-            saw_transient = True
+                ensure_gui()
+                crop = await asyncio.to_thread(crop_field_face, face, layout)
+                _write_image(str(jpeg), mark_field_source(crop, "derived"))
+                stats.field_derived += 1
+                installed = jpeg
+                if not transient:
+                    stats.published_misses.add(card_id)
+            else:
+                stats.record_field_failure(card_id, name, transient)
 
-    if result is FetchResult.OK:
-        if getattr(cfg, "repair", False):
-            # The fallback can replace a broken JPG with a PNG (or vice versa).
-            # Only remove the broken sibling after the replacement succeeds.
-            base, ext = os.path.splitext(filepath)
-            sibling = base + (".png" if ext == ".jpg" else ".jpg")
-            with contextlib.suppress(OSError):
-                with open(sibling, "rb") as existing:
-                    valid = _looks_like_image(existing.read())
-                if not valid:
-                    record_artwork_change(sibling, None)
-                    os.remove(sibling)
+    if installed:
         stats.field_ok += 1
-    else:
-        stats.record_field_failure(card_id, name, transient=saw_transient)
+        sibling = jpeg.with_suffix(".png") if installed == jpeg else jpeg
+        # A stale derived JPG can shadow the newly published PNG in the client.
+        if sibling.is_file() and (
+            derived_field(sibling)
+            or (
+                getattr(cfg, "repair", False) and not _looks_like_image(_image_sample(str(sibling)))
+            )
+        ):
+            record_artwork_change(sibling, None)
+            sibling.unlink()
     if progress and task_id is not None:
         progress.advance(task_id)
 
@@ -1391,6 +1391,8 @@ def _build_summary_rows(
             rows.append(("Backup art", f"{stats.official_backup:,}", "cyan"))
         if stats.field_ok:
             rows.append(("Field art", f"{stats.field_ok:,}", "green"))
+        if stats.field_derived:
+            rows.append(("Derived from card faces", f"{stats.field_derived:,}", "dim"))
         if stats.field_failed:
             rows.append(("Field art unavailable", f"{stats.field_failed:,}", "yellow"))
         if stats.skipped:
@@ -1399,14 +1401,11 @@ def _build_summary_rows(
             rows.append(("Unavailable", f"{stats.failed:,}", "yellow"))
             rush = stats.rush_failures
             unofficial = stats.unofficial_failures
-            tokens = stats.token_failures
             official = stats.official_failures
             if rush:
                 rows.append(("  Rush Duel", f"{rush:,}", "dim"))
             if unofficial:
                 rows.append(("  Anime / fan-made", f"{unofficial:,}", "dim"))
-            if tokens:
-                rows.append(("  Tokens / placeholders", f"{len(tokens):,}", "dim"))
             if official:
                 rows.append(("  Official", f"{len(official):,}", "dim"))
             if stats.transient_failures:
@@ -1437,6 +1436,8 @@ def _write_report(stats: DownloadStats, cfg: Config, runtime_seconds: float) -> 
                 f.write(f"Backup art:      {stats.official_backup:,}\n")
             if stats.field_ok:
                 f.write(f"Field art:       {stats.field_ok:,}\n")
+            if stats.field_derived:
+                f.write(f"Derived fields:  {stats.field_derived:,}\n")
             if stats.field_failed:
                 f.write(f"Field art n/a:   {stats.field_failed:,}\n")
             if stats.skipped:
@@ -1450,14 +1451,11 @@ def _write_report(stats: DownloadStats, cfg: Config, runtime_seconds: float) -> 
                 f.write(f"{'=' * 40}\n")
                 rush = stats.rush_failures
                 unofficial = stats.unofficial_failures
-                tokens = stats.token_failures
                 official = stats.official_failures
                 if rush:
                     f.write(f"  Rush Duel cards:       {rush:,}\n")
                 if unofficial:
                     f.write(f"  Anime / fan-made:      {unofficial:,}\n")
-                if tokens:
-                    f.write(f"  Tokens / placeholders: {len(tokens):,}\n")
                 if stats.transient_failures:
                     f.write(f"  Network errors:        {stats.transient_failures:,}")
                     f.write("  (will be retried automatically next run)\n")
@@ -1467,7 +1465,7 @@ def _write_report(stats: DownloadStats, cfg: Config, runtime_seconds: float) -> 
                     f.write("-" * 60 + "\n")
                     for card_id, card_name in official:
                         f.write(f"  {card_id}\t{card_name}\n")
-            else:
+            elif not stats.optional_tokens:
                 f.write("\nAll cards downloaded successfully.\n")
 
             if stats.unexpected_errors:
@@ -1749,14 +1747,46 @@ def _count_deck_files(folder: str) -> int:
     return count
 
 
+def _field_miss_applies(
+    pics: Path,
+    cid: int,
+    donor: int | None,
+    checked_donor: str | int | None,
+    derived: bool,
+    pending_faces: set[int],
+) -> bool:
+    # Legacy timestamps covered own-ID hosts only. A new donor or a face
+    # arriving since the 404 gives this field a source it hasn't exhausted.
+    if donor:
+        try:
+            if donor != checked_donor or _local_donor(pics / "field", donor):
+                return False
+        except OSError:
+            # An unreadable donor cannot substantiate a negative cache hit.
+            return False
+    return derived or (cid not in pending_faces and not (pics / f"{cid}.jpg").is_file())
+
+
 def collect_coverage_stats(cfg: Config, id_to_name: dict[int, str], field_ids: set[int]) -> dict:
     """Gather how much artwork is on disk versus what the databases know about."""
-    stats = scan_artwork_coverage(cfg.pics_path, id_to_name, field_ids)
-    cached = len(load_failure_cache(_failure_cache_path(cfg)))
-    field_cached = len(load_failure_cache(_field_failure_cache_path(cfg)))
+    tokens = getattr(id_to_name, "tokens", set())
+    cached = load_failure_cache(_failure_cache_path(cfg)).keys() & id_to_name.keys()
+    stats = scan_artwork_coverage(
+        cfg.pics_path, id_to_name, field_ids, optional_missing=cached & tokens
+    )
+    donors = getattr(id_to_name, "field_donors", {})
+    checked: dict[int, str | int] = {}
+    fields = load_failure_cache(_field_failure_cache_path(cfg), contexts=checked)
+    pics = Path(cfg.pics_path)
+    missing_fields = sum(
+        not has_field_art(cfg, cid)
+        and _field_miss_applies(pics, cid, donors.get(cid), checked.get(cid), False, set())
+        for cid in fields.keys() & field_ids
+    )
     return {
         **stats,
-        "known_missing": cached + field_cached,
+        "known_missing": sum(not (pics / f"{cid}.jpg").is_file() for cid in cached - tokens)
+        + missing_fields,
         "pics_path": os.path.abspath(cfg.pics_path),
     }
 
@@ -1774,14 +1804,19 @@ def print_coverage_stats(cfg: Config, id_to_name: dict[int, str], field_ids: set
     console.print()
     console.rule("[bold]Artwork Coverage[/bold]")
     console.print(f"  Cards indexed   {data['cards_total']:>10,}")
+    optional = data["cards_total"] - data["cards_expected"]
+    if optional:
+        console.print(f"  Optional tokens without art  {optional:,}")
     console.print(
         f"  Card art        {data['cards_have']:>10,}  "
-        f"[dim]({pct(data['cards_have'], data['cards_total'])})[/dim]"
+        f"[dim]({pct(data['cards_have'], data['cards_expected'])})[/dim]"
     )
     console.print(
         f"  Field art       {data['fields_have']:>10,}  [dim]of {data['fields_total']:,} "
         f"Field Spells ({pct(data['fields_have'], data['fields_total'])})[/dim]"
     )
+    if data["fields_derived"]:
+        console.print(f"  Derived fields  {data['fields_derived']:>10,}")
     console.print(f"  Disk usage      {_format_size(data['disk_bytes']):>10}")
     if data["known_missing"]:
         console.print(
@@ -1830,7 +1865,7 @@ async def run(cfg: Config):
         if not dbs:
             return None
 
-    if not cfg.stats:
+    if not cfg.stats and not cfg.dry_run:
         os.makedirs(cfg.pics_path, exist_ok=True)
 
     deck_filter = None
@@ -1842,18 +1877,21 @@ async def run(cfg: Config):
         index = scan_databases(dbs, unreadable=unreadable, only_ids=deck_filter)
         # A suffix match may need a base card outside this deck. The full scan
         # also distinguishes missing deck IDs from an empty or corrupt installation.
-        scoped_index = bool(index[0]) and not any(
-            is_era_entry(name, era_suffixes) for name in index[0].values()
+        scoped_index = (
+            bool(index[0])
+            and not index[3]
+            and not any(is_era_entry(name, era_suffixes) for name in index[0].values())
         )
     if not scoped_index:
         index = scan_databases(dbs, unreadable=unreadable)
     full_id_to_name, name_to_official, rush_ids, field_ids = index
+    metadata = full_id_to_name if isinstance(full_id_to_name, ArtworkIndex) else ArtworkIndex()
     manual_map = load_manual_map(cfg.manual_map_file)
     scope = "selected " if scoped_index else ""
     console.print(f"[dim]Indexed {len(full_id_to_name):,} {scope}cards[/dim]")
 
     has_non_empty_db = any(os.path.isfile(db) and os.path.getsize(db) > 0 for db in dbs)
-    if has_non_empty_db and not full_id_to_name:
+    if has_non_empty_db and not full_id_to_name and not metadata.excluded:
         raise SyncInputError(
             "The selected databases contain no readable cards. Open EDOPro to update "
             "its card databases, or choose another installation."
@@ -1930,7 +1968,7 @@ async def run(cfg: Config):
     missing_from_dbs = set()
     if deck_filter is not None:
         id_to_name = {cid: name for cid, name in full_id_to_name.items() if cid in deck_filter}
-        missing_from_dbs = deck_filter - full_id_to_name.keys()
+        missing_from_dbs = deck_filter - full_id_to_name.keys() - metadata.excluded
         console.print(
             f"[dim]Deck filter: {len(id_to_name):,} of {len(deck_filter):,} "
             "deck cards found in the scanned databases.[/dim]"
@@ -1944,7 +1982,11 @@ async def run(cfg: Config):
         id_to_name = full_id_to_name
 
     failure_cache_path = _failure_cache_path(cfg)
-    failure_cache = load_failure_cache(failure_cache_path)
+    checked_policies: dict[int, str | int] = {}
+    failure_cache = load_failure_cache(failure_cache_path, contexts=checked_policies)
+    excluded = metadata.excluded if deck_filter is None else metadata.excluded & deck_filter
+    for cid in excluded:
+        failure_cache.pop(cid, None)
     if cfg.recheck_missing or cfg.force:
         # Forget only the cards in scope for THIS run. A deck-filtered recheck
         # must not wipe cache entries for cards it never re-attempts.
@@ -1965,7 +2007,6 @@ async def run(cfg: Config):
 
     # Track the applied policy per folder and card, so partial/deck runs and
     # failed downloads do not mark untouched artwork as upgraded.
-    era_policy = "original-v1" if cfg.original_text else "hd-v2"
     era_folder = os.path.normcase(os.path.abspath(cfg.edopro_path))
     applied = cfg.era_art_applied.get(era_folder, {})
     if not isinstance(applied, dict):
@@ -1973,11 +2014,17 @@ async def run(cfg: Config):
     cfg.refresh_era_ids = {
         cid
         for cid, name in id_to_name.items()
-        if is_era_entry(name, era_suffixes) and applied.get(str(cid)) != era_policy
+        if is_era_entry(name, era_suffixes)
+        and applied.get(str(cid)) != era_policy(cid, cfg.original_text)
     }
-    if cfg.refresh_era_ids and not cfg.dry_run:
-        for cid in cfg.refresh_era_ids:
-            failure_cache.pop(cid, None)
+    if cfg.refresh_era_ids:
+        for cid in cfg.refresh_era_ids & failure_cache.keys():
+            policy = era_policy(cid, cfg.original_text)
+            previous = checked_policies.get(cid)
+            if previous != policy and (
+                previous or policy in ("hd-v3", "original-v2") or str(cid) in applied
+            ):
+                failure_cache.pop(cid)
         console.print(
             f"[yellow]Refreshing {len(cfg.refresh_era_ids):,} GOAT/Pre-Errata "
             f"card(s) with {'original wording' if cfg.original_text else 'HD artwork'}.[/yellow]"
@@ -1986,6 +2033,7 @@ async def run(cfg: Config):
             cfg.notice_sink(f"Refreshing {len(cfg.refresh_era_ids):,} GOAT/Pre-Errata cards")
 
     skipped_by_cache = 0
+    skipped_tokens = 0
     if cfg.force:
         missing_ids = list(id_to_name.keys())
     else:
@@ -2006,7 +2054,10 @@ async def run(cfg: Config):
                 if present:
                     continue
             if card_id in failure_cache:
-                skipped_by_cache += 1
+                if card_id in metadata.tokens:
+                    skipped_tokens += 1
+                else:
+                    skipped_by_cache += 1
                 continue
             missing_ids.append(card_id)
         if skipped_by_cache:
@@ -2017,7 +2068,9 @@ async def run(cfg: Config):
 
     # Field Spell playmat art (pics/field/) — same incremental + cache logic.
     field_cache_path = _field_failure_cache_path(cfg)
-    field_cache = load_failure_cache(field_cache_path)
+    checked_donors: dict[int, str | int] = {}
+    field_cache = load_failure_cache(field_cache_path, contexts=checked_donors)
+    field_donors = metadata.field_donors
     if cfg.recheck_missing or cfg.force:
         for cid in id_to_name:
             field_cache.pop(cid, None)
@@ -2038,18 +2091,30 @@ async def run(cfg: Config):
         if deck_filter is None and candidate_fields and not cfg.force:
             with contextlib.suppress(OSError):
                 existing_fields = _present_art_filenames(field_art_dir(cfg), (".jpg", ".png"))
+        pics = Path(cfg.pics_path)
+        pending_faces = set(missing_ids)
         for cid in candidate_fields:
-            if not cfg.force and cid not in broken_fields:
-                present = (
-                    (f"{cid}.jpg" in existing_fields or f"{cid}.png" in existing_fields)
-                    if existing_fields is not None
-                    else has_field_art(cfg, cid)
-                )
-                if present:
-                    continue
-            if cid in field_cache:
-                skipped_by_cache += 1
+            present = (
+                f"{cid}.jpg" in existing_fields or f"{cid}.png" in existing_fields
+                if existing_fields is not None
+                else has_field_art(cfg, cid)
+            )
+            derived = present and derived_field(pics / "field" / f"{cid}.jpg")
+            if not cfg.force and cid not in broken_fields and present and not derived:
                 continue
+            if cid in field_cache:
+                if _field_miss_applies(
+                    pics,
+                    cid,
+                    field_donors.get(cid),
+                    checked_donors.get(cid),
+                    derived,
+                    pending_faces,
+                ):
+                    if not present:
+                        skipped_by_cache += 1
+                    continue
+                del field_cache[cid]
             missing_fields.append(cid)
 
     # Nothing missing? Offer the easy full refresh (re-download everything).
@@ -2061,6 +2126,7 @@ async def run(cfg: Config):
         and not cfg.quiet
         and id_to_name
         and not skipped_by_cache
+        and not skipped_tokens
         and not missing_from_dbs
         and cfg.interactive_prompts
         and _prompt_yes_no("All artwork is already downloaded. Re-download everything anyway?")
@@ -2092,11 +2158,15 @@ async def run(cfg: Config):
                     "Waiting for card data",
                     "Open EDOPro and let it download its card databases, then sync again.",
                 )
-            elif skipped_by_cache or missing_from_dbs:
+            elif skipped_by_cache or skipped_tokens or missing_from_dbs:
                 notes = []
                 if skipped_by_cache:
                     notes.append(
                         f"Previously unavailable images ({skipped_by_cache:,}) are retried after 14 days."
+                    )
+                if skipped_tokens:
+                    notes.append(
+                        f"Optional token art ({skipped_tokens:,}) is retried after 14 days."
                     )
                 if missing_from_dbs:
                     notes.append(
@@ -2118,6 +2188,16 @@ async def run(cfg: Config):
             "into pics/field/[/dim]"
         )
 
+        for cid in missing_fields:
+            donor = field_donors.get(cid)
+            stages = ["own published art"]
+            if donor:
+                if local := _local_donor(pics / "field", donor):
+                    stages.append(f"installed donor {local.name}")
+                stages.append(f"published donor {donor}")
+            stages.append(f"crop from {cid}.jpg if present after the card sync")
+            console.print(f"  [dim]Field {cid} ({id_to_name[cid]}):[/dim] " + " -> ".join(stages))
+
     # Pre-compute match info for every card to avoid redundant lookups in workers.
     card_match_info: dict[int, tuple[list[int], str | None, bool, bool]] = {}
     for card_id in missing_ids:
@@ -2131,7 +2211,7 @@ async def run(cfg: Config):
         manual = manual_map.get(str(card_id))
         card_match_info[card_id] = (official, manual, is_pre_errata_miss, is_suffix_match)
 
-    stats = DownloadStats(rush_ids=rush_ids)
+    stats = DownloadStats(rush_ids=rush_ids, token_ids=metadata.tokens)
     if cfg.dry_run:
         stats.planned_fields = len(missing_fields)
     queue: asyncio.Queue[int] = asyncio.Queue()
@@ -2231,7 +2311,15 @@ async def run(cfg: Config):
                             )
                         try:
                             await download_field_art(
-                                session, cid, fname, cfg, stats, progress, task_id
+                                session,
+                                cid,
+                                fname,
+                                cfg,
+                                stats,
+                                progress,
+                                task_id,
+                                donor=field_donors.get(cid),
+                                layout=metadata.field_layout(cid, rush_ids),
                             )
                         except asyncio.CancelledError:
                             raise
@@ -2283,19 +2371,25 @@ async def run(cfg: Config):
 
     if missing_ids and not cfg.dry_run:
         now_ts = datetime.now().timestamp()
+        for cid in stats.optional_tokens:
+            failure_cache[cid] = now_ts
         for cid, _ in stats.failed_cards:
             # Only remember definitive misses; network hiccups retry next run.
             if cid not in stats.transient_ids:
                 failure_cache[cid] = now_ts
+                if cid in cfg.refresh_era_ids:
+                    checked_policies[cid] = era_policy(cid, cfg.original_text)
         # Forget cached entries whose image is on disk now (e.g. after a recheck).
         for cid in list(failure_cache.keys()):
-            if os.path.exists(os.path.join(cfg.pics_path, f"{cid}.jpg")):
+            if (cid not in cfg.refresh_era_ids or cid in stats.success_ids) and os.path.exists(
+                os.path.join(cfg.pics_path, f"{cid}.jpg")
+            ):
                 del failure_cache[cid]
-        save_failure_cache(failure_cache_path, failure_cache)
+        save_failure_cache(failure_cache_path, failure_cache, contexts=checked_policies)
 
     if not cfg.dry_run:
         for cid in cfg.refresh_era_ids & stats.success_ids:
-            applied[str(cid)] = era_policy
+            applied[str(cid)] = era_policy(cid, cfg.original_text)
         if applied:
             cfg.era_art_applied[era_folder] = applied
             config_module.save_setting(cfg.config_path, "era_art_applied", cfg.era_art_applied)
@@ -2312,13 +2406,20 @@ async def run(cfg: Config):
 
     if missing_fields and not cfg.dry_run:
         now_ts = datetime.now().timestamp()
-        for cid, _ in stats.field_failed_cards:
-            if cid not in stats.field_transient_ids:
-                field_cache[cid] = now_ts
-        for cid in list(field_cache.keys()):
-            if has_field_art(cfg, cid):
+        misses = stats.published_misses | {
+            cid for cid, _ in stats.field_failed_cards if cid not in stats.field_transient_ids
+        }
+        for cid in misses:
+            field_cache[cid] = now_ts
+            checked_donors.pop(cid, None)
+            if cid in field_donors:
+                checked_donors[cid] = field_donors[cid]
+        for cid in field_cache.keys() - misses:
+            if has_field_art(cfg, cid) and not derived_field(
+                Path(field_art_dir(cfg), f"{cid}.jpg")
+            ):
                 del field_cache[cid]
-        save_failure_cache(field_cache_path, field_cache)
+        save_failure_cache(field_cache_path, field_cache, contexts=checked_donors)
 
     if cfg.prune and not cfg.dry_run:
         if deck_filter is not None:
@@ -2329,7 +2430,7 @@ async def run(cfg: Config):
         elif unreadable or not full_id_to_name or _run_was_cancelled(cfg):
             console.print("[yellow]Skipping --prune: no complete card index is available.[/yellow]")
         else:
-            pruned = prune_orphan_images(cfg.pics_path, set(full_id_to_name.keys()))
+            pruned = prune_orphan_images(cfg.pics_path, set(full_id_to_name) | metadata.excluded)
             if pruned:
                 console.print(f"[dim]Pruned {pruned:,} orphaned images[/dim]")
 
@@ -2404,6 +2505,10 @@ def main() -> int:
         elif cfg.cli.legacy_gui:
             import gui
 
+            # Tk runs sync in a worker. Qt's image codecs need their application on the main thread.
+            from sleeves.imaging import ensure_gui
+
+            ensure_gui()
             launched_gui = True
             try:
                 exit_code = gui.run_app(cfg, VERSION, run, _apply_gui_choices)

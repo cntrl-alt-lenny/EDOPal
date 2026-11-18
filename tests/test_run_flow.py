@@ -162,6 +162,36 @@ class RunFlowTests(unittest.TestCase):
         retry = self._run(self._cfg(), cards, {511000818: main.FetchResult.OK})
         self.assertTrue(retry.await_count)
 
+    def test_corrected_prints_refresh_only_in_the_affected_mode(self) -> None:
+        cards = {
+            511000824: "Ring of Destruction (Pre-Errata)",
+            88264988: "Red-Eyes Darkness Metal Dragon (Pre-Errata)",
+            511000818: "Sinister Serpent (Pre-Errata)",
+        }
+        folder = os.path.normcase(os.path.abspath(self.root))
+        for historical, previous, affected in (
+            (False, "hd-v2", 511000824),
+            (True, "original-v1", 88264988),
+        ):
+            with self.subTest(historical=historical):
+                Path(self.config_path).write_text(
+                    json.dumps(
+                        {
+                            "original_text": historical,
+                            "era_art_applied": {folder: dict.fromkeys(map(str, cards), previous)},
+                        }
+                    )
+                )
+                for cid in cards:
+                    Path(self.pics, f"{cid}.jpg").write_bytes(b"old print")
+                self._seed_cache([affected, 999])
+                attempted = self._run(self._cfg(), cards, {affected: main.FetchResult.OK})
+                self.assertEqual(
+                    [Path(c.args[2]).stem for c in attempted.await_args_list], [str(affected)]
+                )
+                self.assertEqual(self._cache_keys(), {"999"})
+                self.assertFalse(self._run(self._cfg(), cards, {}).await_count)
+
     def test_deck_upgrade_leaves_other_era_cards_pending(self):
         cards = {111: "First (Pre-Errata)", 222: "Second (Pre-Errata)"}
         for cid in cards:

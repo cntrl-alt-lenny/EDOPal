@@ -15,15 +15,21 @@ import sys
 import time
 from collections.abc import Iterator
 
+from card_databases import iter_db_files
+
+# Only these installed HD prints need refreshing when upgrading from hd-v2.
+CORRECTED_HD_PRINTS = {
+    "504700040": "23401840",  # Senju of the Thousand Hands
+    "504700142": "83011278",  # Mystic Tomato
+    "511000824": "83555667",  # Ring of Destruction, flames
+    "511000825": "83555666",  # Ring of Destruction, grenades
+    "511002992": "14878871",  # Rescue Cat
+    "511003023": "80604092",  # Ultimate Offering
+}
+HISTORICAL_IGNIS_PRINT = 88264988  # CDN serves modern Red-Eyes text under the historical ID.
+
 BUILTIN_MANUAL_MAP: dict[str, str] = {
-    # When multiple suffix variants (GOAT / Pre-Errata) share the same base name,
-    # suffix stripping returns all official IDs but always tries them in the same
-    # order — so every variant ends up with the first artwork.  These overrides pin
-    # each variant to a distinct official artwork.
-    #
-    # Ring of Destruction (Pre-Errata)
-    "511000824": "83555666",
-    "511000825": "83555667",
+    **CORRECTED_HD_PRINTS,
     # Crush Card Virus (Pre-Errata)
     "511000822": "57728570",
     "511000823": "57728571",
@@ -32,7 +38,6 @@ BUILTIN_MANUAL_MAP: dict[str, str] = {
     "511006005": "68540059",
     # Rescue Cat — GOAT + Pre-Errata
     "504700179": "14878871",
-    "511002992": "14878872",
 }
 
 DEFAULTS = {
@@ -208,20 +213,8 @@ def folder_has_card_databases(path: str) -> bool:
     """
     if not path or not os.path.isdir(path):
         return False
-    if os.path.isfile(os.path.join(path, "cards.cdb")):
-        return True
-
-    expansions = os.path.join(path, "expansions")
-    if os.path.isdir(expansions):
-        with contextlib.suppress(OSError):
-            if any(name.endswith(".cdb") for name in os.listdir(expansions)):
-                return True
-
-    repositories = os.path.join(path, "repositories")
-    if os.path.isdir(repositories):
-        for _root, _dirs, filenames in os.walk(repositories):
-            if any(name.endswith(".delta.cdb") for name in filenames):
-                return True
+    with contextlib.suppress(OSError):
+        return next(iter_db_files(path), None) is not None
     return False
 
 

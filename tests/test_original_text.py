@@ -108,6 +108,27 @@ class OriginalTextTests(unittest.TestCase):
         self.assertEqual(reasons(sources=sources, original_text=True), ["direct-id", "name-match"])
 
 
+def test_reviewed_hd_prints_and_historical_wording() -> None:
+    expected = {
+        504700040: 23401840,
+        504700142: 83011278,
+        511000824: 83555667,
+        511000825: 83555666,
+        511002992: 14878871,
+        511003023: 80604092,
+    }
+    for cid, donor in expected.items():
+        pin = config_module.BUILTIN_MANUAL_MAP[str(cid)]
+        assert urls(card_id=cid, manual_match=pin)[0] == f"{OFFICIAL}/{donor}.jpg"
+    assert urls(card_id=88264988, original_text=True)[:2] == [
+        f"{BACKUP}/88264988.jpg",
+        f"{OFFICIAL}/88264988.jpg",
+    ]
+    assert urls(card_id=88264988, official_matches=[88264978])[0] == f"{OFFICIAL}/88264978.jpg"
+    assert urls()[0] == f"{OFFICIAL}/8131171.jpg"
+    assert urls(original_text=True)[0] == f"{OFFICIAL}/511000818.jpg"
+
+
 class EraEntryTests(unittest.TestCase):
     """Which cards the setting applies to."""
 

@@ -114,14 +114,14 @@ class SyncReportingTests(unittest.TestCase):
         self.assertIn(("Backup art", "1", "cyan"), rows)
 
     def test_token_cards_are_split_out_of_official_failures(self):
-        stats = main.DownloadStats()
+        stats = main.DownloadStats(token_ids={42427231, 35552986})
         stats.record_failure(42427231, "Machine Token")
         stats.record_failure(35552986, "Fiendsmith Token")
         stats.record_failure(46986414, "Dark Magician")
 
         self.assertEqual(
-            [cid for cid, _ in stats.token_failures],
-            [42427231, 35552986],
+            stats.optional_tokens,
+            {42427231, 35552986},
         )
         self.assertEqual(
             [cid for cid, _ in stats.official_failures],
@@ -135,7 +135,7 @@ class SyncReportingTests(unittest.TestCase):
         stats.record_failure(69247836, "Token Stampede")
         stats.record_failure(57063504, "Token Thanksgiving")
 
-        self.assertEqual(stats.token_failures, [])
+        self.assertEqual(stats.optional_tokens, set())
         self.assertEqual(len(stats.official_failures), 3)
 
     def test_dry_run_summary_counts_planned_downloads(self):
@@ -159,17 +159,18 @@ class SyncReportingTests(unittest.TestCase):
         self.assertIn(("  Network errors", "1", "dim"), rows)
         self.assertEqual(stats.official_failures, [])
 
-    def test_summary_includes_token_breakdown_row(self):
-        stats = main.DownloadStats()
+    def test_summary_omits_unavailable_tokens(self):
+        stats = main.DownloadStats(token_ids={42427231})
         stats.record_failure(42427231, "Machine Token")
         cfg = self.make_cfg(quiet=True)
 
         rows = main._build_summary_rows(stats, cfg, 5.0)
 
-        self.assertIn(("  Tokens / placeholders", "1", "dim"), rows)
+        self.assertFalse(any(label == "Unavailable" for label, _, _ in rows))
+        self.assertEqual(stats.failed, 0)
 
-    def test_report_file_lists_tokens_separately(self):
-        stats = main.DownloadStats()
+    def test_report_excludes_optional_tokens_from_failures(self):
+        stats = main.DownloadStats(token_ids={42427231})
         stats.record_failure(42427231, "Machine Token")
         stats.record_failure(46986414, "Dark Magician")
         cfg = self.make_cfg(save_report=True, quiet=True)
@@ -188,7 +189,7 @@ class SyncReportingTests(unittest.TestCase):
         with open(report_path, encoding="utf-8") as f:
             contents = f.read()
 
-        self.assertIn("Tokens / placeholders: 1", contents)
+        self.assertIn("Unavailable:     1", contents)
         self.assertIn("Official cards:        1", contents)
         # The "Dark Magician" entry should appear in the official list; "Machine Token" should not.
         self.assertIn("Dark Magician", contents)
