@@ -1,70 +1,18 @@
-EDOPro HD Cards Downloader for Linux
-========================
+EDOPal for Linux
+Your unofficial companion for EDOPro.
 
-What it does
-------------
-Downloads the missing HD card artwork for EDOPro (ProjectIgnis), so your
-cards look sharp instead of blurry. Rush Duel, anime, GOAT, Pre-Errata and
-alternate artworks are all covered, plus the playmat art for Field Spells.
+The Linux build targets x86-64 with glibc 2.35 or newer. On Steam Deck,
+choose Steam > Power > Switch to Desktop. Game Mode is untested.
 
-How to use it
--------------
-1. Unzip the download.
-2. Double-click EDOPro-HD-Sync (and choose "Run"), or run ./EDOPro-HD-Sync
-   from a terminal.
-3. It finds your ProjectIgnis folder and shows it in the window. If it got
-   the wrong one, press "Change folder" and pick the right folder.
-4. Choose Full library or My decks, then press Sync HD cards.
+1. Extract the downloaded ZIP.
+2. Open EDOPal from your file manager or run ./EDOPal in a terminal
+   in the extracted folder. If needed, first run chmod +x EDOPal.
+3. Check the game folder shown in the window. Use Change folder to pick
+   the ProjectIgnis folder you play on.
+4. Open HD Cards, choose My decks or Full library, then select
+   Sync HD cards.
 
-That's it. There is nothing to install, and the download contains only this
-app and this ReadMe. You can put the app wherever you like; its small settings,
-retry caches, and optional reports live in your normal per-user config folder.
+Close EDOPro before applying appearance or audio changes. Settings stay
+in the per-user EDOPro HD Sync folder, usually under ~/.config.
 
-If your file manager will not run it, mark it executable first:
-  chmod +x EDOPro-HD-Sync
-
-Customize EDOPro
-----------------
-Close the game, open Customize EDOPro, and preview a Monokai skin in the
-menu, deck editor and duel field. Select Highlight the turn player to see
-a clearer active-player indicator. Pick Vortex or 1998 OCG independently for
-each side, or preview the Thonk and Synth effects. Each section has its own
-apply and restore controls. Reopen EDOPro to use your selections.
-
-Soundtracks and tournament decks
---------------------------------
-Open Music library to preview deck editor or duel music by game. Select
-Add audio to import a recording. Manage library lets you bring a personal
-soundtrack folder over from another device. If game music is off, close EDOPro
-and choose Enable game music. Your volume setting is preserved. Choose
-Restore playlist to bring your music back.
-
-Open Tournament decks, choose a format and event, then preview or select a
-published list. Add to EDOPro saves the deck in the selected game's deck
-folder. Sync deck artwork gets the pictures for those cards. For Goat events,
-Use installed GOAT card versions saves an additional historical deck. To host
-with it, set Forbidden List to 2005.4 GOAT, Rule to GOAT, and Allowed Cards
-to Anything goes. Leave the deck checks enabled.
-
-Helpful notes
--------------
-- The app takes a second or two to start. That is normal: it unpacks itself
-  each time so it can stay a single file.
-- Only missing artwork is downloaded, so repeat runs are quick. Tick
-  "Re-download everything" for a full refresh.
-- "My decks" is much faster on a fresh install - it grabs
-  just the cards in your saved decks.
-- "Show coverage" tells you how much artwork you have without downloading.
-- The app tells you when a new version is out. Download it from
-  https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases and replace
-  this file with the new one.
-- Works on Steam Deck (Desktop Mode), Ubuntu, Fedora, Arch, etc. -
-  x86_64 systems with glibc 2.35 or newer.
-
-Quick sanity check
-------------------
-From a terminal in this folder you can also run:
-
-./EDOPro-HD-Sync --health-check
-
-That runs a quick offline check to verify the tool is working correctly.
+Downloads: https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases

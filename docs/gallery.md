@@ -1,24 +1,26 @@
-# Screenshot gallery
+# EDOPal screenshot gallery
 
-[Artwork home](../assets/app-window.png) · [Deck-editor music](screenshots/Soundtracks-deck.png) · [Duel music](screenshots/Soundtracks-duels.png) · [An imported tournament deck in a Goat duel](screenshots/GOAT-LAN-duel.png)
+[Back to EDOPal](../README.md) · [Documentation](index.md)
 
-Choose a scene to open the full-size EDOPro capture. The turn highlight is optional for every skin.
+Captures of the rebuilt app are pending. The table gives their order and filenames. Use the final EDOPal build and synthetic installations. Capture each view at 1600×1000 and check the layout at 1280×800. Turn off **Save a sync report** for the results capture so the full local report path stays out of the image.
 
-| Skin | Menu | Deck editor | Duel field | Turn highlight |
-|---|---|---|---|---|
-| Abyss | [Menu](../assets/window/gallery/large/abyss-menu.png) | [Deck editor](../assets/window/gallery/large/abyss-deck.png) | [Duel field](../assets/window/gallery/large/abyss-duel.png) | [Turn highlight](../assets/window/gallery/large/abyss-turn.png) |
-| Moon | [Menu](../assets/window/gallery/large/moon-menu.png) | [Deck editor](../assets/window/gallery/large/moon-deck.png) | [Duel field](../assets/window/gallery/large/moon-duel.png) | [Turn highlight](../assets/window/gallery/large/moon-turn.png) |
-| Nebula | [Menu](../assets/window/gallery/large/nebula-menu.png) | [Deck editor](../assets/window/gallery/large/nebula-deck.png) | [Duel field](../assets/window/gallery/large/nebula-duel.png) | [Turn highlight](../assets/window/gallery/large/nebula-turn.png) |
-| Ristretto | [Menu](../assets/window/gallery/large/ristretto-menu.png) | [Deck editor](../assets/window/gallery/large/ristretto-deck.png) | [Duel field](../assets/window/gallery/large/ristretto-duel.png) | [Turn highlight](../assets/window/gallery/large/ristretto-turn.png) |
+| Order | Planned file | What to show |
+| --- | --- | --- |
+| 1 | `docs/screenshots/edopal-overview.png` | README hero with the sidebar, a selected demo installation and HD Cards set to **My decks**. |
+| 2 | `docs/screenshots/hd-cards-results.png` | A completed deck-only artwork sync with card and Field Spell results. |
+| 3 | `docs/screenshots/skins-theme-maker.png` | Theme Maker with colour controls and a generated wallpaper in the duel preview. |
+| 4 | `docs/screenshots/sleeves-designer.png` | A patterned sleeve design with distinct player and opponent previews. |
+| 5 | `docs/screenshots/sounds.png` | A sound set with individual duel cues and audition controls. |
+| 6 | `docs/screenshots/music.png` | One game selected, a music moment and a playlist of playable demo tracks. |
+| 7 | `docs/screenshots/tournament-decks.png` | Event standings and a published deck preview ready to import. |
+| 8 | `docs/screenshots/my-decks.png` | Two saved versions compared with section changes visible. |
+| 9 | `docs/screenshots/replays.png` | The replay shelf with a selected demo replay, its details and notes. |
+| 10 | `docs/screenshots/backup-transfer.png` | A restore preview showing a conflict and the choices for keeping both files. |
+| 11 | `docs/screenshots/health-check.png` | Health findings for a demo installation and the support summary action. |
+| 12 | `docs/screenshots/content-packs.png` | A redistributable example pack with its creator, licence, size and download state. |
 
-## Soundtrack library
+Add the hero image to the README and link the gallery images here once the files exist. Use the [capture command](../CONTRIBUTING.md#pages-tests-and-screenshots) as a starting point.
 
-![Deck-editor soundtrack selection](screenshots/Soundtracks-deck.png)
+## EDOPro duel example
 
-![Regular duel soundtrack selection](screenshots/Soundtracks-duels.png)
-
-## Tournament decks
-
-An imported Goat Format Championship winning deck in an EDOPro duel with both deck checks enabled.
-
-![First turn of the local Goat duel](screenshots/GOAT-LAN-duel.png)
+This existing capture shows an imported Goat Format Championship winning deck in an EDOPro duel with both deck checks enabled. [Open the full-size capture](screenshots/GOAT-LAN-duel.png)
