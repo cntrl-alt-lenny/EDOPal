@@ -1,0 +1,276 @@
+"""Inline panels and virtualized review lists for Backup & transfer."""
+
+from collections.abc import Callable, Sequence
+from functools import partial
+from html import escape
+
+from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QObject, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QKeyEvent, QPainter
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QHBoxLayout,
+    QLabel,
+    QListView,
+    QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+import backup
+from studio import theme as t
+from studio.icons import icon
+from studio.pages.backup_data import CATEGORIES, Row, amount
+from studio.widgets import Button, ElidedLabel, Panel, glyph, label, margins
+
+
+def serif(text: str, size: int = t.DISPLAY) -> QLabel:
+    title = label(text, "display", True)
+    title.setStyleSheet(f'font-family: "{t.SERIF}", serif; font-size: {size}px;')
+    return title
+
+
+def action(
+    text: str, callback: Callable[[], None], role: str = "secondary", symbol: str = ""
+) -> Button:
+    button = Button(text, role, symbol)
+    button.clicked.connect(lambda: callback())
+    return button
+
+
+def actions(*buttons: Button, description: str = "") -> Panel:
+    panel = Panel(t.LG)
+    row = QHBoxLayout()
+    row.setSpacing(t.MD)
+    row.addWidget(label(description, "body", True), 1)
+    for button in buttons:
+        row.addWidget(button)
+    panel.body.addLayout(row)
+    return panel
+
+
+def text_tooltip(value: str) -> str:
+    return "<p>" + "<br>".join(escape(line) for line in value.splitlines()) + "</p>"
+
+
+def path_label(path: str, display: str | None = None) -> ElidedLabel:
+    item = ElidedLabel()
+    item.set_value(path, display)
+    item.setToolTip(text_tooltip(path))
+    return item
+
+
+def information(symbol: str, headline: str, description: str) -> Panel:
+    panel = Panel()
+    title = QHBoxLayout()
+    title.setSpacing(t.MD)
+    title.addWidget(glyph(symbol, t.ICON_BIG))
+    title.addWidget(serif(headline, t.HEADING + t.XS), 1)
+    panel.body.addLayout(title)
+    panel.body.addWidget(label(description, "body", True))
+    return panel
+
+
+class ArrowFocus(QObject):
+    def __init__(self, parent: QWidget, buttons: Sequence[Button], columns: int) -> None:
+        super().__init__(parent)
+        self.buttons, self.columns = buttons, columns
+        for button in buttons:
+            button.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if isinstance(event, QKeyEvent) and event.type() == QEvent.Type.KeyPress:
+            offsets = {
+                Qt.Key.Key_Left: (0, -1),
+                Qt.Key.Key_Right: (0, 1),
+                Qt.Key.Key_Up: (-1, 0),
+                Qt.Key.Key_Down: (1, 0),
+            }
+            if direction := offsets.get(event.key()):
+                row, column = divmod(self.buttons.index(watched), self.columns)
+                row, column = row + direction[0], column + direction[1]
+                index = row * self.columns + column
+                if row >= 0 and 0 <= column < self.columns and index < len(self.buttons):
+                    target = self.buttons[index]
+                    if target.isEnabled():
+                        target.setFocus(Qt.FocusReason.OtherFocusReason)
+                return True
+        return super().eventFilter(watched, event)
+
+
+class CategoryChoice(Button):
+    def __init__(self, category: str, total: backup.Total) -> None:
+        title, hint, symbol = CATEGORIES[category]
+        summary = amount(total)
+        super().__init__("", "scope")
+        self.setAccessibleName(title)
+        self.setAccessibleDescription(f"{hint} {summary}")
+        self.setCheckable(True)
+        row = QHBoxLayout(self)
+        margins(row, t.MD)
+        row.setSpacing(t.MD)
+        row.addWidget(glyph(symbol, t.ICON_BIG))
+        copy = QWidget()
+        stack = QVBoxLayout(copy)
+        margins(stack, 0)
+        stack.setSpacing(t.XS)
+        stack.addWidget(label(title, "subheading"))
+        stack.addWidget(label(hint, "muted", True))
+        row.addWidget(copy, 1, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(label(summary, "small"))
+        self.marker = QLabel()
+        self.marker.setFixedSize(t.LG, t.LG)
+        row.addWidget(self.marker)
+        for child in self.findChildren(QWidget):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.toggled.connect(self._mark)
+        self._mark(False)
+        self.setChecked(category in backup.DEFAULTS)
+
+    def _mark(self, checked: bool) -> None:
+        fill, edge = (t.GOLD, t.GOLD) if checked else (t.CLEAR, t.MUTED)
+        self.marker.setStyleSheet(
+            f"background: {fill}; border: {t.HAIR}px solid {edge}; border-radius: {t.XS}px;"
+        )
+        if checked:
+            self.marker.setPixmap(icon("check", t.ON_GOLD).pixmap(t.LG, t.LG))
+        else:
+            self.marker.clear()
+
+
+class Rows(QAbstractListModel):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.rows: Sequence[Row] = ()
+
+    def replace(self, rows: Sequence[Row]) -> None:
+        self.beginResetModel()
+        self.rows = rows
+        self.endResetModel()
+
+    def rowCount(self, parent: QModelIndex | None = None) -> int:
+        return 0 if parent and parent.isValid() else len(self.rows)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> object:
+        if not index.isValid():
+            return None
+        row = self.rows[index.row()]
+        if role == Qt.ItemDataRole.DisplayRole:
+            return row.title
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return text_tooltip(row.tooltip)
+        if role == Qt.ItemDataRole.AccessibleDescriptionRole:
+            return row.tooltip
+        if role == Qt.ItemDataRole.UserRole:
+            return row
+        return None
+
+
+class RowDelegate(QStyledItemDelegate):
+    def __init__(self, parent: QListView, show_action: bool) -> None:
+        super().__init__(parent)
+        self.show_action = show_action
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        return QSize(0, t.TILE_H - t.SM if self.show_action else t.BUTTON_H + t.MD)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        row = index.data(Qt.ItemDataRole.UserRole)
+        rect = option.rect
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        painter.save()
+        if selected:
+            painter.fillRect(rect, QColor(t.ACTIVE))
+        painter.setPen(QColor(t.EDGE))
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        top = rect.y() + t.SM
+        for value, colour, size, height in (
+            (row.title, t.PALE if selected else t.INK, t.BODY, t.XL - t.XS),
+            (row.detail, t.TEXT, t.SMALL, t.LG + t.XS),
+            (row.action, t.GOLD, t.SMALL, t.LG + t.XS),
+        ):
+            if not value:
+                continue
+            painter.setFont(t.font(size, bold=value == row.title))
+            painter.setPen(QColor(colour))
+            line = QRect(rect.x() + t.MD, top, rect.width() - 2 * t.MD, height)
+            text = painter.fontMetrics().elidedText(
+                value, Qt.TextElideMode.ElideMiddle, line.width()
+            )
+            painter.drawText(line, Qt.AlignmentFlag.AlignVCenter, text)
+            top += height
+        painter.restore()
+
+
+class ReviewList(QListView):
+    def __init__(self, name: str, *, show_action: bool = False) -> None:
+        super().__init__()
+        self.setAccessibleName(name)
+        self.rows = Rows(self)
+        self.setModel(self.rows)
+        self.setItemDelegate(RowDelegate(self, show_action))
+        self.setUniformItemSizes(True)
+        self.setWordWrap(False)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setStyleSheet(f"QListView {{ padding: 0; background: {t.CANVAS}; }}")
+
+    def replace(self, rows: Sequence[Row]) -> None:
+        self.rows.replace(rows)
+        self.scrollToTop()
+
+
+class GroupedList(Panel):
+    def __init__(self, headings: dict[str, str], messages: dict[str, str]) -> None:
+        super().__init__(t.LG)
+        self.messages = messages
+        self.headings = headings
+        self.groups: dict[str, list[Row]] = {}
+        self.tabs: dict[str, Button] = {}
+        group = QButtonGroup(self)
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(t.SM)
+        for key, title in headings.items():
+            tab = Button(title, "scope")
+            tab.setCheckable(True)
+            tab.setStyleSheet(f"padding: 0 {t.MD}px;")
+            group.addButton(tab)
+            tab.toggled.connect(partial(self._select, key))
+            self.tabs[key] = tab
+            toolbar.addWidget(tab)
+        toolbar.addStretch()
+        self.body.addLayout(toolbar)
+        self.list = ReviewList("File review", show_action=headings.get("add") is not None)
+        self.list.setMinimumHeight(t.TILE_H * 2)
+        self.body.addWidget(self.list, 1)
+        self.empty = label("", "body", True)
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty.setMinimumHeight(t.TILE_H * 2)
+        self.body.addWidget(self.empty, 1)
+
+    def compact(self, small: bool) -> None:
+        height = t.TILE_H if small else t.TILE_H * 2
+        self.list.setMinimumHeight(height)
+        self.empty.setMinimumHeight(height)
+
+    def set_groups(self, groups: dict[str, list[Row]], preferred: str | None = None) -> None:
+        self.groups = groups
+        first = preferred or next(
+            (key for key in self.headings if groups[key]), next(iter(self.headings))
+        )
+        for key, title in self.headings.items():
+            self.tabs[key].setText(f"{title}  {len(groups[key]):,}")
+        self.tabs[first].setChecked(True)
+        self._select(first, True)
+
+    def _select(self, key: str, checked: bool) -> None:
+        if checked:
+            rows = self.groups[key]
+            self.empty.setText(self.messages[key])
+            self.empty.setVisible(not rows)
+            self.list.setVisible(bool(rows))
+            self.list.setAccessibleName(self.headings[key])
+            self.list.replace(rows)

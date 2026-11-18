@@ -12,7 +12,10 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from time import time
 from zipfile import ZIP_STORED, BadZipFile, ZipFile
+
+from config import app_version
 
 from .core import (
     DEFAULTS,
@@ -27,6 +30,7 @@ from .core import (
     check,
     publish_new,
     read_small,
+    transfer,
 )
 from .inventory import INDEX, category, selection, sources
 from .preferences import LIMIT
@@ -40,6 +44,7 @@ class Entry:
     category: str
     size: int
     sha256: str
+    modified_at: int | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,7 @@ class Manifest:
     app_version: str
     categories: tuple[str, ...]
     entries: tuple[Entry, ...]
+    created_at: int | None = None
 
 
 def game_version(install: Installation) -> str | None:
@@ -111,23 +117,33 @@ def create(
         with ZipFile(temp, "w", allowZip64=False) as archive:
             for i, file in enumerate(files, 1):
                 with archive.open(file.name, "w") as member:
-                    digest = file.copy_to(install, member, cancel)
-                entries.append(Entry(file.name, category(file.name), file.size, digest))
+                    digest, modified_at = file.copy_to(install, member, cancel)
+                entries.append(
+                    Entry(file.name, category(file.name), file.size, digest, modified_at)
+                )
                 if progress:
-                    progress(i, len(files), file.name)
-            app_version = (Path(__file__).resolve().parents[1] / "VERSION").read_text().strip()
+                    progress(i, 2 * len(files), file.name)
             manifest = Manifest(
                 1,
                 sys.platform,
                 game_version(install),
-                app_version,
+                app_version(),
                 tuple(sorted(selected)),
                 tuple(entries),
+                int(time()),
             )
             data = json.dumps(asdict(manifest), ensure_ascii=False).encode()
             if len(data) > MAX_MANIFEST:
                 raise ValueError("Manifest too large")
             archive.writestr(MANIFEST, data)
+        # A checksum of the source alone cannot prove that the saved copy is readable.
+        with opened(temp) as (archive, saved):
+            for i, entry in enumerate(saved.entries, len(files) + 1):
+                with archive.open(entry.path) as stream:
+                    if transfer(stream, None, entry.size, cancel) != (entry.size, entry.sha256):
+                        raise ValueError("The saved backup did not pass verification")
+                if progress:
+                    progress(i, 2 * len(files), entry.path)
         check(cancel)
         publish_new(temp, destination)
         return manifest
@@ -151,6 +167,12 @@ def decode(data: bytes) -> dict:
     if not isinstance(obj, dict):
         raise ValueError("Expected a JSON object")
     return obj
+
+
+def timestamp(value: object) -> int | None:
+    if value is None or (type(value) is int and -62135596800 <= value <= 253402300799):
+        return value
+    raise ValueError("Invalid backup date")
 
 
 def parse(archive: ZipFile) -> Manifest:
@@ -212,7 +234,7 @@ def parse(archive: ZipFile) -> Manifest:
         ):
             raise ValueError(f"Invalid manifest entry: {name}")
         names.remove(name)
-        entries.append(Entry(name, cat, size, digest))
+        entries.append(Entry(name, cat, size, digest, timestamp(row.get("modified_at"))))
     return Manifest(
         1,
         doc["source_platform"],
@@ -220,6 +242,7 @@ def parse(archive: ZipFile) -> Manifest:
         doc["app_version"],
         tuple(sorted(selected)),
         tuple(entries),
+        timestamp(doc.get("created_at")),
     )
 
 

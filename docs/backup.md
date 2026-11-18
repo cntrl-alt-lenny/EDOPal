@@ -7,16 +7,18 @@ The `backup` package works offline. The caller supplies the game and Studio root
 | Call | Result |
 |---|---|
 | `Installation(game, data)` or `Installation.at(game, config=None)` | Two filesystem roots. With a config path, Studio data lives in its parent. Omitting it selects the existing per-user data directory. |
-| `inventory(install)` | Category names mapped to `Total(count, bytes)`. Directories and tracks are scanned by metadata. Preference values, repo definitions and an existing small music index are read. |
+| `inventory(install, *, cancel=None)` | Category names mapped to `Total(count, bytes)`. Directories and tracks are scanned by metadata. Preference values, repo definitions and an existing small music index are read. |
 | `create(install, destination, categories=DEFAULTS, *, progress=None, cancel=None)` | Creates one archive at a new path and returns its `Manifest`. The destination parent must exist. `DEFAULTS` selects decks and replays. |
 | `inspect(path)` | Validates the container, paths and manifest. Returns metadata without extracting files. |
 | `plan_restore(path, install, policy="keep_mine", *, categories=None, cancel=None)` | Returns an immutable `Plan`. The default selects the categories recorded in the archive. Every selected source has an item with its destination, status, action and collision detail. File conflicts include the existing path and hash. Preference conflicts include both values. |
-| `execute(plan, *, progress=None, cancel=None)` | Rechecks the preview under OS locks, verifies every archive member including skipped members, stages before/after images, then publishes. Returns a `Transaction(id, status)`. |
-| `transactions(install)` | Lists local recovery and undo records for this installation and Studio data directory. |
-| `recover(install, id, "finish" or "rollback", *, progress=None, cancel=None)` | Resumes a pending restore or undoes a pending/completed restore. Both operations are repeatable. The archive can be disconnected after publication starts. |
+| `execute(plan, *, progress=None, cancel=None, require_closed=False)` | Rechecks the preview under OS locks, verifies every archive member including skipped members, stages before/after images, then publishes. Returns a `Transaction(id, status)`. |
+| `transactions(install)` | Lists local recovery and undo records for this installation and Studio data directory, with last update times and file counts. |
+| `recover(install, id, "finish" or "rollback", *, progress=None, cancel=None, require_closed=False)` | Resumes a pending restore or undoes a pending/completed restore. Both operations are repeatable. The archive can be disconnected after publication starts. |
 | `compare(left_install, right_install_or_archive, categories=None, *, cancel=None)` | Returns paths, left/right hashes and statuses for identical, changed, one-sided and case-colliding files. Defaults to decks and replays between installs, or the archive selection. For an archive, comparison uses the manifest hashes. |
 
 Paths are `pathlib.Path` objects. `progress(done, total, path)` reports completed files during verification and publication. Supply `threading.Event.is_set` for `cancel`. Calls raise `Cancelled`, `ValueError` for invalid data or a stale preview, or `OSError` for filesystem, space, locking and game-process problems. After a publication error, call `transactions` and show any pending recovery. A stopped verification/staging pass can be retried directly.
+
+`create` reads back each saved member and verifies its digest before publishing. Its progress total counts the copy and verification passes. Studio passes `require_closed=True` to check for EDOPro before publishing any category. A running game raises `GameRunning`, an `OSError` subclass.
 
 ## Selection
 
@@ -56,6 +58,8 @@ These keys are present in the measured Windows installation. The nickname is a U
 ## Format 1 and reproducible example
 
 `manifest.json` is UTF-8 JSON. `format_version` is an integer. `source_platform` is Python's platform name. `edopro_version` is a string or null. `app_version` is the Studio release string. `categories` records the selection, including selected empty categories. Each payload file has exactly one entry with its scoped relative path, category, integer byte length and lowercase hexadecimal SHA-256. The manifest itself is the container metadata. Unknown format versions are rejected.
+
+New backups include optional `created_at` and per-entry `modified_at` timestamps in Unix seconds. Older backups and generated entries may have no date. These are display metadata. Restore does not use them to choose a version or set a file's modified time.
 
 The Windows synthetic transfer produced this manifest.
 

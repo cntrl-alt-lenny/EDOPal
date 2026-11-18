@@ -9,6 +9,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
+from time import monotonic
 from typing import BinaryIO, Literal
 
 from music_library import _game_running
@@ -20,6 +21,7 @@ from .core import (
     MAX_FILES,
     MAX_TOTAL,
     Cancel,
+    GameRunning,
     Installation,
     Progress,
     check,
@@ -185,6 +187,7 @@ def _apply(
     *,
     fresh: bool = False,
     begin: Callable[[], None] | None = None,
+    require_closed: bool = False,
 ) -> None:
     desired = [
         (c, c.after if reverse else c.before, c.before if reverse else c.after)
@@ -199,7 +202,19 @@ def _apply(
             if signature(safe(tx, digest), cancel) != digest:
                 raise ValueError(f"Restore journal checksum mismatch: {target}")
         if current != new and change.target == CONF and _game_running(install.game):
-            raise OSError("Close EDOPro before restoring preferences")
+            raise GameRunning("Close EDOPro before restoring preferences")
+    if require_closed and _game_running(install.game):
+        raise GameRunning("Close EDOPro before changing files")
+    next_game_check = monotonic() + 1
+
+    def check_game(target: str) -> None:
+        nonlocal next_game_check
+        # Starting the Windows process probe for each deck would stall large transfers.
+        if target == CONF or (require_closed and monotonic() >= next_game_check):
+            if _game_running(install.game):
+                raise GameRunning("Close EDOPro before changing files")
+            next_game_check = monotonic() + 1
+
     if begin:
         begin()
     for i, (change, old, new) in enumerate(desired, 1):
@@ -212,8 +227,7 @@ def _apply(
         if current != new:
             if current != old:
                 raise ValueError(f"Destination changed during restore: {target}")
-            if change.target == CONF and _game_running(install.game):
-                raise OSError("Close EDOPro before restoring preferences")
+            check_game(change.target)
             if new is None:
                 # Only undo a file this transaction added, whose bytes still match.
                 # Its complete content is retained in the transaction.
@@ -227,8 +241,7 @@ def _apply(
                     with out, blob.open("rb") as stream:
                         if transfer(stream, out, MAX_FILE, cancel)[1] != new:
                             raise ValueError("Restore image changed during copy")
-                    if change.target == CONF and _game_running(install.game):
-                        raise OSError("Close EDOPro before restoring preferences")
+                    check_game(change.target)
                     if _current(install, change, cancel)[1] != old:
                         raise ValueError(f"Destination changed during restore: {target}")
                     if old is None:
@@ -242,7 +255,9 @@ def _apply(
             progress(i, len(desired), change.target)
 
 
-def execute(plan: Plan, *, progress: Progress = None, cancel: Cancel = None) -> Transaction:
+def execute(
+    plan: Plan, *, progress: Progress = None, cancel: Cancel = None, require_closed: bool = False
+) -> Transaction:
     """Apply exactly the preview. A durable pending journal precedes the first game write."""
     with _locks(plan.install):
         for tx in transactions(plan.install):
@@ -267,8 +282,10 @@ def execute(plan: Plan, *, progress: Progress = None, cancel: Cancel = None) -> 
         try:
             changes = _stage(plan, staging, progress, cancel)
             check(cancel)
+            if require_closed and _game_running(plan.install.game):
+                raise GameRunning("Close EDOPro before changing files")
             if any(c.target == CONF for c in changes) and _game_running(plan.install.game):
-                raise OSError("Close EDOPro before restoring preferences")
+                raise GameRunning("Close EDOPro before restoring preferences")
             _record(staging, "pending", changes)
             staging.rename(txdir)
         finally:
@@ -279,7 +296,16 @@ def execute(plan: Plan, *, progress: Progress = None, cancel: Cancel = None) -> 
             if progress:
                 progress(len(plan.manifest.entries) + i, len(plan.manifest.entries) + total, name)
 
-        _apply(plan.install, txdir, changes, False, report, cancel, fresh=True)
+        _apply(
+            plan.install,
+            txdir,
+            changes,
+            False,
+            report,
+            cancel,
+            fresh=True,
+            require_closed=require_closed,
+        )
         _record(txdir, "complete", changes)
         return Transaction(token, "complete")
 
@@ -291,6 +317,7 @@ def recover(
     *,
     progress: Progress = None,
     cancel: Cancel = None,
+    require_closed: bool = False,
 ) -> Transaction:
     """Finish/undo using only verified journal images; the USB archive can be disconnected."""
     if not _TOKEN.fullmatch(token) or mode not in {"finish", "rollback"}:
@@ -312,6 +339,15 @@ def recover(
             if reverse and state != "rolling_back":
                 _record(txdir, "rolling_back", changes)
 
-        _apply(install, txdir, changes, reverse, progress, cancel, begin=begin)
+        _apply(
+            install,
+            txdir,
+            changes,
+            reverse,
+            progress,
+            cancel,
+            begin=begin,
+            require_closed=require_closed,
+        )
         _record(txdir, expected, changes)
         return Transaction(token, expected)

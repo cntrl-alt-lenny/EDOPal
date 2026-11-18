@@ -30,6 +30,10 @@ class Cancelled(Exception):
     """A cooperative stop. Recover a pending transaction after publication begins."""
 
 
+class GameRunning(OSError):
+    """The selected EDOPro installation must be closed before publication."""
+
+
 def check(cancel: Cancel) -> None:
     if cancel and cancel():
         raise Cancelled("Backup operation cancelled")

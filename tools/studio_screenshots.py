@@ -28,6 +28,7 @@ from config import APP_NAME, Config  # noqa: E402
 from studio import theme  # noqa: E402
 from studio.context import AppContext, Installation  # noqa: E402
 from studio.shell import StudioWindow  # noqa: E402
+from tools.studio_backup_screenshots import capture_backup  # noqa: E402
 from tools.studio_decks_screenshots import render_decks  # noqa: E402
 from tools.studio_health_replays_shots import render_tools  # noqa: E402
 from tools.studio_shell_shots import render_shell_states  # noqa: E402
@@ -212,6 +213,7 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
         shot("18-awaiting-databases")
         render_shell_states(window, shot, settle, root, selected)
         render_tools(window, selected, shot, settle)
+        capture_backup(window, root, shot, settle)
     finally:
         fake.release.set()
         settle(lambda: not ctx.tasks.jobs)
