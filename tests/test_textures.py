@@ -17,6 +17,7 @@ class _Resp:
     def __init__(self, status=200, body=b"", json_data=None):
         self.status = status
         self._body = body
+        self.content = self
         self._json = json_data
         self.headers = {}
 
@@ -26,8 +27,9 @@ class _Resp:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def read(self):
-        return self._body
+    async def iter_chunked(self, size):
+        for start in range(0, len(self._body), size):
+            yield self._body[start : start + size]
 
     async def json(self):
         return self._json

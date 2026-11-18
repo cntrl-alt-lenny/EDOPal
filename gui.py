@@ -9,42 +9,44 @@ run_app raises GuiUnavailable and the caller falls back to the console flow.
 """
 
 import contextlib
+import copy
 import os
 import platform
 import queue
 import sys
 import threading
+from pathlib import Path
 
 import config
+import extras
 
 try:
     import tkinter as tk
-    from tkinter import filedialog, ttk
+    from tkinter import filedialog, messagebox, ttk
     from tkinter import font as tkfont
 except Exception:  # tkinter genuinely missing on some Pythons
     tk = None
     ttk = None
 
-# Brand palette (matches assets/github-banner.jpg)
-BG = "#0d1425"
-BG_CARD = "#131c31"
-BG_CHIP = "#1b2740"
-BORDER = "#263351"
-GOLD = "#f0a832"
-GOLD_HI = "#ffd76a"
-GOLD_DOWN = "#d18f1f"
-GOLD_DIM = "#c9a24a"
-ON_GOLD = "#161006"
-TEXT = "#d7deee"
-TEXT_DIM = "#8fa0bf"
-TEXT_FAINT = "#5c6c8c"
-GREEN = "#6fcf97"
-RED = "#ef7d7d"
-FOCUS = "#7ea4e0"
-DISABLED = "#3a4059"
-CHECK_EDGE = "#42527a"  # unchecked box outline / secondary button border
-
-CONTENT_WIDTH = 460
+WINDOW_ART = Path(__file__).resolve().parent / "assets/window"
+BG = "#151615"
+BG_CARD = "#242521"
+BG_CHIP = "#33342f"
+BORDER = "#3b3c36"
+GOLD = "#f1cc79"
+GOLD_HI = "#ffdf99"
+GOLD_DOWN = "#d3aa57"
+GOLD_DIM = "#c9b382"
+ON_GOLD = "#272013"
+TEXT = "#f7f4ec"
+TEXT_DIM = "#cecac1"
+TEXT_FAINT = "#aba99f"
+GREEN = "#8ae8c2"
+RED = "#f19893"
+FOCUS = "#e5bf72"
+DISABLED = "#3a3b36"
+CHECK_EDGE = "#57584e"
+CONTENT_WIDTH = 848
 
 # (section, [(key, label, hint, default), ...])
 CHECKBOX_GROUPS = [
@@ -118,20 +120,20 @@ CHECKBOXES = [box for _section, boxes in CHECKBOX_GROUPS for box in boxes]
 
 def _recommended_my_decks(cfg) -> bool:
     """Recommend deck-first sync on an empty install that already has decks."""
+    deck_dir = os.path.join(getattr(cfg, "edopro_path", "") or "", "deck")
+    if not os.path.isdir(deck_dir):
+        return False
     pics_path = getattr(cfg, "pics_path", "") or ""
     image_count = 0
     if os.path.isdir(pics_path):
         with contextlib.suppress(OSError), os.scandir(pics_path) as entries:
-            image_count = sum(
-                1 for entry in entries if entry.is_file() and entry.name.endswith(".jpg")
-            )
-    if image_count >= 500:
-        return False
-    deck_dir = os.path.join(getattr(cfg, "edopro_path", "") or "", "deck")
-    if not os.path.isdir(deck_dir):
-        return False
+            for entry in entries:
+                if entry.name.lower().endswith(".jpg") and entry.is_file():
+                    image_count += 1
+                    if image_count == 500:
+                        return False
     for _root, _dirs, files in os.walk(deck_dir):
-        if any(name.endswith(".ydk") for name in files):
+        if any(name.lower().endswith(".ydk") for name in files):
             return True
     return False
 
@@ -352,6 +354,71 @@ def _apply_style(root) -> None:
         bordercolor=[("active", "#3a4c74")],
     )
 
+    style.configure("Brand.TLabel", font=(f["body"][0], 12, "bold"))
+    style.configure(
+        "Quiet.TButton",
+        padding=(8, 6),
+        background=BG,
+        foreground=TEXT_DIM,
+        borderwidth=0,
+        focuscolor=FOCUS,
+    )
+    style.map("Quiet.TButton", background=[("active", BG_CHIP)], foreground=[("active", TEXT)])
+    style.configure("Scope.TRadiobutton", padding=(14, 6), background=BG, foreground=TEXT_DIM)
+    style.layout(
+        "Scope.TRadiobutton",
+        [
+            (
+                "Radiobutton.focus",
+                {
+                    "sticky": "nsew",
+                    "children": [
+                        (
+                            "Radiobutton.padding",
+                            {
+                                "sticky": "nsew",
+                                "children": [("Radiobutton.label", {"sticky": "nsew"})],
+                            },
+                        )
+                    ],
+                },
+            )
+        ],
+    )
+    style.map(
+        "Scope.TRadiobutton",
+        background=[("selected", BG_CHIP), ("active", BG_CARD)],
+        foreground=[("selected", GOLD_HI)],
+    )
+    style.configure(
+        "Gallery.TCheckbutton",
+        background=BG,
+        foreground=TEXT,
+        indicatorbackground=BG_CARD,
+        indicatorforeground=GOLD,
+    )
+    style.map("Gallery.TCheckbutton", background=[("active", BG_CHIP)])
+    style.configure(
+        "Aqua.TButton",
+        padding=(17, 8),
+        background="#8ae8d5",
+        foreground="#102924",
+        font=f["button"],
+        borderwidth=0,
+    )
+    style.map(
+        "Aqua.TButton",
+        background=[("disabled", DISABLED), ("active", "#a8f2df")],
+        foreground=[("disabled", TEXT_FAINT)],
+    )
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", BG_CHIP)],
+        foreground=[("readonly", TEXT)],
+        selectforeground=[("readonly", TEXT)],
+        selectbackground=[("readonly", BG_CHIP)],
+    )
+
     # Flat progressbar: bevel colors match fill/trough so no broken 3D edges.
     style.configure(
         "Gold.Horizontal.TProgressbar",
@@ -412,7 +479,8 @@ class _App:
             raise GuiUnavailable(str(exc)) from exc
 
         try:
-            self.root.title(f"EDOPro HD Cards Downloader v{version}")
+            self.root.title(f"EDOPro HD Sync · {version}")
+            self.content_width = min(CONTENT_WIDTH, max(1, self.root.winfo_screenwidth() - 20))
             self.root.resizable(False, False)
             _apply_style(self.root)
             _apply_windows_dark_titlebar(self.root)
@@ -466,7 +534,8 @@ class _App:
         so the shorter screens center their content instead of clinging to the
         top with a large void underneath.
         """
-        frame = ttk.Frame(self.shell, padding=(24, 20, 24, 22))
+        padding = (14, 12, 14, 14) if self.content_width < CONTENT_WIDTH else (24, 20, 24, 22)
+        frame = ttk.Frame(self.shell, padding=padding)
         frame.grid(row=0, column=0, sticky="nsew")
         frame.columnconfigure(0, weight=1)
         self._screens.append(frame)
@@ -480,83 +549,290 @@ class _App:
         self._inner_of[frame] = inner
         return inner
 
+    def _image(self, name):
+        if name not in self.images:
+            self.images[name] = tk.PhotoImage(file=str(WINDOW_ART / f"{name}.png"))
+        return self.images[name]
+
     def _build_options(self) -> None:
         f = self.options_frame = self._screen()
-
-        header = ttk.Frame(f)
-        header.grid(sticky="ew")
-        header.columnconfigure(0, weight=1)
-        ttk.Label(header, text="EDOPro HD Cards Downloader", style="Title.TLabel").grid(
-            row=0, column=0, sticky="w"
-        )
-        ttk.Label(header, text=f"v{self.version}", style="Chip.TLabel").grid(
-            row=0, column=1, sticky="e"
-        )
-        accent = tk.Frame(f, background=GOLD, height=3, width=118)
-        accent.grid(sticky="w", pady=(9, 0))
-        accent.grid_propagate(False)
-        # The folder is settled before anything runs: the app finds it, shows
-        # it here, and pressing Start is the confirmation. One line, because
-        # every pixel this card takes is added to all three screens.
-        ttk.Label(f, text="EDOPRO FOLDER", style="Section.TLabel").grid(sticky="w", pady=(14, 5))
-        folder_card = ttk.Frame(f, style="Card.TFrame", padding=(16, 9, 12, 9))
-        folder_card.grid(sticky="ew", pady=(0, 13))
-        folder_card.columnconfigure(0, weight=1)
-        self.folder_var = tk.StringVar()
-        self.folder_hint_var = tk.StringVar()
-        ttk.Label(folder_card, textvariable=self.folder_var, style="CardBody.TLabel").grid(
-            row=0, column=0, sticky="w"
-        )
-        ttk.Button(
-            folder_card, text="Change…", style="Secondary.TButton", command=self._on_change_folder
-        ).grid(row=0, column=1, sticky="e", padx=(12, 0))
-        # Only shown when something needs saying, so the happy path stays short.
-        self.folder_hint = ttk.Label(
-            folder_card, textvariable=self.folder_hint_var, style="Hint.TLabel"
-        )
-        self.folder_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(3, 0))
-
-        self.variables: dict[str, tk.BooleanVar] = {}
+        self.images = {}
+        self.appearance_busy = False
+        self.gallery_frame = None
+        self.notice_var = tk.StringVar()
         defaults = {
-            "field_art": getattr(self.cfg, "field_art", True),
-            "hd_era_art": not getattr(self.cfg, "original_text", False),
+            "field_art": self.cfg.field_art,
+            "hd_era_art": not self.cfg.original_text,
             "my_decks": _recommended_my_decks(self.cfg),
         }
-        for section, boxes in CHECKBOX_GROUPS:
-            ttk.Label(f, text=section, style="Section.TLabel").grid(sticky="w", pady=(0, 5))
-            card = ttk.Frame(f, style="Card.TFrame", padding=(16, 11, 16, 5))
-            card.grid(sticky="ew", pady=(0, 13))
-            card.columnconfigure(0, weight=1)
-            for key, label, hint, default in boxes:
-                self.variables[key] = tk.BooleanVar(value=bool(defaults.get(key, default)))
-                ttk.Checkbutton(
-                    card, text=label, style="Card.TCheckbutton", variable=self.variables[key]
-                ).grid(sticky="w")
-                ttk.Label(card, text=hint, style="Hint.TLabel", wraplength=390).grid(
-                    sticky="w", padx=(28, 0), pady=(0, 8)
-                )
+        self.variables = {
+            key: tk.BooleanVar(value=defaults.get(key, default))
+            for key, _label, _hint, default in CHECKBOXES
+        }
 
-        self.notice_var = tk.StringVar(value="")
-        ttk.Label(f, textvariable=self.notice_var, style="Notice.TLabel").grid(
-            sticky="w", pady=(0, 6)
+        header = ttk.Frame(f)
+        header.grid(sticky="ew", pady=(0, 13))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(
+            header,
+            image=self._image("cards"),
+            compound="left",
+            text="  EDOPro HD Sync",
+            style="Brand.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            header,
+            text="Sync settings",
+            style="Quiet.TButton",
+            command=lambda: self._show(self.settings_frame),
+        ).grid(row=0, column=1)
+
+        width = 800 if self.content_width == CONTENT_WIDTH else max(1, self.content_width - 28)
+        hero = tk.Canvas(f, width=width, height=212, highlightthickness=0, bg=BG)
+        hero.grid(sticky="ew")
+        hero.create_image(0, 0, image=self._image("archive"), anchor="nw")
+        hero.create_text(
+            26,
+            22,
+            anchor="nw",
+            text="CARD ARTWORK",
+            fill=GOLD,
+            font=(_ui_fonts()["body"][0], -12, "bold"),
+        )
+        serif = "Georgia" if sys.platform in ("win32", "darwin") else "DejaVu Serif"
+        hero.create_text(
+            25, 48, anchor="nw", text="Your cards,\nin HD.", fill=TEXT, font=(serif, -49, "bold")
+        )
+        hero.create_text(
+            27,
+            174,
+            anchor="nw",
+            text="Download missing artwork for your library.",
+            fill="#d9d5cb",
+            font=(_ui_fonts()["body"][0], -15),
         )
 
-        buttons = ttk.Frame(f)
-        buttons.grid(sticky="e", pady=(4, 0))
-        self.coverage_button = ttk.Button(
-            buttons, text="Show coverage", style="Secondary.TButton", command=self._on_coverage
+        folder = ttk.Frame(f)
+        folder.grid(sticky="ew", pady=(16, 11))
+        folder.columnconfigure(0, weight=1)
+        ttk.Label(folder, text="GAME INSTALLATION", style="Section.TLabel").grid(sticky="w")
+        self.folder_name = tk.StringVar()
+        self.folder_var = tk.StringVar()
+        self.folder_hint_var = tk.StringVar()
+        ttk.Label(
+            folder,
+            textvariable=self.folder_name,
+            image=self._image("folder"),
+            compound="left",
+            padding=(0, 2),
+            style="Brand.TLabel",
+        ).grid(sticky="w")
+        ttk.Label(folder, textvariable=self.folder_var, style="Status.TLabel").grid(sticky="w")
+        self.folder_hint = ttk.Label(
+            folder, textvariable=self.folder_hint_var, style="Notice.TLabel", wraplength=580
         )
-        self.coverage_button.grid(row=0, column=0, padx=(0, 10))
+        self.folder_hint.grid(row=3, column=0, sticky="w")
+        ttk.Button(
+            folder, text="Change folder", style="Secondary.TButton", command=self._on_change_folder
+        ).grid(row=0, column=1, rowspan=3)
+        self._rule(f)
+        scope = ttk.Frame(f)
+        scope.grid(sticky="ew", pady=10)
+        scope.columnconfigure(0, weight=1)
+        self.scope_hint = tk.StringVar(value="Artwork to sync")
+        ttk.Label(scope, textvariable=self.scope_hint).grid(row=0, column=0, sticky="w")
+        for col, (name, value) in enumerate((("Full library", False), ("My decks", True)), 1):
+            ttk.Radiobutton(
+                scope,
+                text=name,
+                value=value,
+                variable=self.variables["my_decks"],
+                style="Scope.TRadiobutton",
+            ).grid(row=0, column=col, padx=(2, 0))
+        self._rule(f)
+        footer = ttk.Frame(f)
+        footer.grid(sticky="ew", pady=(13, 0))
+        footer.columnconfigure(2, weight=1)
+        self.customize_button = ttk.Button(
+            footer,
+            text="  Customize EDOPro",
+            image=self._image("swatches"),
+            compound="left",
+            style="Quiet.TButton",
+            command=self._open_gallery,
+        )
+        self.customize_button.grid(row=0, column=0, sticky="w")
+        self.music_button = ttk.Button(
+            footer,
+            text="  Music library",
+            image=self._image("gallery/music-library"),
+            compound="left",
+            style="Quiet.TButton",
+            command=self._open_music,
+        )
+        self.music_button.grid(row=0, column=1, sticky="w", padx=(5, 0))
+        self.decks_button = ttk.Button(
+            footer,
+            text="  Tournament decks",
+            image=self._image("gallery/deck-library"),
+            compound="left",
+            style="Quiet.TButton",
+            command=self._open_decks,
+        )
+        self.decks_button.grid(row=0, column=2, sticky="w", padx=(5, 6))
         self.start_button = ttk.Button(
-            buttons, text="Install HD artwork", style="Primary.TButton", command=self._on_start
+            footer,
+            text="  Sync HD cards",
+            image=self._image("download"),
+            compound="left",
+            style="Primary.TButton",
+            command=self._on_start,
         )
-        self.start_button.grid(row=0, column=1)
+        self.start_button.grid(row=0, column=3)
+        self._build_sync_settings()
+        self.root.bind("<<TournamentDeckSaved>>", self._on_deck_saved)
+        self._render_folder()
+        self.root.bind("<Return>", self._on_return)
+        self.root.bind("<Escape>", lambda _e: self._on_escape())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
+    @staticmethod
+    def _rule(frame):
+        tk.Frame(frame, bg=BORDER, height=1).grid(sticky="ew")
+
+    def _build_sync_settings(self):
+        f = self.settings_frame = self._screen()
+        ttk.Label(f, text="Sync settings", style="Title.TLabel").grid(sticky="w", pady=(0, 14))
+        for key, label, hint, _ in CHECKBOXES:
+            if key in ("my_decks", "audio"):
+                continue
+            box = ttk.Frame(f, style="Card.TFrame", padding=(12, 5))
+            box.grid(sticky="ew", pady=(0, 4))
+            ttk.Checkbutton(
+                box, text=label, variable=self.variables[key], style="Card.TCheckbutton"
+            ).grid(sticky="w")
+            ttk.Label(box, text=hint, style="Hint.TLabel").grid(sticky="w", padx=(25, 0))
+        actions = ttk.Frame(f)
+        actions.grid(sticky="ew", pady=(12, 0))
+        actions.columnconfigure(0, weight=1)
+        self.coverage_button = ttk.Button(
+            actions, text="Show coverage", style="Secondary.TButton", command=self._on_coverage
+        )
+        self.coverage_button.grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            actions,
+            text="Done",
+            style="Primary.TButton",
+            command=lambda: self._show(self.options_frame),
+        ).grid(row=0, column=1)
+
+    def _open_music(self, *, game=None):
+        from music_window import open_music_library
+
+        try:
+            open_music_library(self.root, self.cfg.edopro_path, game=game)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Music library", str(exc), parent=self.root)
+
+    def _open_decks(self):
+        from tournament_window import open_tournament_decks
+
+        try:
+            open_tournament_decks(
+                self.root, self.cfg.edopro_path, on_sync_artwork=self._sync_imported_decks
+            )
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Tournament decks", str(exc), parent=self.root)
+
+    def _on_deck_saved(self, _event):
+        self.scope_hint.set("Deck saved · Choose My decks to sync its art")
         self._render_folder()
 
-        self.root.bind("<Return>", lambda _e: self._on_start())
-        self.root.bind("<Escape>", lambda _e: self._on_escape())
-        self.root.protocol("WM_DELETE_WINDOW", self._on_escape)
+    def _sync_imported_decks(self, game_path: Path, paths: tuple[Path, ...]) -> bool:
+        if self.appearance_busy or self.current is self.progress_frame:
+            messagebox.showinfo(
+                "Deck artwork", "Wait for the current task to finish.", parent=self.root
+            )
+            return False
+        selected = Path(self.cfg.edopro_path).resolve()
+        deck_folder = (selected / "deck").resolve()
+        if (
+            selected != game_path.resolve()
+            or not config.folder_has_card_databases(str(selected))
+            or not paths
+            or not deck_folder.is_relative_to(selected)
+            or not all(
+                path.is_file()
+                and path.suffix.lower() == ".ydk"
+                and not path.is_symlink()
+                and path.resolve().parent == deck_folder
+                for path in paths
+            )
+        ):
+            messagebox.showinfo(
+                "Deck artwork",
+                "Select the EDOPro installation containing these decks and its card databases.",
+                parent=self.root,
+            )
+            return False
+        self._launch(stats_only=False, deck_paths=paths)
+        return True
+
+    def _open_gallery(self):
+        from appearance_gallery import AppearanceGallery
+
+        if self.gallery_frame is None:
+            self.gallery_frame = self._screen()
+            self.gallery_frame.configure(padding=0)
+            self.gallery_frame.rowconfigure(0, weight=1)
+            self.gallery = AppearanceGallery(
+                self.gallery_frame,
+                family=_ui_fonts()["body"][0],
+                back=lambda: self._show(self.options_frame),
+                apply=self._apply_gallery,
+                open_music=self._open_music,
+                on_layout=self._gallery_layout,
+            )
+            self.gallery.grid(sticky="nsew")
+        self.gallery.open(self.cfg.edopro_path, self.cfg.config_path)
+        self._show(self.gallery_frame)
+        self.gallery.tabs[self.gallery.tab.get()].focus_set()
+
+    def _gallery_layout(self):
+        if self.current is self.gallery_frame:
+            self._fit_to_screen()
+
+    def _apply_gallery(self, selection):
+        if self.appearance_busy or not selection:
+            return
+        target, settings = self.cfg.edopro_path, self.cfg.config_path
+        restore = selection.get("restore", False)
+        undo = selection.get("undo_group", "")
+        self.appearance_busy = True
+        self.gallery.set_busy(
+            "Restoring previous selection…" if restore or undo else "Applying changes…"
+        )
+
+        def worker():
+            try:
+                extras.apply_appearance(target, settings, **selection)
+            except Exception as exc:
+                self.events.put(("appearance", False, str(exc)))
+            else:
+                result = {
+                    "sleeves": "Previous sleeves restored.",
+                    "effects": "Previous duel sound effects restored.",
+                    "music": "Previous background music restored.",
+                }.get(
+                    undo,
+                    "Previous skin restored."
+                    if restore
+                    else "Changes applied. Restart EDOPro if it is open.",
+                )
+                self.events.put(("appearance", True, result))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.root.after(60, self._pump)
 
     # -- EDOPro folder -------------------------------------------------------
 
@@ -564,16 +840,24 @@ class _App:
         """Show the folder the sync will use, and gate Start on having one."""
         path = getattr(self.cfg, "edopro_path", "") or ""
         hint = ""
+        self.folder_name.set(
+            "  " + os.path.basename(os.path.normpath(path))
+            if config.looks_like_edopro_folder(path)
+            else "Choose an installation"
+        )
         ready = config.folder_has_card_databases(path)
         if ready:
-            self.folder_var.set(_elide_path(path))
+            self.folder_var.set(_elide_path(path, 76))
         elif config.looks_like_edopro_folder(path):
-            self.folder_var.set(_elide_path(path))
+            self.folder_var.set(_elide_path(path, 76))
             hint = "No card databases here yet — open EDOPro once, then run this again"
         else:
             self.folder_var.set("Not found")
-            hint = "Press Change… and pick your ProjectIgnis folder"
+            hint = "Select Change folder and choose your ProjectIgnis installation."
         state = ["!disabled"] if ready else ["disabled"]
+        customize_state = ["!disabled"] if config.looks_like_edopro_folder(path) else ["disabled"]
+        for button in (self.customize_button, self.music_button, self.decks_button):
+            button.state(customize_state)
         self.start_button.state(state)
         self.coverage_button.state(state)
 
@@ -599,10 +883,13 @@ class _App:
         return None
 
     def _on_change_folder(self) -> None:
-        picked = self._ask_for_folder(getattr(self.cfg, "edopro_path", ""))
+        from installation_picker import choose_installation
+
+        picked = choose_installation(self.root, getattr(self.cfg, "edopro_path", ""))
         if not picked:
             return
         self.cfg.set_edopro_path(picked, save=True)
+        self.scope_hint.set("Artwork to sync")
         self._render_folder()
 
     def _build_progress(self) -> None:
@@ -676,7 +963,15 @@ class _App:
         ttk.Label(
             f, textvariable=self.summary_note_var, style="Status.TLabel", wraplength=440
         ).grid(sticky="w", pady=(2, 16))
-        ttk.Button(f, text="Close", style="Primary.TButton", command=self._close).grid(sticky="e")
+        actions = ttk.Frame(f)
+        actions.grid(sticky="ew")
+        actions.columnconfigure(0, weight=1)
+        ttk.Button(actions, text="Back to home", command=self._back_to_home).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Button(actions, text="Close", style="Primary.TButton", command=self._close).grid(
+            row=0, column=1
+        )
 
     # -- layout helpers ----------------------------------------------------
 
@@ -698,17 +993,27 @@ class _App:
             if outer is None:
                 return
             self.root.update_idletasks()
-            width = max(self.shell.winfo_reqwidth(), CONTENT_WIDTH)
+            width = max(self.shell.winfo_reqwidth(), self.content_width)
             height = outer.winfo_reqheight()
             self.root.minsize(width, height)
             self.root.geometry(f"{width}x{height}")
 
     def _show(self, frame) -> None:
+        if (
+            self.current is not None
+            and self.current is self.gallery_frame
+            and frame is not self.gallery_frame
+        ):
+            self.gallery.stop_preview()
+        for screen in self._screens:
+            if screen is not frame:
+                screen.grid_remove()
+        frame.grid()
         self.current = frame
         frame.tkraise()
         self._fit_to_screen()
         self.root.update_idletasks()
-        width = max(self.root.winfo_width(), CONTENT_WIDTH)
+        width = self.root.winfo_width()
         x = (self.root.winfo_screenwidth() - width) // 2
         y = (self.root.winfo_screenheight() - self.root.winfo_height()) // 3
         self.root.geometry(f"+{max(x, 0)}+{max(y, 0)}")
@@ -733,21 +1038,46 @@ class _App:
     def _picks(self) -> dict:
         return {key: var.get() for key, var in self.variables.items()}
 
-    def _launch(self, stats_only: bool) -> None:
+    def _launch(self, stats_only: bool, deck_paths: tuple[Path, ...] = ()) -> None:
         picks = self._picks()
         picks["stats"] = stats_only
         self.mode = "coverage" if stats_only else "sync"
-        self.apply_choices(self.cfg, picks)
+        # Filters and runtime flags belong to this job. A second sync can target
+        # another folder or the full library without inheriting the first job.
+        self.run_config = cfg = copy.copy(self.cfg)
+        if deck_paths:
+            cfg.deck_paths = [str(path) for path in deck_paths]
+            cfg.decks_folder = None
+            cfg.prune = False
+            picks.update(my_decks=False, force=False, textures=False, theme=False, audio=False)
+        self.apply_choices(cfg, picks)
+        if cfg.folder_detected and cfg.cli.edopro_path is None:
+            cfg.set_edopro_path(cfg.edopro_path, save=True)
+        self.finished = self.coverage_shown = self.folder_cancelled = False
+        self.exit_code = self.total = self.done = 0
+        self.hero_ok_caption.configure(text="downloaded")
+        self.hero_bad_caption.configure(text="unavailable")
+        self.cancel_button.state(["!disabled"])
+        for var in (self.pct_var, self.count_var, self.remaining_var, self.notice_var):
+            var.set("")
+        if deck_paths:
+            self.notice_var.set(
+                "Artwork for the imported deck"
+                if len(deck_paths) == 1
+                else f"Artwork for {len(deck_paths)} imported decks"
+            )
+        self.scope_hint.set("Artwork to sync")
 
         # Fresh event per launch so a stray earlier cancel can't poison the run.
         self.cancel_event = threading.Event()
-        self.cfg.gui_progress = _GuiProgress(self.events)
-        self.cfg.cancel_event = self.cancel_event
-        self.cfg.notice_sink = lambda text: self.events.put(("notice", text))
-        self.cfg.coverage_sink = lambda data: self.events.put(("coverage", data))
-        self.cfg.folder_picker = self._folder_picker_from_worker
+        cfg.gui_progress = _GuiProgress(self.events)
+        cfg.cancel_event = self.cancel_event
+        cfg.notice_sink = lambda text: self.events.put(("notice", text))
+        cfg.coverage_sink = lambda data: self.events.put(("coverage", data))
+        cfg.folder_picker = self._folder_picker_from_worker
 
         self.root.bind("<Return>", lambda _e: None)
+        self.root.bind("<Escape>", lambda _e: self._on_escape())
         self.stage_var.set(
             "Reading card databases…" if not stats_only else "Measuring artwork coverage…"
         )
@@ -760,15 +1090,30 @@ class _App:
 
             payload: dict = {}
             try:
-                payload["stats"] = asyncio.run(self.run_coro(self.cfg))
+                payload["stats"] = asyncio.run(self.run_coro(cfg))
             except SystemExit as exc:
                 payload["exit"] = exc.code if isinstance(exc.code, int) else 1
+                if hasattr(exc, "user_message"):
+                    payload["error"] = exc.user_message
             except Exception as exc:
                 payload["error"] = f"{type(exc).__name__}: {exc}"
             self.events.put(("done", payload))
 
         threading.Thread(target=worker, daemon=True).start()
         self.root.after(80, self._pump)
+
+    def _back_to_home(self):
+        self.root.bind("<Return>", self._on_return)
+        self.root.bind("<Escape>", lambda _e: self._on_escape())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        self._show(self.options_frame)
+        self._render_folder()
+        self.start_button.focus_set()
+
+    def _on_return(self, event):
+        # Focused buttons and radio controls own their keyboard activation.
+        if self.current is self.options_frame and event.widget is self.root:
+            self._on_start()
 
     def _on_start(self) -> None:
         if not self.start_button.instate(["disabled"]):
@@ -789,7 +1134,20 @@ class _App:
         if self.current is self.progress_frame and not self.finished:
             self._on_cancel()
             return
+        if self.appearance_busy:
+            return
+        if self.current in (self.gallery_frame, self.settings_frame):
+            self._show(self.options_frame)
+            return
         self._close()
+
+    def _on_window_close(self):
+        if self.appearance_busy:
+            return
+        if self.current is self.progress_frame and not self.finished:
+            self._on_cancel()
+        else:
+            self._close()
 
     def _close(self) -> None:
         with contextlib.suppress(Exception):
@@ -819,12 +1177,15 @@ class _App:
                 self._handle(event)
         except queue.Empty:
             pass
-        if not self.finished:
+        if self.appearance_busy or (self.current is self.progress_frame and not self.finished):
             self.root.after(80, self._pump)
 
     def _handle(self, event: tuple) -> None:
         kind = event[0]
-        if kind == "task":
+        if kind == "appearance":
+            self.appearance_busy = False
+            self.gallery.finish(event[1], event[2])
+        elif kind == "task":
             _, _tid, description, total = event
             self.total = int(total)
             self.done = 0
@@ -893,6 +1254,10 @@ class _App:
     def _finish(self, payload: dict) -> None:
         self.finished = True
         self.bar.stop()
+        cfg = self.run_config
+        self.cfg.saved_original_text = cfg.saved_original_text
+        if cfg.edopro_path != self.cfg.edopro_path:
+            self.cfg.set_edopro_path(cfg.edopro_path)
 
         # Exit code and failure detection come first, whatever the mode —
         # a SystemExit or cancelled folder dialog must never masquerade as
@@ -903,11 +1268,20 @@ class _App:
             self.exit_code = 1
         error_text = payload.get("error")
         if error_text is None and payload.get("exit") not in (None, 0):
-            error_text = "The sync could not run — see the console window for details."
+            error_text = (
+                "Check that the selected installation has readable card databases, then try again."
+            )
 
         stats = payload.get("stats")
-        if error_text is None and self.mode == "coverage" and not self.coverage_shown:
-            error_text = "Coverage could not be measured — see the console window for details."
+        if (
+            error_text is None
+            and self.mode == "coverage"
+            and not self.coverage_shown
+            and not self.folder_cancelled
+        ):
+            error_text = (
+                "Coverage could not be measured. Check the selected EDOPro folder and try again."
+            )
 
         if error_text is not None:
             self.summary_title_var.set("Something went wrong")
@@ -916,8 +1290,6 @@ class _App:
             self.hero_bad_label.configure(style="BigCalm.TLabel")
             self._breakdown_rows([])
             self.summary_note_var.set(error_text)
-        elif self.mode == "coverage":
-            pass  # _show_coverage already populated the screen
         elif stats is None and self.folder_cancelled:
             self.summary_title_var.set("No folder selected")
             self.hero_ok_var.set("—")
@@ -925,9 +1297,18 @@ class _App:
             self.hero_bad_var.set("")
             self.hero_bad_caption.configure(text="")
             self._breakdown_rows([])
-            self.summary_note_var.set(
-                "Run the app again and pick your EDOPro folder to sync artwork."
-            )
+            self.summary_note_var.set("Choose Back to home to select your EDOPro folder.")
+        elif self.mode == "coverage":
+            pass  # _show_coverage already populated the screen
+        elif stats is None and cfg.idle_summary:
+            title, details = cfg.idle_summary
+            self.summary_title_var.set(title)
+            self.hero_ok_var.set("0")
+            self.hero_ok_caption.configure(text="downloaded")
+            self.hero_bad_var.set("")
+            self.hero_bad_caption.configure(text="")
+            self._breakdown_rows([])
+            self.summary_note_var.set(details)
         elif stats is None:
             self.summary_title_var.set("Already up to date")
             self.hero_ok_var.set("✓")
@@ -935,7 +1316,7 @@ class _App:
             self.hero_bad_var.set("")
             self.hero_bad_caption.configure(text="")
             self._breakdown_rows([])
-            installed = getattr(self.cfg, "installed_extras", [])
+            installed = cfg.installed_extras
             if installed:
                 self.summary_title_var.set("Extras installed")
                 self.summary_note_var.set(
@@ -979,21 +1360,21 @@ class _App:
                 rows.append(("Network errors (will retry)", f"{transient:,}"))
             self._breakdown_rows(rows)
             notes = []
-            installed = getattr(self.cfg, "installed_extras", [])
+            installed = cfg.installed_extras
             if installed:
                 notes.append(f"Installed {', '.join(installed)}. Reopen EDOPro to use them.")
             if unavailable:
                 notes.append(
                     "Unavailable cards are remembered for 14 days and skipped on the next run."
                 )
-            if getattr(self.cfg, "save_report", False):
-                notes.append("A sync report was saved next to the app.")
+            if cfg.save_report:
+                notes.append(f"Report folder: {Path(cfg.config_path).parent}")
             self.summary_note_var.set(" ".join(notes))
 
         self._show(self.summary_frame)
-        self.root.bind("<Return>", lambda _e: self._close())
-        self.root.bind("<Escape>", lambda _e: self._close())
-        self.root.protocol("WM_DELETE_WINDOW", self._close)
+        self.root.bind("<Return>", self._on_return)
+        self.root.bind("<Escape>", lambda _e: self._back_to_home())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
     def run(self) -> int:
         self.root.mainloop()

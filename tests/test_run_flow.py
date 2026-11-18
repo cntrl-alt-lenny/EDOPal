@@ -3,10 +3,12 @@
 import asyncio
 import json
 import os
+import sqlite3
 import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import main
@@ -78,7 +80,6 @@ class RunFlowTests(unittest.TestCase):
             mock.patch.object(main, "scan_databases", return_value=(dict(cards), {}, set(), set())),
             mock.patch.object(main, "load_manual_map", return_value={}),
             mock.patch.object(main.aiohttp, "ClientSession", FakeSession),
-            mock.patch.object(main, "_check_image_server", new=mock.AsyncMock(return_value=None)),
             mock.patch.object(main, "check_for_update", new=mock.AsyncMock(return_value=None)),
             mock.patch.object(main, "_try_download", new=download_mock),
         ):
@@ -90,6 +91,14 @@ class RunFlowTests(unittest.TestCase):
             return set()
         with open(self.cache_path, encoding="utf-8") as f:
             return set(json.load(f).keys())
+
+    def test_cached_artwork_is_not_reported_as_already_present(self):
+        self._seed_cache([111])
+        cfg = self._cfg()
+        download = self._run(cfg, {111: "Missing card"}, {})
+        download.assert_not_awaited()
+        self.assertEqual(cfg.idle_summary[0], "No new artwork available")
+        self.assertIn("(1)", cfg.idle_summary[1])
 
     def test_run_caches_only_definitive_misses_and_evicts_recovered_cards(self):
         # C is cached as missing but its art now exists on disk -> must be evicted.
@@ -209,6 +218,72 @@ class RunFlowTests(unittest.TestCase):
         self._run(self._cfg("--my-decks"), cards, {111: main.FetchResult.OK})
 
         self.assertTrue(os.path.exists(os.path.join(self.pics, "111.jpg")))
+
+    def test_repair_preview_preserves_card_and_field_and_reports_both(self):
+        card = Path(self.pics, "111.jpg")
+        field = Path(self.pics, "field", "111.png")
+        field.parent.mkdir()
+        for path in (card, field):
+            path.write_bytes(b"broken")
+        cfg = self._cfg("--dry-run", "--repair", "--field-art")
+        with mock.patch.object(
+            main, "scan_databases", return_value=({111: "Field"}, {}, set(), {111})
+        ):
+            stats = asyncio.run(main.run(cfg))
+        self.assertEqual((stats.planned, stats.planned_fields), (1, 1))
+        for path in (card, field):
+            self.assertEqual(path.read_bytes(), b"broken")
+
+    def test_prune_runs_on_up_to_date_library(self):
+        orphan = Path(self.pics, "222.jpg")
+        orphan.touch()
+        Path(self.pics, "111.jpg").touch()
+        downloads = self._run(self._cfg("--prune"), {111: "Card"}, {})
+        downloads.assert_not_awaited()
+        self.assertFalse(orphan.exists())
+
+    def test_prune_preserves_images_if_an_expansion_failed_to_scan(self):
+        Path(self.db).unlink()
+        db = sqlite3.connect(self.db)
+        try:
+            db.executescript(
+                "CREATE TABLE datas(id,type); CREATE TABLE texts(id,name);"
+                "INSERT INTO datas VALUES (111,1); INSERT INTO texts VALUES (111,'Card');"
+            )
+        finally:
+            db.close()
+        expansion = Path(self.root, "expansions")
+        expansion.mkdir()
+        (expansion / "custom.cdb").write_bytes(b"unreadable")
+        for cid in (111, 222):
+            Path(self.pics, f"{cid}.jpg").touch()
+        with mock.patch.object(main, "check_for_update", new=mock.AsyncMock(return_value=None)):
+            asyncio.run(main.run(self._cfg("--prune")))
+        self.assertTrue(Path(self.pics, "222.jpg").exists())
+
+    def test_first_card_can_finish_while_update_check_is_waiting(self):
+        downloaded = asyncio.Event()
+        update_saw_download = []
+
+        async def wait_for_card(*_):
+            await asyncio.wait_for(downloaded.wait(), timeout=2)
+            update_saw_download.append(True)
+
+        async def download(*_):
+            downloaded.set()
+            return main.FetchResult.OK
+
+        with (
+            mock.patch.object(
+                main, "scan_databases", return_value=({111: "Card"}, {}, set(), set())
+            ),
+            mock.patch.object(main, "check_for_update", side_effect=wait_for_card) as update,
+            mock.patch.object(main, "_try_download", side_effect=download),
+        ):
+            stats = asyncio.run(main.run(self._cfg()))
+        update.assert_awaited_once()
+        self.assertEqual(update_saw_download, [True])
+        self.assertEqual(stats.total_ok, 1)
 
     def test_prune_is_skipped_when_deck_filter_is_active(self):
         deck = os.path.join(self.root, "mine.ydk")

@@ -1,6 +1,3 @@
-# Claude Code local files
-.claude/
-
 # Python artifacts
 __pycache__/
 *.py[cod]
@@ -13,7 +10,6 @@ AppDir/
 
 # Mac artifacts
 .DS_Store
-New Claude Files/
 
 # Generated output files (personal to each user's run)
 config.json

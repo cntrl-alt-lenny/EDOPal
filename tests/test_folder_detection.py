@@ -108,6 +108,26 @@ class FindFolderTests(unittest.TestCase):
         with self.patch_parents(missing, self.root):
             self.assertEqual(config_module.find_edopro_folder(), os.path.abspath(expected))
 
+    def test_chooser_returns_distinct_installs_ready_first_and_keeps_saved_preference(self):
+        fresh = _make_edopro_folder(self.root, "EDOPro", databases=False)
+        first = _make_edopro_folder(self.root, "ProjectIgnis")
+        saved = _make_edopro_folder(self.root, "Tournament portable")
+        with self.patch_parents(self.root, self.root):
+            self.assertEqual(config_module.find_edopro_folders([saved]), [saved, first, fresh])
+
+    def test_generic_repositories_and_expansions_are_not_game_installations(self):
+        for directory in ("repositories", "expansions"):
+            os.makedirs(os.path.join(self.root, "Work", directory))
+        with self.patch_parents(self.root):
+            self.assertEqual(config_module.find_edopro_folders(), [])
+
+    def test_recognizes_a_fresh_linux_portable_install(self):
+        path = os.path.join(self.root, "Tournament")
+        os.makedirs(path)
+        open(os.path.join(path, "EDOPro"), "wb").close()
+        with self.patch_parents(self.root):
+            self.assertEqual(config_module.find_edopro_folders(), [path])
+
 
 class DetectOnStartupTests(unittest.TestCase):
     def setUp(self):

@@ -1,6 +1,7 @@
 """Tests for the shared HTTPS session configuration."""
 
 import os
+import ssl
 import tempfile
 import unittest
 from unittest import mock
@@ -36,7 +37,7 @@ class HttpSessionTests(unittest.TestCase):
             mock.patch.dict(os.environ, {"EDOPRO_CA_BUNDLE": ca_path}, clear=False),
             mock.patch.object(main.aiohttp, "TCPConnector"),
             mock.patch.object(main.aiohttp, "ClientSession"),
-            mock.patch.object(main.ssl.SSLContext, "load_verify_locations") as load_cas,
+            mock.patch.object(ssl.SSLContext, "load_verify_locations") as load_cas,
         ):
             main._create_http_session()
 

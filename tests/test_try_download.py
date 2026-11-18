@@ -22,6 +22,7 @@ class _FakeResponse:
     def __init__(self, status: int, body: bytes, headers: dict | None = None):
         self.status = status
         self._body = body
+        self.content = self
         self.headers = headers or {}
 
     async def __aenter__(self):
@@ -30,8 +31,9 @@ class _FakeResponse:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def read(self) -> bytes:
-        return self._body
+    async def iter_chunked(self, size):
+        for start in range(0, len(self._body), size):
+            yield self._body[start : start + size]
 
 
 class _FakeSession:
@@ -129,6 +131,26 @@ class TryDownloadTests(unittest.TestCase):
 
         self.assertIs(result, main.FetchResult.ERROR)
         self.assertFalse(os.path.exists(self.filepath))
+
+    def test_chunked_image_stops_at_the_limit_and_keeps_existing_art(self):
+        original = _jpeg_body(700)
+        with open(self.filepath, "wb") as dest:
+            dest.write(original)
+
+        async def long_image(_response, _size):
+            yield JPEG_MAGIC + bytes(900)
+            yield bytes(800)
+            self.fail("The download should stop reading once it exceeds the limit.")
+
+        with (
+            mock.patch.object(main, "MAX_IMAGE_BYTES", 1500),
+            mock.patch.object(_FakeResponse, "iter_chunked", long_image),
+        ):
+            self.assertIs(self._run(_FakeSession([(200, b"")])), main.FetchResult.ERROR)
+
+        with open(self.filepath, "rb") as dest:
+            self.assertEqual(dest.read(), original)
+        self.assertEqual(os.listdir(self.temp_dir.name), ["card.jpg"])
 
     def test_honors_retry_after_on_429(self):
         session = _FakeSession(

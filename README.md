@@ -8,9 +8,9 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/github/license/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader" alt="License">
-  <img src="https://img.shields.io/github/v/release/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader" alt="Release">
-  <img src="https://img.shields.io/github/downloads/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader/total?color=2ea44f&label=downloads" alt="Downloads">
+  <img src="https://img.shields.io/github/license/cntrl-alt-lenny/edopro-hd-cards" alt="License">
+  <img src="https://img.shields.io/github/v/release/cntrl-alt-lenny/edopro-hd-cards" alt="Release">
+  <img src="https://img.shields.io/github/downloads/cntrl-alt-lenny/edopro-hd-cards/total?color=2ea44f&label=downloads" alt="Downloads">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform">
 </p>
 
@@ -21,35 +21,39 @@
 </p>
 
 <p align="center">
-  <img src="assets/app-window.svg" alt="EDOPro HD Cards Downloader options window" width="520">
+  <img src="assets/app-window.png" alt="EDOPro HD Cards Downloader main window" width="760">
 </p>
 
 ## Download
 
-One download per platform on the [Releases page](https://github.com/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader/releases/latest). Every zip holds **one file and a ReadMe** — no installer, no Python, no setup folder. The app keeps only small settings, retry caches, and optional reports in your normal per-user application-data folder.
+Download the portable app for your platform from the [Releases page](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest). The Windows and Linux archives include the executable and a ReadMe. The macOS archive contains one app. Settings, artwork retry caches, optional reports and imported soundtracks live in your per-user application-data folder.
 
 | Platform | Download | Then |
 |---|---|---|
-| **Windows** | [`EDOPro-HD-Sync-Windows.zip`](https://github.com/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader/releases/latest) | Unzip, double-click **EDOPro-HD-Sync.exe**. If SmartScreen warns, choose **More info → Run anyway**. |
-| **macOS** | [`EDOPro-HD-Sync-macOS.zip`](https://github.com/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader/releases/latest) | Unzip and open **EDOPro HD Sync**. It runs natively on Apple Silicon and Intel. If macOS blocks the first launch, follow [Apple’s Open Anyway steps](https://support.apple.com/en-gb/102445). |
-| **Linux** | [`EDOPro-HD-Sync-Linux.zip`](https://github.com/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader/releases/latest) | Unzip, double-click **EDOPro-HD-Sync** (or run `./EDOPro-HD-Sync`). |
+| **Windows** | [`EDOPro-HD-Sync-Windows.zip`](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest) | Unzip, double-click **EDOPro-HD-Sync.exe**. If SmartScreen warns, choose **More info → Run anyway**. |
+| **macOS** | [`EDOPro-HD-Sync-macOS.zip`](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest) | Unzip and open **EDOPro HD Sync**. It runs natively on Apple Silicon and Intel. If macOS blocks the first launch, follow [Apple’s Open Anyway steps](https://support.apple.com/en-gb/102445). |
+| **Linux** | [`EDOPro-HD-Sync-Linux.zip`](https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest) | Unzip, double-click **EDOPro-HD-Sync** (or run `./EDOPro-HD-Sync`). |
 
-**It finds your EDOPro folder for you.** The window opens showing the folder it found — press Install HD artwork to use it, or **Change…** to pick a different one. If nothing turns up, you're asked to choose it straight away.
+**It finds your EDOPro folder for you.** The window shows the current installation. **Change folder** lists nearby copies, including portable installations, and lets you browse to another location. The app remembers your choice.
 
 ## Features
 
-- **One file, nothing to install** — the download is a single app plus a ReadMe. Put it anywhere, including a protected folder; settings and retry caches are stored separately in your user profile.
+- **One file, nothing to install** — unzip the app anywhere and open it. Settings and retry caches live in your user profile.
 - **Finds your EDOPro folder** — it checks the usual install locations and shows you what it found; you just confirm it.
-- **One simple window** — tick what you want, press Install HD artwork, and watch the live progress and results right in the window. Same experience on Windows, macOS, and Linux.
+- **One simple window** — choose Full library or My decks, press **Sync HD cards**, and watch the live progress and results right in the window. Same experience on Windows, macOS, and Linux.
 - **Every card type covered** — official, Rush Duel, and anime/custom cards are all fetched directly by the same IDs EDOPro uses.
 - **Field Spell playmat art** — the cropped artwork EDOPro displays on the board is downloaded into `pics/field/` automatically.
-- **GOAT / Pre-Errata artwork choice** ? *HD GOAT / Pre-Errata artwork* is on by default and uses the base card's sharp artwork with modern, errata'd text. Untick it (or use `--original-text`) for the card's own original wording at lower resolution. Changing the choice refreshes affected cards; upgrading also refreshes previously downloaded era artwork, keeping existing images until replacements succeed.
-- **Deck-first sync** — tick *Only cards from my decks* (or use `--my-decks`) and a fresh install is playable in minutes instead of hours.
-- **Coverage at a glance** — the *Show coverage* button (or `--stats`) tells you how complete your artwork is without downloading a thing.
+- **GOAT / Pre-Errata artwork choice** uses the base card’s sharp artwork by default. Turn off *HD GOAT / Pre-Errata artwork* (or use `--original-text`) for the card’s historical wording at lower resolution. Changing this setting refreshes affected cards once replacements download successfully.
+- **Deck-first sync** — choose *My decks* (or use `--my-decks`) and a fresh install is playable in minutes instead of hours.
+- **Coverage at a glance** — *Sync settings → Show coverage* (or `--stats`) tells you how complete your artwork is without downloading a thing.
 - **Repair mode** — tick *Repair broken images* (or use `--repair`) to find and re-fetch corrupt or half-downloaded files.
-- **Optional theme and audio** — install the included Midnight Circuit backgrounds and sleeves, two synth tracks and ten duel cues. Reopen EDOPro after installing. Copies of replaced files are saved under `extras-backups` in the downloader’s user data folder.
+- **Customize EDOPro** previews Abyss, Moon, Nebula, and Ristretto in the game menu, deck editor, and duel field. Set your sleeve and your opponent’s independently using the original Vortex and 1998 OCG artwork. Compare the original duel field with **Highlight the turn player** to see whose turn it is at a glance. Preview the duel sound effects, then close EDOPro to apply your changes. Restoring the previous skin also restores its fonts.
+- **Music library** has separate selections for the deck editor and regular duels. Browse 25 game covers, preview and seek through a track, then apply it to the selected installation. Dates refer to the pictured edition. Restore the previous playlist at any time. The gallery spans the *Power of Chaos* trilogy, *World Championship*, *Tag Force*, and *Legacy of the Duelist*. It uses audio already in EDOPro and recordings you import. **Manage library** can read original *Power of Chaos* audio and import a personal soundtrack folder copied from another device. If game music is muted, use **Enable game music** after closing EDOPro. This keeps your volume setting. [Cover art from LaunchBox Games Database](https://gamesdb.launchbox-app.com/)
+- **Tournament decks** lets you browse results by format or event, preview published lists, and save one or more directly into EDOPro’s `deck` folder. After importing, you can sync HD artwork just for those decks. Existing edits are preserved. Event standings, card lists, and deck downloads come from [Format Library](https://formatlibrary.com/events).
 - **Update notices** — it tells you when a newer version is out; download it and replace the one file.
 - **Safe and resumable** — verified downloads, a 14-day failure cache so known-missing cards aren't hammered, and optional timestamped sync reports.
+
+The importer keeps supported passcodes, counts, and section order. If an event uses an alternate printing absent from your installation, it checks the published card details against your local databases before using a supported printing. The app reports card IDs it could not resolve. In Goat events, **Use installed GOAT card versions** saves a separate historical copy and lets you review the matched cards. To host with this copy, set **Forbidden List** to **2005.4 GOAT**, **Rule** to **GOAT**, and **Allowed Cards** to **Anything goes**. Keep both deck checks enabled. The whitelist enforces the format while allowing EDOPro’s historical card IDs.
 
 ## How it works
 
@@ -98,8 +102,8 @@ The packaged app needs no flags — the options window covers the common choices
 ## From source
 
 ```bash
-git clone https://github.com/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader.git
-cd EDOPro-HD-Cards-Downloader
+git clone https://github.com/cntrl-alt-lenny/edopro-hd-cards.git
+cd edopro-hd-cards
 pip install -r requirements.txt
 
 python main.py                 # normal sync

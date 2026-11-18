@@ -1,11 +1,7 @@
-# EDOPro HD Cards Downloader - Project Guide for Claude
+# Contributing to EDOPro HD Cards Downloader
 
 ## What this is
-A tool that automatically downloads HD card artwork for the EDOPro Yu-Gi-Oh! simulator (ProjectIgnis fork). Users place it in their EDOPro folder and run it - it scans the card databases, finds missing images, and downloads them from the best available source.
-
-The owner is a non-programmer. Keep explanations plain and avoid jargon. Prefer simple, focused changes over clever abstractions.
-
-**After committing and pushing any change, always offer to push a version tag so a new release is built automatically.** The owner will not know to do this themselves. Suggest the next patch/minor version based on what changed.
+This portable desktop app finds EDOPro installations and downloads missing HD card and field artwork. Players can also preview skins, sleeves, audio and tournament decks before applying them to a selected installation.
 
 **Release packaging requirements must be preserved.** Publish **exactly one asset per platform** — no checksum files, no launchers — so the Releases page reads simply "Windows, macOS, Linux":
 - `EDOPro-HD-Sync-Windows-vVERSION.zip`
@@ -36,18 +32,28 @@ python main.py --health-check   # quick offline sanity check
 
 ## Project structure
 ```text
-main.py                     # core logic: DB scan, download pipeline, Rich UI
-config.py                   # settings + EDOPro folder detection
-gui.py                      # tick-box options window (tkinter, all platforms)
-requirements.txt            # aiohttp, rich, certifi
-release_assets/ReadMe-*.txt # the ReadMe shipped beside the app in each zip
-.github/workflows/build.yml # CI: builds one binary per platform on tag push
+main.py, card_databases.py           # database scanning and artwork sync
+config.py, installation_picker.py    # preferences, discovery and folder selection
+gui.py, appearance_gallery.py        # desktop home, progress and appearance previews
+extras.py, state_lock.py             # local appearance changes, undo and write coordination
+music_library.py, music_import.py    # catalogue, personal files and per-game playlists
+music_window.py, music_player.py     # soundtrack browsing, playback and seeking
+tournament_window.py                 # tournament browser and artwork hand-off
+tournament_decks.py, goat_versions.py # Format Library imports and historical card versions
+network_tls.py                       # certificate settings shared by remote services
+release_assets/ReadMe-*.txt          # platform instructions
+.github/workflows/build.yml          # release packaging and smoke checks
 ```
 
 ## App window (gui.py)
-Plain packaged runs open a branded three-screen tkinter app (navy/gold, ttk 'clam' theme): OPTIONS (grouped tick-boxes + Start / Show coverage), PROGRESS (determinate gold bar, current-card status, live count, Cancel), and SUMMARY (hero numbers + unavailable breakdown / coverage table). Architecture: Tk owns the main thread; `gui.run_app(cfg, VERSION, run, _apply_gui_choices)` runs `main.run()` in a daemon worker thread and communicates through a queue via runtime hooks on Config — `gui_progress` (a Rich-Progress-compatible adapter), `folder_picker` (worker asks the window to show the native directory dialog), `coverage_sink`, `notice_sink`, and `cancel_event` (workers check it between downloads, so Cancel finishes in-flight files and still writes the failure caches). `run()` returns the DownloadStats the summary screen renders; `cfg.interactive_prompts=False` mutes all console questions. Rules in `_should_show_gui`: `--gui` forces it (even from source), `--no-gui` or any explicit power flag skips it, non-frozen runs never show it by default, and any Tk failure raises `gui.GuiUnavailable` → console flow. The build workflow hard-fails if tkinter is missing on a CI runner; Windows gets DPI awareness + a dark title bar via ctypes (see the pitfall comments in gui.py before touching styling).
+Double-clicking the packaged app opens the artwork screen. Customize EDOPro, Music library and Tournament decks share its selected installation. Tk runs on the main thread. Artwork workers send results through a queue and receive cancellation through a per-run event. A sync for imported decks uses a fresh configuration so its deck paths and options stay within that job. Power flags use the console entry point unless the caller explicitly requests `--gui`. Use `python main.py --gui` to exercise the desktop flow from source.
+
+## Soundtrack covers
+
+Soundtrack entries in `assets/music/catalog.json` identify their LaunchBox front-cover source, original resolution and region. Use the release year of the edition pictured. Konami lists the contemporary game bundles in its [North American](https://www.db.yugioh-card.com/yugiohdb/card_list.action?request_locale=en) and [European](https://www.db.yugioh-card.com/yugiohdb/card_list.action?request_locale=de) records. Personal recordings belong in the user's soundtrack library.
 
 ## Deck-first sync
+
 `--my-decks` (or the window's tick-box) points the deck filter at `<edopro>/deck`, scanned recursively for `.ydk`. On a fresh install (>2,000 cards indexed, <500 images on disk) the console flow asks "Quick start: only sync the cards in your N deck(s)?" before committing to a full ~13,000-card download. The packaged options window checks this automatically and recommends deck-first mode when it finds decks on a mostly empty install.
 
 ## Architecture

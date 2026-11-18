@@ -1,8 +1,10 @@
 """Tests for the tick-box options window plumbing (not the Tk widgets themselves)."""
 
 import os
+import queue
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -59,6 +61,46 @@ class ShouldShowGuiTests(unittest.TestCase):
 
 
 class ApplyGuiChoicesTests(unittest.TestCase):
+    def test_imported_deck_sync_does_not_change_next_full_run(self):
+        app = mock.Mock(spec=gui._App)
+        app.cfg = _cfg(folder_detected=False, theme=False, audio=False)
+        app.events = queue.Queue()
+        app._picks.side_effect = lambda: {"force": True, "theme": True}
+        app.apply_choices = main._apply_gui_choices
+        app.run_coro = mock.AsyncMock(return_value=None)
+        for name in (
+            "hero_ok_caption",
+            "hero_bad_caption",
+            "cancel_button",
+            "pct_var",
+            "count_var",
+            "remaining_var",
+            "notice_var",
+            "scope_hint",
+            "root",
+            "stage_var",
+            "bar",
+            "progress_frame",
+        ):
+            setattr(app, name, mock.Mock())
+
+        deck = Path("deck/Tournament.ydk")
+        gui._App._launch(app, stats_only=False, deck_paths=(deck,))
+        self.assertEqual(app.events.get(timeout=3)[0], "done")
+        scoped = app.run_config
+        scoped.cancel_event.set()
+        gui._App._launch(app, stats_only=False)
+        self.assertEqual(app.events.get(timeout=3)[0], "done")
+
+        self.assertEqual(scoped.deck_paths, [str(deck)])
+        self.assertFalse(scoped.force)
+        self.assertFalse(scoped.theme)
+        self.assertEqual(app.run_config.deck_paths, [])
+        self.assertTrue(app.run_config.force)
+        self.assertTrue(app.run_config.theme)
+        self.assertFalse(app.run_config.cancel_event.is_set())
+        self.assertFalse(app.cfg.force)
+
     def test_choices_land_on_config_and_mute_prompts(self):
         cfg = _cfg()
         main._apply_gui_choices(

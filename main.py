@@ -15,21 +15,22 @@ import ntpath
 import os
 import re
 import sqlite3
-import ssl
 import subprocess
 import sys
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 from time import perf_counter
+from uuid import uuid4
 
 import aiohttp
-import certifi
 
 import config as config_module
 import extras
 import gui
+from card_databases import get_db_files
 from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, find_edopro_folder
+from network_tls import create_ssl_context
 
 try:
     import tkinter as tk
@@ -57,9 +58,17 @@ except ImportError:
     RICH_AVAILABLE = False
 
 
+def _output_stream():
+    """Return a usable output stream, including for windowed builds."""
+    return sys.stdout or getattr(sys, "__stdout__", None)
+
+
 def _stdout_supports_unicode() -> bool:
     """Return True when stdout can encode Rich output safely."""
-    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    stream = _output_stream()
+    if stream is None:
+        return False
+    encoding = getattr(stream, "encoding", None) or "utf-8"
     try:
         "\u2500".encode(encoding)
         return True
@@ -75,22 +84,65 @@ def _strip_markup(value: str) -> str:
     return _MARKUP_RE.sub("", value)
 
 
+class _WindowedOutput:
+    """Keep an optional Windows console from interrupting a windowed executable."""
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def write(self, value):
+        try:
+            return self.stream.write(value)
+        except (OSError, ValueError):
+            # A launcher may close its inherited console before this process exits.
+            return len(value)
+
+    def flush(self):
+        with contextlib.suppress(OSError, ValueError):
+            self.stream.flush()
+
+    def isatty(self):
+        return False
+
+    @property
+    def encoding(self):
+        return self.stream.encoding
+
+
+def _console_stream():
+    stream = _output_stream()
+    if stream is not None and sys.platform == "win32" and getattr(sys, "frozen", False):
+        return _WindowedOutput(stream)
+    return stream
+
+
 if RICH_AVAILABLE and _stdout_supports_unicode():
-    console = Console()
+    stream = _console_stream()
+    # Rich's legacy Win32 renderer bypasses file.write and assumes a live console.
+    console = (
+        Console(file=stream, force_terminal=False, legacy_windows=False)
+        if isinstance(stream, _WindowedOutput)
+        else Console()
+    )
 else:
     RICH_AVAILABLE = False
 
     class _FallbackConsole:
         @staticmethod
         def print(*args, **kwargs):
+            stream = _console_stream()
+            if stream is None:
+                return
             kwargs.pop("style", None)
             kwargs.pop("highlight", None)
             stripped = tuple(_strip_markup(arg) if isinstance(arg, str) else arg for arg in args)
-            print(*stripped, **kwargs)
+            print(*stripped, file=stream, **kwargs)
 
         @staticmethod
         def rule(title=""):
-            print(f"\n{'-' * 20} {_strip_markup(title)} {'-' * 20}\n")
+            stream = _console_stream()
+            if stream is not None:
+                print(f"\n{'-' * 20} {_strip_markup(title)} {'-' * 20}\n", file=stream)
 
     console = _FallbackConsole()
 
@@ -134,36 +186,16 @@ def _truncate(text: str, max_len: int) -> str:
     return text if len(text) <= max_len else text[: max_len - 1] + "…"
 
 
-LATEST_RELEASE_API = (
-    "https://api.github.com/repos/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader/releases/latest"
-)
-TEXTURES_RELEASES_API = (
-    "https://api.github.com/repos/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader/releases"
-)
+LATEST_RELEASE_API = "https://api.github.com/repos/cntrl-alt-lenny/edopro-hd-cards/releases/latest"
+TEXTURES_RELEASES_API = "https://api.github.com/repos/cntrl-alt-lenny/edopro-hd-cards/releases"
 TEXTURES_RELEASE_API = f"{TEXTURES_RELEASES_API}/tags/textures"
-
-
-def _custom_ca_bundle_path() -> str | None:
-    """Return an existing custom CA bundle path, if one is configured."""
-    for env_name in ("EDOPRO_CA_BUNDLE", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
-        configured_path = os.environ.get(env_name)
-        if not configured_path:
-            continue
-        expanded_path = os.path.abspath(os.path.expanduser(configured_path))
-        if os.path.isfile(expanded_path):
-            return expanded_path
-    return None
 
 
 def _create_http_session(
     *, limit: int | None = None, limit_per_host: int | None = None
 ) -> aiohttp.ClientSession:
     """Create an HTTPS session that honors standard proxy and CA-bundle settings."""
-    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-    custom_ca_bundle = _custom_ca_bundle_path()
-    if custom_ca_bundle:
-        ssl_ctx.load_verify_locations(cafile=custom_ca_bundle)
-    connector_kwargs: dict[str, object] = {"ssl": ssl_ctx}
+    connector_kwargs: dict[str, object] = {"ssl": create_ssl_context()}
     if limit is not None:
         connector_kwargs["limit"] = limit
     if limit_per_host is not None:
@@ -188,20 +220,20 @@ def _parse_version(text: str) -> tuple[int, ...]:
 def _update_message(latest: str) -> str:
     return (
         f"[yellow]A newer version ({latest}) is available — "
-        "https://github.com/cntrl-alt-lenny/EDOPro-HD-Cards-Downloader/releases/latest\n"
+        "https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest\n"
         "Download it and replace this app with the new one.[/yellow]"
     )
 
 
-async def notify_if_update_available(cfg: Config | None = None) -> None:
-    """One-shot startup update check for paths that never open the main session.
-
-    The normal sync path checks inside its own HTTP session; this covers the
-    "everything is already synced" early exit so opening the tool always tells
-    the user about a new release. Silent on any failure.
-    """
+async def notify_if_update_available(
+    cfg: Config | None = None, session: aiohttp.ClientSession | None = None
+) -> None:
+    """Report a newer release if the check succeeds."""
     try:
-        async with _create_http_session() as session:
+        if session is None:
+            async with _create_http_session() as client:
+                latest = await check_for_update(client, VERSION)
+        else:
             latest = await check_for_update(session, VERSION)
     except Exception:
         return
@@ -235,55 +267,7 @@ async def check_for_update(session: aiohttp.ClientSession, current: str) -> str 
     return None
 
 
-async def _check_image_server(session: aiohttp.ClientSession, cfg: Config) -> str | None:
-    """Probe the image server once and return a warning message, or None if it looks healthy.
-
-    Returns the message instead of printing it so the caller can run this
-    concurrently with the update check without the two interleaving their output.
-    """
-    try:
-        test_timeout = aiohttp.ClientTimeout(total=8)
-        async with session.get(
-            f"{cfg.sources['official']}/46986414.jpg",
-            timeout=test_timeout,
-        ) as resp:
-            if resp.status != 200:
-                return (
-                    f"[yellow]Image server returned HTTP {resp.status} — "
-                    "downloads may fail[/yellow]"
-                )
-    except Exception as exc:
-        return (
-            f"[bold red]Cannot reach image server: {exc}\n"
-            "  Check your internet connection.[/bold red]"
-        )
-    return None
-
-
 # Database scanning
-
-
-def get_db_files(edopro_path: str) -> list[str]:
-    """Find card DBs in the EDOPro root, expansions/, and repository delta folders."""
-    dbs: list[str] = []
-    root_db = os.path.join(edopro_path, "cards.cdb")
-    if os.path.exists(root_db):
-        dbs.append(root_db)
-
-    exp_path = os.path.join(edopro_path, "expansions")
-    if os.path.isdir(exp_path):
-        for filename in sorted(os.listdir(exp_path)):
-            if filename.endswith(".cdb"):
-                dbs.append(os.path.join(exp_path, filename))
-
-    repo_path = os.path.join(edopro_path, "repositories")
-    if os.path.isdir(repo_path):
-        for current_root, dirnames, filenames in os.walk(repo_path):
-            dirnames.sort()
-            for filename in sorted(filenames):
-                if filename.endswith(".delta.cdb"):
-                    dbs.append(os.path.join(current_root, filename))
-    return dbs
 
 
 def normalize_edopro_path(path: str) -> str:
@@ -416,7 +400,7 @@ def confirm_edopro_folder(cfg: Config) -> bool:
     return prompt_for_edopro_path(cfg) is not None
 
 
-def prompt_for_edopro_path(cfg: Config) -> list[str] | None:
+def prompt_for_edopro_path(cfg: Config, *, unreadable: list[str] | None = None) -> list[str] | None:
     """Prompt until the user enters a valid EDOPro folder or cancels."""
     checked_path = os.path.abspath(cfg.edopro_path)
     console.print(f"[yellow]No .cdb files found in:[/yellow] [bold]{checked_path}[/bold]")
@@ -459,7 +443,9 @@ def prompt_for_edopro_path(cfg: Config) -> list[str] | None:
                 console.print("[yellow]No folder entered. Exiting.[/yellow]")
                 return None
 
-        dbs = get_db_files(candidate)
+        if unreadable is not None:
+            unreadable.clear()
+        dbs = get_db_files(candidate, unreadable=unreadable)
         if dbs:
             saved = cfg.set_edopro_path(candidate, save=True)
             console.print(f"[green]Using EDOPro folder:[/green] [bold]{cfg.edopro_path}[/bold]")
@@ -481,8 +467,14 @@ def prompt_for_edopro_path(cfg: Config) -> list[str] | None:
 FIELD_SPELL_TYPE = 0x80002
 
 
+SMALL_DECK_INDEX_LIMIT = 500
+
+
 def scan_databases(
     db_files: list[str],
+    *,
+    unreadable: list[str] | None = None,
+    only_ids: set[int] | None = None,
 ) -> tuple[dict[int, str], dict[str, list[int]], set[int], set[int]]:
     """
     Read every .cdb and return:
@@ -497,6 +489,18 @@ def scan_databases(
     rush_ids: set[int] = set()
     field_ids: set[int] = set()
 
+    # Deck passcodes are unbounded Python ints. SQLite only stores signed 64-bit IDs.
+    # Use bound IN queries in sorted batches to retain database/ID precedence.
+    join = " FROM datas d INNER JOIN texts t ON d.id = t.id"
+    queries = [(join + " ORDER BY d.id", ())]
+    if only_ids is not None:
+        ids = sorted(cid for cid in only_ids if 0 < cid <= 2**63 - 1)
+        queries = []
+        for start in range(0, len(ids), SMALL_DECK_INDEX_LIMIT):
+            batch = tuple(ids[start : start + SMALL_DECK_INDEX_LIMIT])
+            placeholders = ",".join("?" for _ in batch)
+            queries.append((f"{join} WHERE d.id IN ({placeholders}) ORDER BY d.id", batch))
+
     for db in db_files:
         # Skip empty placeholder files (EDOPro ships a 0-byte cards.cdb)
         if os.path.getsize(db) == 0:
@@ -505,34 +509,28 @@ def scan_databases(
         conn = None
         try:
             conn = sqlite3.connect(db)
-            try:
-                rows = conn.execute(
-                    "SELECT d.id, t.name, d.type FROM datas d "
-                    "INNER JOIN texts t ON d.id = t.id ORDER BY d.id"
-                ).fetchall()
-            except sqlite3.OperationalError:
-                # Hand-made DBs without a type column still sync card art.
-                rows = [
-                    (card_id, name, 0)
-                    for card_id, name in conn.execute(
-                        "SELECT d.id, t.name FROM datas d "
-                        "INNER JOIN texts t ON d.id = t.id ORDER BY d.id"
-                    ).fetchall()
-                ]
-            for card_id, name, card_type in rows:
-                id_to_name[card_id] = name
-                if is_rush:
-                    rush_ids.add(card_id)
-                if (
-                    isinstance(card_type, int)
-                    and (card_type & FIELD_SPELL_TYPE) == FIELD_SPELL_TYPE
-                ):
-                    field_ids.add(card_id)
-                if card_id < 100_000_000:
-                    official_ids = name_to_official.setdefault(name, [])
-                    if card_id not in official_ids:
-                        official_ids.append(card_id)
+            for query, batch in queries:
+                try:
+                    rows = conn.execute("SELECT d.id, t.name, d.type" + query, batch).fetchall()
+                except sqlite3.OperationalError:
+                    # Hand-made databases may omit the type column.
+                    rows = conn.execute("SELECT d.id, t.name, 0" + query, batch).fetchall()
+                for card_id, name, card_type in rows:
+                    id_to_name[card_id] = name
+                    if is_rush:
+                        rush_ids.add(card_id)
+                    if (
+                        isinstance(card_type, int)
+                        and (card_type & FIELD_SPELL_TYPE) == FIELD_SPELL_TYPE
+                    ):
+                        field_ids.add(card_id)
+                    if card_id < 100_000_000:
+                        official_ids = name_to_official.setdefault(name, [])
+                        if card_id not in official_ids:
+                            official_ids.append(card_id)
         except sqlite3.Error as exc:
+            if unreadable is not None:
+                unreadable.append(db)
             console.print(f"[yellow]Error reading {db}: {exc}[/yellow]")
         finally:
             if conn is not None:
@@ -874,6 +872,16 @@ def _looks_like_image(content: bytes) -> bool:
     return content.startswith(PNG_MAGIC) and b"IEND" in content[-32:]
 
 
+def _image_sample(path: str) -> bytes:
+    """Read only the size threshold, signature and trailer our image checks inspect."""
+    with open(path, "rb", buffering=0) as source:
+        head = source.read(MIN_IMAGE_BYTES)
+        if len(head) < MIN_IMAGE_BYTES:
+            return head
+        source.seek(-64, os.SEEK_END)
+        return head + source.read(64)
+
+
 def field_art_dir(cfg: Config) -> str:
     return os.path.join(cfg.pics_path, "field")
 
@@ -904,14 +912,38 @@ def find_broken_field_images(field_dir: str, known_ids: set[int]) -> list[int]:
             continue
         path = os.path.join(field_dir, entry)
         try:
-            with open(path, "rb") as f:
-                content = f.read()
-            if not _looks_like_image(content) and cid not in seen:
+            if not _looks_like_image(_image_sample(path)) and cid not in seen:
                 broken.append(cid)
                 seen.add(cid)
         except OSError:
             continue
     return broken
+
+
+def _present_art_filenames(folder: str, extensions: tuple[str, ...]) -> set[str]:
+    """Index a full art folder in one pass, preserving case and symlink semantics."""
+    names = set()
+    try:
+        entries = os.scandir(folder)
+    except FileNotFoundError:
+        return names
+    with entries:
+        for entry in entries:
+            name = entry.name
+            if name.endswith(extensions):
+                if entry.is_file(follow_symlinks=False):
+                    names.add(name)
+                    continue
+                canonical = name
+            else:
+                stem, ext = os.path.splitext(name)
+                ext = ext.lower()
+                if ext not in extensions:
+                    continue
+                canonical = stem + ext
+            if os.path.exists(os.path.join(folder, canonical)):
+                names.add(canonical)
+    return names
 
 
 def find_broken_images(pics_path: str, known_ids: set[int]) -> list[int]:
@@ -934,9 +966,8 @@ def find_broken_images(pics_path: str, known_ids: set[int]) -> list[int]:
             continue
         path = os.path.join(pics_path, entry)
         try:
-            with open(path, "rb") as f:
-                if not _looks_like_jpeg(f.read()):
-                    broken.append(cid)
+            if not _looks_like_jpeg(_image_sample(path)):
+                broken.append(cid)
         except OSError:
             continue
     return broken
@@ -991,8 +1022,6 @@ async def _try_download(
     exponential backoff between attempts.
     `is_valid` decides whether the downloaded bytes are an acceptable image.
     """
-    tmp_path = f"{filepath}.part"
-    _remove_quietly(tmp_path)
     total_attempts = max_retries + 1
     for attempt in range(1, total_attempts + 1):
         retry_after: float | None = None
@@ -1002,23 +1031,29 @@ async def _try_download(
                     content_length = resp.headers.get("Content-Length")
                     try:
                         if content_length is not None and int(content_length) > MAX_IMAGE_BYTES:
-                            _remove_quietly(tmp_path)
                             return FetchResult.ERROR
                     except (TypeError, ValueError):
                         pass
-                    content = await resp.read()
-                    if len(content) > MAX_IMAGE_BYTES:
-                        _remove_quietly(tmp_path)
-                        return FetchResult.ERROR
+                    content = bytearray()
+                    async for chunk in resp.content.iter_chunked(128 * 1024):
+                        if len(content) + len(chunk) > MAX_IMAGE_BYTES:
+                            return FetchResult.ERROR
+                        content.extend(chunk)
                     if is_valid(content):
-                        with open(tmp_path, "wb") as file_obj:
-                            file_obj.write(content)
-                        os.replace(tmp_path, filepath)
+                        # Independent app instances can safely sync the same installation.
+                        # Only a complete, verified image replaces the destination.
+                        tmp_path = f"{filepath}.{uuid4().hex}.part"
+                        try:
+                            with open(tmp_path, "xb") as file_obj:
+                                file_obj.write(content)
+                            os.replace(tmp_path, filepath)
+                        except BaseException:
+                            _remove_quietly(tmp_path)
+                            raise
                         return FetchResult.OK
                     if attempt >= total_attempts:
                         # A 200 with a non-image body is usually an error or
                         # anti-bot page, so treat it as transient.
-                        _remove_quietly(tmp_path)
                         return FetchResult.ERROR
                 elif resp.status == 404:
                     return FetchResult.MISSING
@@ -1030,14 +1065,12 @@ async def _try_download(
             pass
         except OSError as exc:
             console.print(f"[red]Cannot write to {filepath}: {exc}[/red]")
-            _remove_quietly(tmp_path)
             return FetchResult.ERROR
 
         if attempt < total_attempts:
             delay = retry_after if retry_after is not None else 2 ** (attempt - 1)
             await asyncio.sleep(delay)
 
-    _remove_quietly(tmp_path)
     return FetchResult.ERROR
 
 
@@ -1104,9 +1137,9 @@ def build_download_candidates(
     return manual + rest + own
 
 
-def is_era_entry(name: str, suffixes: list[str]) -> bool:
+def is_era_entry(name: str, suffixes: list[str] | tuple[str, ...]) -> bool:
     """True for GOAT / Pre-Errata entries - the cards original_text affects."""
-    return any(name.endswith(suffix) for suffix in suffixes)
+    return name.endswith(tuple(suffixes))
 
 
 async def download_card(
@@ -1121,12 +1154,15 @@ async def download_card(
     stats: DownloadStats,
     progress=None,
     task_id=None,
+    *,
+    replace_existing: bool = False,
 ) -> None:
     """Download a single card image using a simple waterfall."""
     filepath = os.path.join(cfg.pics_path, f"{card_id}.jpg")
 
     if (
         not cfg.force
+        and not replace_existing
         and card_id not in getattr(cfg, "refresh_era_ids", set())
         and os.path.exists(filepath)
     ):
@@ -1206,6 +1242,16 @@ async def download_field_art(
             saw_transient = True
 
     if result is FetchResult.OK:
+        if getattr(cfg, "repair", False):
+            # The fallback can replace a broken JPG with a PNG (or vice versa).
+            # Only remove the broken sibling after the replacement succeeds.
+            base, ext = os.path.splitext(filepath)
+            sibling = base + (".png" if ext == ".jpg" else ".jpg")
+            with contextlib.suppress(OSError):
+                with open(sibling, "rb") as existing:
+                    valid = _looks_like_image(existing.read())
+                if not valid:
+                    os.remove(sibling)
         stats.field_ok += 1
     else:
         stats.record_field_failure(card_id, name, transient=saw_transient)
@@ -1558,7 +1604,7 @@ def _prompt_yes_no(question: str, default: bool = False) -> bool:
 
 
 def run_health_check(cfg: Config) -> bool:
-    """Run quick offline checks for suffix-stripping logic."""
+    """Check artwork matching and the assets needed by the packaged windows."""
     suffixes = DEFAULTS["suffixes_to_strip"]
     name_to_official = {
         "Dark Magician": [36996508, 46986414],
@@ -1605,6 +1651,46 @@ def run_health_check(cfg: Config) -> bool:
         (
             is_pre_errata_miss and not is_suffix_match,
             "Summoned Skull (Pre-Errata): flags pre-errata miss when base is absent",
+        )
+    )
+
+    from music_library import ART, LOCAL, catalog
+
+    try:
+        games = [game for game in catalog() if game != LOCAL]
+        music_present = bool(games) and all(
+            (ART / size / f"{game}.png").is_file()
+            for game in games
+            for size in ("", "thumb", "grid", "detail")
+        )
+    except (OSError, KeyError, ValueError):
+        music_present = False
+    checks.append((music_present, "Soundtrack catalogue and game covers"))
+    gallery = extras.PACKS.parent / "window" / "gallery"
+    if getattr(sys, "frozen", False):
+        try:
+            import miniaudio
+        except (ImportError, OSError):
+            playable = False
+        else:
+            try:
+                playable = miniaudio.get_file_info(str(gallery / "thonk-draw.wav")).num_frames > 0
+            except (OSError, RuntimeError, miniaudio.MiniaudioError):
+                playable = False
+        checks.append((playable, "Built-in soundtrack decoder"))
+    checks.append(
+        (
+            all(
+                (extras.PACKS / f"{skin.lower()}.zip").is_file()
+                and all(
+                    (gallery / size / f"{skin.lower()}-{view}.png").is_file()
+                    for view in ("menu", "deck", "duel", "turn")
+                    for size in ("", "large")
+                )
+                for skin in extras.SKINS
+            )
+            and (extras.PACKS / "shared.zip").is_file(),
+            "Skin packs, sleeves and in-game previews",
         )
     )
 
@@ -1708,6 +1794,7 @@ def _scan_art_folder(
     """Return valid image IDs and total recognized-file bytes for one art folder."""
     ids: set[int] = set()
     size = 0
+    sample_suffices = is_valid in (_looks_like_jpeg, _looks_like_image)
     if not os.path.isdir(folder):
         return ids, size
     with os.scandir(folder) as it:
@@ -1720,8 +1807,11 @@ def _scan_art_folder(
             try:
                 size += entry.stat().st_size
                 if is_valid is not None:
-                    with open(entry.path, "rb") as file_obj:
-                        content = file_obj.read()
+                    if sample_suffices:
+                        content = _image_sample(entry.path)
+                    else:
+                        with open(entry.path, "rb") as file_obj:
+                            content = file_obj.read()
                     if not is_valid(content):
                         continue
             except OSError:
@@ -1783,8 +1873,18 @@ def print_coverage_stats(cfg: Config, id_to_name: dict[int, str], field_ids: set
     console.print(f"[dim]Images folder: {data['pics_path']}[/dim]")
 
 
+class SyncInputError(SystemExit):
+    """An actionable stop message for the same CLI and desktop entry points."""
+
+    def __init__(self, message: str):
+        self.user_message = message
+        console.print(f"[bold red]{message}[/bold red]")
+        super().__init__(1)
+
+
 async def run(cfg: Config):
     started_at = perf_counter()
+    cfg.idle_summary = None
 
     console.print(f"[bold cyan]EDOPro HD Cards Downloader[/bold cyan] [dim]v{VERSION}[/dim]")
 
@@ -1803,25 +1903,40 @@ async def run(cfg: Config):
     ):
         return None
 
-    dbs = get_db_files(cfg.edopro_path)
+    unreadable: list[str] = []
+    dbs = get_db_files(cfg.edopro_path, unreadable=unreadable)
     if not dbs:
-        dbs = prompt_for_edopro_path(cfg)
+        dbs = prompt_for_edopro_path(cfg, unreadable=unreadable)
         if not dbs:
             return None
 
     os.makedirs(cfg.pics_path, exist_ok=True)
 
-    full_id_to_name, name_to_official, rush_ids, field_ids = scan_databases(dbs)
+    deck_filter = None
+    if not cfg.stats and (cfg.deck_paths or cfg.decks_folder):
+        deck_filter = collect_deck_filter_ids(cfg)
+    era_suffixes = tuple(cfg.suffixes)
+    scoped_index = bool(deck_filter) and len(deck_filter) <= SMALL_DECK_INDEX_LIMIT
+    if scoped_index:
+        index = scan_databases(dbs, unreadable=unreadable, only_ids=deck_filter)
+        # A suffix match may need a base card outside this deck. The full scan
+        # also distinguishes missing deck IDs from an empty or corrupt installation.
+        scoped_index = bool(index[0]) and not any(
+            is_era_entry(name, era_suffixes) for name in index[0].values()
+        )
+    if not scoped_index:
+        index = scan_databases(dbs, unreadable=unreadable)
+    full_id_to_name, name_to_official, rush_ids, field_ids = index
     manual_map = load_manual_map(cfg.manual_map_file)
-    console.print(f"[dim]Indexed {len(full_id_to_name):,} cards[/dim]")
+    scope = "selected " if scoped_index else ""
+    console.print(f"[dim]Indexed {len(full_id_to_name):,} {scope}cards[/dim]")
 
     has_non_empty_db = any(os.path.isfile(db) and os.path.getsize(db) > 0 for db in dbs)
     if has_non_empty_db and not full_id_to_name:
-        console.print(
-            "[bold red]No cards found in the scanned databases. "
-            "They may be corrupt or in an unexpected schema.[/bold red]"
+        raise SyncInputError(
+            "The selected databases contain no readable cards. Open EDOPro to update "
+            "its card databases, or choose another installation."
         )
-        raise SystemExit(1)
 
     if cfg.stats:
         print_coverage_stats(cfg, full_id_to_name, field_ids)
@@ -1872,7 +1987,8 @@ async def run(cfg: Config):
         ):
             cfg.decks_folder = deck_dir
 
-    deck_filter = collect_deck_filter_ids(cfg)
+    if deck_filter is None:
+        deck_filter = collect_deck_filter_ids(cfg)
     if deck_filter is not None and not deck_filter:
         if cfg.my_decks:
             # The window/quick-start path: empty decks just mean "sync it all".
@@ -1886,11 +2002,11 @@ async def run(cfg: Config):
             # An explicit --deck/--decks-folder that matched nothing is almost
             # certainly a typo'd path; escalating it to a full ~13,000-card
             # download would be a nasty surprise.
-            console.print(
-                "[bold red]No card IDs found in the given deck file(s) or folder. "
-                "Check the path and try again.[/bold red]"
+            raise SyncInputError(
+                "The selected deck files contain no card IDs. Choose a saved .ydk deck "
+                "or check the deck folder."
             )
-            raise SystemExit(1)
+    missing_from_dbs = set()
     if deck_filter is not None:
         id_to_name = {cid: name for cid, name in full_id_to_name.items() if cid in deck_filter}
         missing_from_dbs = deck_filter - full_id_to_name.keys()
@@ -1914,10 +2030,10 @@ async def run(cfg: Config):
         for cid in id_to_name:
             failure_cache.pop(cid, None)
 
+    broken: set[int] = set()
     if cfg.repair:
-        broken = find_broken_images(cfg.pics_path, set(id_to_name))
+        broken = set(find_broken_images(cfg.pics_path, set(id_to_name)))
         for cid in broken:
-            _remove_quietly(os.path.join(cfg.pics_path, f"{cid}.jpg"))
             failure_cache.pop(cid, None)
         if broken:
             console.print(
@@ -1936,7 +2052,7 @@ async def run(cfg: Config):
     cfg.refresh_era_ids = {
         cid
         for cid, name in id_to_name.items()
-        if is_era_entry(name, cfg.suffixes) and applied.get(str(cid)) != era_policy
+        if is_era_entry(name, era_suffixes) and applied.get(str(cid)) != era_policy
     }
     if cfg.refresh_era_ids and not cfg.dry_run:
         for cid in cfg.refresh_era_ids:
@@ -1948,16 +2064,26 @@ async def run(cfg: Config):
         if cfg.notice_sink is not None:
             cfg.notice_sink(f"Refreshing {len(cfg.refresh_era_ids):,} GOAT/Pre-Errata cards")
 
+    skipped_by_cache = 0
     if cfg.force:
         missing_ids = list(id_to_name.keys())
     else:
         missing_ids = []
-        skipped_by_cache = 0
+        existing = None
+        if deck_filter is None:
+            # Small deck syncs only need to check their own IDs.
+            with contextlib.suppress(OSError):
+                existing = _present_art_filenames(cfg.pics_path, (".jpg",))
         for card_id in id_to_name:
-            if card_id not in cfg.refresh_era_ids and os.path.exists(
-                os.path.join(cfg.pics_path, f"{card_id}.jpg")
-            ):
-                continue
+            if card_id not in broken and card_id not in cfg.refresh_era_ids:
+                filename = f"{card_id}.jpg"
+                present = (
+                    filename in existing
+                    if existing is not None
+                    else os.path.exists(os.path.join(cfg.pics_path, filename))
+                )
+                if present:
+                    continue
             if card_id in failure_cache:
                 skipped_by_cache += 1
                 continue
@@ -1977,21 +2103,31 @@ async def run(cfg: Config):
     missing_fields: list[int] = []
     if cfg.field_art:
         candidate_fields = sorted(cid for cid in field_ids if cid in id_to_name)
+        broken_fields: set[int] = set()
         if cfg.repair:
-            broken_fields = find_broken_field_images(field_art_dir(cfg), set(candidate_fields))
+            broken_fields = set(find_broken_field_images(field_art_dir(cfg), set(candidate_fields)))
             for cid in broken_fields:
-                _remove_quietly(os.path.join(field_art_dir(cfg), f"{cid}.jpg"))
-                _remove_quietly(os.path.join(field_art_dir(cfg), f"{cid}.png"))
                 field_cache.pop(cid, None)
             if broken_fields:
                 console.print(
                     f"[yellow]Repair: re-downloading {len(broken_fields):,} "
                     "broken field image(s).[/yellow]"
                 )
+        existing_fields = None
+        if deck_filter is None and candidate_fields and not cfg.force:
+            with contextlib.suppress(OSError):
+                existing_fields = _present_art_filenames(field_art_dir(cfg), (".jpg", ".png"))
         for cid in candidate_fields:
-            if not cfg.force and has_field_art(cfg, cid):
-                continue
+            if not cfg.force and cid not in broken_fields:
+                present = (
+                    (f"{cid}.jpg" in existing_fields or f"{cid}.png" in existing_fields)
+                    if existing_fields is not None
+                    else has_field_art(cfg, cid)
+                )
+                if present:
+                    continue
             if cid in field_cache:
+                skipped_by_cache += 1
                 continue
             missing_fields.append(cid)
 
@@ -2002,6 +2138,9 @@ async def run(cfg: Config):
         and not cfg.force
         and not cfg.dry_run
         and not cfg.quiet
+        and id_to_name
+        and not skipped_by_cache
+        and not missing_from_dbs
         and cfg.interactive_prompts
         and _prompt_yes_no("All artwork is already downloaded. Re-download everything anyway?")
     ):
@@ -2026,8 +2165,28 @@ async def run(cfg: Config):
         want_textures = _resolve_want_textures(cfg, has_cards=True)
     else:
         want_textures = _resolve_want_textures(cfg, has_cards=False)
-        if not want_textures:
-            console.print("\n[bold green]All synced — nothing to download![/bold green]")
+        if not want_textures and not cfg.prune:
+            if not full_id_to_name:
+                cfg.idle_summary = (
+                    "Waiting for card data",
+                    "Open EDOPro and let it download its card databases, then sync again.",
+                )
+            elif skipped_by_cache or missing_from_dbs:
+                notes = []
+                if skipped_by_cache:
+                    notes.append(
+                        f"Previously unavailable images ({skipped_by_cache:,}) are retried after 14 days."
+                    )
+                if missing_from_dbs:
+                    notes.append(
+                        f"Update EDOPro’s card databases to recognize {len(missing_from_dbs):,} missing deck IDs."
+                    )
+                cfg.idle_summary = ("No new artwork available", " ".join(notes))
+            console.print(
+                cfg.idle_summary[1]
+                if cfg.idle_summary
+                else "\n[bold green]All synced — nothing to download![/bold green]"
+            )
             if not cfg.dry_run:
                 await notify_if_update_available(cfg)
             return None
@@ -2058,24 +2217,15 @@ async def run(cfg: Config):
     for card_id in missing_ids:
         queue.put_nowait(card_id)
 
-    async with _create_http_session(
-        limit=cfg.concurrency,
-        limit_per_host=min(cfg.concurrency, 25),
-    ) as session:
+    async with (
+        _create_http_session(
+            limit=cfg.concurrency,
+            limit_per_host=min(cfg.concurrency, 25),
+        ) as session,
+        asyncio.TaskGroup() as background,
+    ):
         if not cfg.dry_run:
-            # Run the connectivity test and update check at the same time so a
-            # slow connection doesn't add both timeouts back-to-back before the
-            # progress bar appears.
-            server_msg, latest = await asyncio.gather(
-                _check_image_server(session, cfg),
-                check_for_update(session, VERSION),
-            )
-            if server_msg:
-                console.print(server_msg)
-            if latest:
-                console.print(_update_message(latest))
-                if cfg.notice_sink is not None:
-                    cfg.notice_sink(f"A newer version ({latest}) is available")
+            background.create_task(notify_if_update_available(cfg, session))
 
         def make_worker(progress=None, task_id=None):
             async def worker():
@@ -2103,6 +2253,7 @@ async def run(cfg: Config):
                             stats,
                             progress,
                             task_id,
+                            replace_existing=card_id in broken,
                         )
                     except asyncio.CancelledError:
                         raise
@@ -2254,6 +2405,8 @@ async def run(cfg: Config):
                 "[yellow]Skipping --prune: can't safely prune while --deck "
                 "is active (the DB scan is authoritative, not the deck).[/yellow]"
             )
+        elif unreadable or not full_id_to_name or _run_was_cancelled(cfg):
+            console.print("[yellow]Skipping --prune: no complete card index is available.[/yellow]")
         else:
             pruned = prune_orphan_images(cfg.pics_path, set(full_id_to_name.keys()))
             if pruned:

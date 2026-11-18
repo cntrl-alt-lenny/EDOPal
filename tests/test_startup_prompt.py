@@ -102,7 +102,7 @@ class StartupPromptTests(unittest.TestCase):
         cfg = Config(["--config", config_path, "--dry-run", "--quiet"])
         expected_dbs = [os.path.join(valid_path, "expansions", "custom.cdb")]
 
-        def prompt_stub(prompt_cfg):
+        def prompt_stub(prompt_cfg, *, unreadable):
             prompt_cfg.set_edopro_path(valid_path, save=True)
             return expected_dbs
 
@@ -117,7 +117,7 @@ class StartupPromptTests(unittest.TestCase):
         ):
             asyncio.run(main.run(cfg))
 
-        scan_mock.assert_called_once_with(expected_dbs)
+        scan_mock.assert_called_once_with(expected_dbs, unreadable=[])
         self.assertTrue(os.path.isdir(os.path.join(valid_path, "pics")))
         with open(config_path, encoding="utf-8") as file_obj:
             saved = json.load(file_obj)
@@ -140,6 +140,7 @@ class StartupPromptTests(unittest.TestCase):
             asyncio.run(main.run(cfg))
 
         # Expect no sync report and an empty pics directory (nothing to download).
+        self.assertEqual(cfg.idle_summary[0], "Waiting for card data")
         self.assertFalse(any(f.startswith("sync-report") for f in os.listdir(valid_path)))
         self.assertTrue(os.path.isdir(os.path.join(valid_path, "pics")))
 

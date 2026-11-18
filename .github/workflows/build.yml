@@ -21,7 +21,7 @@ jobs:
         include:
           - os: windows-latest
           - os: macos-15
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v7
@@ -63,8 +63,9 @@ jobs:
       run: |
         if [ "$RUNNER_OS" = "macOS" ]; then
           # PyPI's default wheels for these packages carry only the current CPU.
-          ARCHFLAGS="-arch arm64 -arch x86_64" MACOSX_DEPLOYMENT_TARGET=11.0 \
-            python -m pip install --no-cache-dir --no-binary aiohttp,frozenlist,multidict,propcache,yarl \
+          # Use the macOS SDK's universal libffi for cffi and the audio backend.
+          PKG_CONFIG=/usr/bin/false ARCHFLAGS="-arch arm64 -arch x86_64" MACOSX_DEPLOYMENT_TARGET=11.0 \
+            python -m pip install --no-cache-dir --no-binary aiohttp,frozenlist,multidict,propcache,yarl,cffi,miniaudio \
             -r requirements.txt
         else
           python -m pip install -r requirements.txt
@@ -86,7 +87,9 @@ jobs:
     - name: Build with PyInstaller
       shell: bash
       run: |
-        args=(--onefile --name EDOPro-HD-Sync --collect-data certifi)
+        args=(--onefile --name EDOPro-HD-Sync --collect-data certifi --hidden-import _cffi_backend
+              --add-data "assets/window:assets/window" --add-data "assets/appearance:assets/appearance"
+              --add-data "assets/music:assets/music")
         case "${{ matrix.os }}" in
           windows-latest)
             args+=(--windowed --icon build/app-icon.ico)
@@ -179,7 +182,7 @@ jobs:
         ditto -c -k --keepParent "$app" "dist/$archive"
 
     - name: Package (Linux)
-      if: matrix.os == 'ubuntu-latest'
+      if: matrix.os == 'ubuntu-22.04'
       shell: bash
       run: |
         version="${{ steps.release_version.outputs.value }}"

@@ -1,0 +1,443 @@
+[
+  {
+    "id": "forbidden",
+    "title": "Forbidden Memories",
+    "platform": "PlayStation",
+    "year": 2002,
+    "aliases": [
+      "Forbidden Memories"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/9490-yu-gi-oh-forbidden-memories",
+    "cover_source": "https://images.launchbox-app.com/r2_52fbcfee-4ae4-4f9f-96bf-9889e615ca90.png",
+    "cover_description": "Yu-Gi-Oh! Forbidden Memories - Box - Front Image (North America)",
+    "cover_resolution": [
+      1500,
+      1500
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "eternal",
+    "title": "The Eternal Duelist Soul",
+    "platform": "Game Boy Advance",
+    "year": 2002,
+    "aliases": [
+      "Eternal Duelist Soul"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/3930-yu-gi-oh-the-eternal-duelist-soul",
+    "cover_source": "https://images.launchbox-app.com/20715622-511b-441e-a10c-71d8bfff10ae.jpg",
+    "cover_description": "Yu-Gi-Oh! The Eternal Duelist Soul - Box - Front Image (North America)",
+    "cover_resolution": [
+      1530,
+      1370
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "sacred",
+    "title": "The Sacred Cards",
+    "platform": "Game Boy Advance",
+    "year": 2003,
+    "aliases": [
+      "The Sacred Cards",
+      "Sacred Cards"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/23746-yu-gi-oh-the-sacred-cards",
+    "cover_source": "https://images.launchbox-app.com/e68ce591-a415-4ac1-9c25-aa545e4815f5.jpg",
+    "cover_description": "Yu-Gi-Oh! The Sacred Cards - Box - Front Image (North America)",
+    "cover_resolution": [
+      500,
+      500
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "worldwide",
+    "title": "Worldwide Edition: Stairway to the Destined Duel",
+    "platform": "Game Boy Advance",
+    "year": 2003,
+    "aliases": [
+      "Stairway to the Destined Duel",
+      "Worldwide Edition"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/2233-yu-gi-oh-worldwide-edition-stairway-to-the-destined-duel",
+    "cover_source": "https://images.launchbox-app.com/8c7b12b3-1865-4710-8dd1-55bbfc98cf8f.jpg",
+    "cover_description": "Yu-Gi-Oh! Worldwide Edition: Stairway to the Destined Duel - Box - Front Image (North America)",
+    "cover_resolution": [
+      640,
+      640
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "pocyugi",
+    "title": "Yugi the Destiny",
+    "platform": "Windows",
+    "year": 2003,
+    "aliases": [
+      "Yugi the Destiny"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/16757-yu-gi-oh-power-of-chaos-yugi-the-destiny",
+    "cover_source": "https://images.launchbox-app.com/cd27932a-3651-4098-b7ff-213c76b8e87f.jpg",
+    "cover_description": "Yu-Gi-Oh! Power of Chaos: Yugi the Destiny - Box - Front Image (North America)",
+    "cover_resolution": [
+      434,
+      617
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "pocjoey",
+    "title": "Joey the Passion",
+    "platform": "Windows",
+    "year": 2004,
+    "aliases": [
+      "Joey the Passion"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/16759-yu-gi-oh-power-of-chaos-joey-the-passion",
+    "cover_source": "https://images.launchbox-app.com/a69a3502-5576-4844-b651-83cb23707610.jpg",
+    "cover_description": "Yu-Gi-Oh! Power of Chaos: Joey the Passion - Box - Front Image (North America)",
+    "cover_resolution": [
+      640,
+      909
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "pockaiba",
+    "title": "Kaiba the Revenge",
+    "platform": "Windows",
+    "year": 2004,
+    "aliases": [
+      "Kaiba the Revenge"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/16758-yu-gi-oh-power-of-chaos-kaiba-the-revenge",
+    "cover_source": "https://images.launchbox-app.com/b2a8463c-c123-4129-8aec-9008fe1f989e.jpg",
+    "cover_description": "Yu-Gi-Oh! Power of Chaos: Kaiba the Revenge - Box - Front Image (North America)",
+    "cover_resolution": [
+      640,
+      908
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "wc2004",
+    "title": "World Championship 2004",
+    "platform": "Game Boy Advance",
+    "year": 2004,
+    "aliases": [
+      "Championship Tournament 2004",
+      "WC2004",
+      "WCT2004"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/3931-yu-gi-oh-world-championship-tournament-2004",
+    "cover_source": "https://images.launchbox-app.com/37743d13-862c-41c8-b21d-7d0bd33166f9.jpg",
+    "cover_description": "Yu-Gi-Oh! World Championship Tournament 2004 - Box - Front Image (North America)",
+    "cover_resolution": [
+      1000,
+      1000
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "trials",
+    "title": "7 Trials to Glory",
+    "platform": "Game Boy Advance",
+    "year": 2005,
+    "aliases": [
+      "7 Trials to Glory",
+      "Championship Tournament 2005",
+      "WC2005"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/3929-yu-gi-oh-7-trials-to-glory-world-championship-tournament-2005",
+    "cover_source": "https://images.launchbox-app.com/7053f9ce-590d-4f5f-bad6-566b71bfc28d.png",
+    "cover_description": "Yu-Gi-Oh! 7 Trials to Glory: World Championship Tournament 2005 - Box - Front Image (North America)",
+    "cover_resolution": [
+      1530,
+      1530
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "nightmare",
+    "title": "Nightmare Troubadour",
+    "platform": "Nintendo DS",
+    "year": 2005,
+    "aliases": [
+      "Nightmare Troubadour"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26506-yu-gi-oh-nightmare-troubadour",
+    "cover_source": "https://images.launchbox-app.com/38540252-ef86-4095-9bac-37b2a2294ee2.jpg",
+    "cover_description": "Yu-Gi-Oh! Nightmare Troubadour - Box - Front Image (Europe)",
+    "cover_resolution": [
+      768,
+      680
+    ],
+    "cover_region": "Europe"
+  },
+  {
+    "id": "ultimate",
+    "title": "Ultimate Masters",
+    "platform": "Game Boy Advance",
+    "year": 2006,
+    "aliases": [
+      "Ultimate Masters",
+      "Championship Tournament 2006",
+      "WC2006"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26518-yu-gi-oh-ultimate-masters-world-championship-tournament-2006",
+    "cover_source": "https://images.launchbox-app.com/272f3ee4-4c36-40a3-b6fb-5e080bd42b24.png",
+    "cover_description": "Yu-Gi-Oh! Ultimate Masters: World Championship Tournament 2006 - Box - Front Image (Europe)",
+    "cover_resolution": [
+      962,
+      1000
+    ],
+    "cover_region": "Europe"
+  },
+  {
+    "id": "spirit",
+    "title": "GX Spirit Caller",
+    "platform": "Nintendo DS",
+    "year": 2007,
+    "aliases": [
+      "Spirit Caller"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/14404-yu-gi-oh-gx-spirit-caller",
+    "cover_source": "https://images.launchbox-app.com/561508ed-5d3d-400c-8d89-885b9ffd39a4.jpg",
+    "cover_description": "Yu-Gi-Oh! GX Spirit Caller - Box - Front Image (Europe)",
+    "cover_resolution": [
+      1061,
+      961
+    ],
+    "cover_region": "Europe"
+  },
+  {
+    "id": "tf1",
+    "title": "GX Tag Force",
+    "platform": "PSP",
+    "year": 2007,
+    "aliases": [
+      "GX Tag Force",
+      "Tag Force 1"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/27703-yu-gi-oh-gx-tag-force",
+    "cover_source": "https://images.launchbox-app.com/51830f37-17a5-4923-80ce-7a9d9ebe0e4b.jpg",
+    "cover_description": "Yu-Gi-Oh! GX: Tag Force - Box - Front Image (Europe)",
+    "cover_resolution": [
+      640,
+      1104
+    ],
+    "cover_region": "Europe"
+  },
+  {
+    "id": "tf2",
+    "title": "GX Tag Force 2",
+    "platform": "PSP",
+    "year": 2007,
+    "aliases": [
+      "Tag Force 2"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/24392-yu-gi-oh-gx-tag-force-2",
+    "cover_source": "https://images.launchbox-app.com/df7472cd-e63a-48d9-aecb-1e89066fe125.jpg",
+    "cover_description": "Yu-Gi-Oh! GX: Tag Force 2 - Box - Front Image (North America)",
+    "cover_resolution": [
+      640,
+      1128
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "wc2007",
+    "title": "World Championship 2007",
+    "platform": "Nintendo DS",
+    "year": 2007,
+    "aliases": [
+      "Championship 2007",
+      "WC2007"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26507-yu-gi-oh-world-championship-2007",
+    "cover_source": "https://images.launchbox-app.com/ff8715c5-a336-4172-beda-547a1672a73a.jpg",
+    "cover_description": "Yu-Gi-Oh! World Championship 2007 - Box - Front Image (North America)",
+    "cover_resolution": [
+      789,
+      703
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "wc2008",
+    "title": "World Championship 2008",
+    "platform": "Nintendo DS",
+    "year": 2007,
+    "aliases": [
+      "Championship 2008",
+      "WC2008"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/20047-yu-gi-oh-world-championship-2008",
+    "cover_source": "https://images.launchbox-app.com/64885ce6-1e54-4b37-bc98-1c6d106f9d3e.jpg",
+    "cover_description": "Yu-Gi-Oh! World Championship 2008 - Box - Front Image (North America)",
+    "cover_resolution": [
+      798,
+      711
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "tf3",
+    "title": "GX Tag Force 3",
+    "platform": "PSP",
+    "year": 2008,
+    "aliases": [
+      "Tag Force 3"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26501-yu-gi-oh-gx-tag-force-3",
+    "cover_source": "https://images.launchbox-app.com/3d2990ce-babf-4e82-af2c-1149f2e91c06.jpg",
+    "cover_description": "Yu-Gi-Oh! GX: Tag Force 3 - Box - Front Image (Europe)",
+    "cover_resolution": [
+      793,
+      1352
+    ],
+    "cover_region": "Europe"
+  },
+  {
+    "id": "tf4",
+    "title": "5D’s Tag Force 4",
+    "platform": "PSP",
+    "year": 2009,
+    "aliases": [
+      "Tag Force 4"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26502-yu-gi-oh-5ds-tag-force-4",
+    "cover_source": "https://images.launchbox-app.com/r2_3396ae1b-13bb-4889-940c-5a4a6d5a5ebc.jpg",
+    "cover_description": "Yu-Gi-Oh! 5D's Tag Force 4 - Box - Front Image (Germany)",
+    "cover_resolution": [
+      1151,
+      1984
+    ],
+    "cover_region": "Germany"
+  },
+  {
+    "id": "wc2009",
+    "title": "Stardust Accelerator",
+    "platform": "Nintendo DS",
+    "year": 2009,
+    "aliases": [
+      "Stardust Accelerator",
+      "Championship 2009",
+      "WC2009"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26504-yu-gi-oh-5ds-world-championship-2009-stardust-accelerator",
+    "cover_source": "https://images.launchbox-app.com/r2_e8e4f3eb-c10f-404e-9439-2364ab14bd3a.jpg",
+    "cover_description": "Yu-Gi-Oh! 5D's World Championship 2009: Stardust Accelerator - Box - Front Image (Germany)",
+    "cover_resolution": [
+      1500,
+      1388
+    ],
+    "cover_region": "Germany"
+  },
+  {
+    "id": "tf5",
+    "title": "5D’s Tag Force 5",
+    "platform": "PSP",
+    "year": 2010,
+    "aliases": [
+      "Tag Force 5"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/14750-yu-gi-oh-5ds-tag-force-5",
+    "cover_source": "https://images.launchbox-app.com/9427fdb8-9d80-4e19-8156-f6bad6035b6f.jpg",
+    "cover_description": "Yu-Gi-Oh! 5D's Tag Force 5 - Box - Front Image (North America)",
+    "cover_resolution": [
+      640,
+      1105
+    ],
+    "cover_region": "North America"
+  },
+  {
+    "id": "wc2010",
+    "title": "Reverse of Arcadia",
+    "platform": "Nintendo DS",
+    "year": 2010,
+    "aliases": [
+      "Reverse of Arcadia",
+      "Championship 2010",
+      "WC2010"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26505-yu-gi-oh-5ds-world-championship-2010-reverse-of-arcadia",
+    "cover_source": "https://images.launchbox-app.com/r2_a9f40beb-c5e8-4951-9860-287a5b04b44d.jpg",
+    "cover_description": "Yu-Gi-Oh! 5D's World Championship 2010: Reverse of Arcadia - Box - Front Image (Germany)",
+    "cover_resolution": [
+      1500,
+      1348
+    ],
+    "cover_region": "Germany"
+  },
+  {
+    "id": "tf6",
+    "title": "5D’s Tag Force 6",
+    "platform": "PSP",
+    "year": 2011,
+    "aliases": [
+      "Tag Force 6"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26503-yu-gi-oh-5ds-tag-force-6",
+    "cover_source": "https://images.launchbox-app.com/bafdbe12-e599-4517-acc6-5b5efce8ca4c.jpg",
+    "cover_description": "Yu-Gi-Oh! 5D's: Tag Force 6 - Box - Front Image (Japan)",
+    "cover_resolution": [
+      500,
+      857
+    ],
+    "cover_region": "Japan"
+  },
+  {
+    "id": "wc2011",
+    "title": "Over the Nexus",
+    "platform": "Nintendo DS",
+    "year": 2011,
+    "aliases": [
+      "Over the Nexus",
+      "Championship 2011",
+      "WC2011"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/21500-yu-gi-oh-5ds-world-championship-2011-over-the-nexus",
+    "cover_source": "https://images.launchbox-app.com/cb1de173-195c-45bb-b3f5-dc7b68a6f20a.png",
+    "cover_description": "Yu-Gi-Oh! 5D's World Championship 2011: Over the Nexus - Box - Front Image (Europe)",
+    "cover_resolution": [
+      1489,
+      1370
+    ],
+    "cover_region": "Europe"
+  },
+  {
+    "id": "tfs",
+    "title": "ARC-V Tag Force Special",
+    "platform": "PSP",
+    "year": 2015,
+    "aliases": [
+      "Tag Force Special"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/26499-yu-gi-oh-arc-v-tag-force-special",
+    "cover_source": "https://images.launchbox-app.com/a9209b03-7eb3-43c8-8d71-af857e1234b0.jpg",
+    "cover_description": "Yu-Gi-Oh! ARC-V Tag Force Special - Fanart - Box - Front Image (Japan)",
+    "cover_resolution": [
+      640,
+      1105
+    ],
+    "cover_region": "Japan"
+  },
+  {
+    "id": "legacy",
+    "title": "Legacy of the Duelist",
+    "platform": "Xbox One",
+    "year": 2015,
+    "aliases": [
+      "Legacy of the Duelist"
+    ],
+    "cover_page": "https://gamesdb.launchbox-app.com/games/images/34644-yu-gi-oh-legacy-of-the-duelist",
+    "cover_source": "https://images.launchbox-app.com/97a78c52-0b96-4336-a8b5-abf76b01f275.jpg",
+    "cover_description": "Yu-Gi-Oh! Legacy of the Duelist - Box - Front Image",
+    "cover_resolution": [
+      584,
+      800
+    ]
+  }
+]

@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Iterator
 
 BUILTIN_MANUAL_MAP: dict[str, str] = {
     # When multiple suffix variants (GOAT / Pre-Errata) share the same base name,
@@ -212,14 +213,13 @@ def looks_like_edopro_folder(path: str) -> bool:
     """
     if not path or not os.path.isdir(path):
         return False
+    return _has_game_executable(path) or folder_has_card_databases(path)
+
+
+def _has_game_executable(path: str) -> bool:
     return any(
-        (
-            os.path.isfile(os.path.join(path, "EDOPro.exe")),
-            os.path.isfile(os.path.join(path, "EDOPro.app", "Contents", "Info.plist")),
-            os.path.isfile(os.path.join(path, "cards.cdb")),
-            os.path.isdir(os.path.join(path, "expansions")),
-            os.path.isdir(os.path.join(path, "repositories")),
-        )
+        os.path.isfile(os.path.join(path, name))
+        for name in ("EDOPro.exe", "EDOPro", os.path.join("EDOPro.app", "Contents", "Info.plist"))
     )
 
 
@@ -227,7 +227,7 @@ def _edopro_folder_score(path: str) -> int:
     """Rank a candidate: 2 = ready to sync, 1 = EDOPro but no databases yet."""
     if folder_has_card_databases(path):
         return 2
-    if looks_like_edopro_folder(path):
+    if _has_game_executable(path):
         return 1
     return 0
 
@@ -278,6 +278,13 @@ def _search_parents() -> list[str]:
         os.path.join(home, "Applications"),
     ]
 
+    if getattr(sys, "frozen", False):
+        # A portable installation can sit alongside the downloader in any folder.
+        binary_dir = os.path.dirname(os.path.abspath(sys.executable))
+        if sys.platform == "darwin" and os.path.basename(binary_dir) == "MacOS":
+            binary_dir = os.path.normpath(os.path.join(binary_dir, "..", "..", ".."))
+        parents.insert(0, binary_dir)
+
     if sys.platform == "win32":
         for variable in ("LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)"):
             value = os.environ.get(variable)
@@ -304,51 +311,64 @@ def _search_parents() -> list[str]:
     return unique
 
 
-def find_edopro_folder(first_guesses: list[str] | None = None) -> str | None:
-    """Look for the user's EDOPro folder, best match first.
-
-    Checks the caller's own guesses, then the exact folder names EDOPro
-    installs under, then one level inside each likely parent. A folder with
-    card databases always wins over one that merely looks like EDOPro.
-    """
+def _installation_candidates(first_guesses: list[str] | None) -> Iterator[str]:
+    """Yield priority paths first, then nearby directories within the scan budget."""
     deadline = time.monotonic() + _SEARCH_TIME_BUDGET_SECONDS
-    best: str | None = None
-    best_score = 0
-
-    def consider(candidate: str) -> bool:
-        """Record a candidate; return True once a perfect match is found."""
-        nonlocal best, best_score
-        score = _edopro_folder_score(candidate)
-        if score > best_score:
-            best_score = score
-            best = os.path.abspath(candidate)
-        return best_score == 2
-
     for guess in first_guesses or []:
-        if guess and consider(guess):
-            return best
-
+        if guess:
+            yield guess
     parents = _search_parents()
     for parent in parents:
         for name in EDOPRO_FOLDER_NAMES:
-            if consider(os.path.join(parent, name)):
-                return best
-
-    # Nothing sat at a predictable name, so glance one level into each parent.
+            yield os.path.join(parent, name)
     for parent in parents:
         if time.monotonic() > deadline:
             break
         try:
-            entries = sorted(os.scandir(parent), key=lambda entry: entry.name)
+            with os.scandir(parent) as scan:
+                entries = sorted(scan, key=lambda entry: entry.name)
         except OSError:
             continue
         for entry in entries:
             if time.monotonic() > deadline:
-                break
+                return
             with contextlib.suppress(OSError):
-                if entry.is_dir() and consider(entry.path):
-                    return best
-    return best
+                if entry.is_dir():
+                    yield entry.path
+
+
+def _found_installations(first_guesses: list[str] | None) -> Iterator[tuple[int, str]]:
+    seen = set()
+    found = set()
+    for candidate in _installation_candidates(first_guesses):
+        path = os.path.abspath(candidate)
+        key = os.path.normcase(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        score = _edopro_folder_score(path)
+        if score:
+            resolved = os.path.normcase(os.path.realpath(path))
+            if resolved not in found:
+                found.add(resolved)
+                yield score, path
+
+
+def find_edopro_folder(first_guesses: list[str] | None = None) -> str | None:
+    """Stop at the first ready installation to keep normal startup fast."""
+    fallback = None
+    for score, path in _found_installations(first_guesses):
+        if score == 2:
+            return path
+        if fallback is None:
+            fallback = path
+    return fallback
+
+
+def find_edopro_folders(first_guesses: list[str] | None = None) -> list[str]:
+    """Return all nearby installations, with playable installations first."""
+    matches = sorted(_found_installations(first_guesses), key=lambda item: -item[0])
+    return [path for _, path in matches]
 
 
 def _build_parser() -> argparse.ArgumentParser:
