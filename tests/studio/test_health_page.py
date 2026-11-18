@@ -6,7 +6,7 @@ from weakref import ref
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QPlainTextEdit
 from pytestqt.qtbot import QtBot
 
 import artwork_coverage
@@ -53,7 +53,7 @@ def test_inspect_support_storage_and_navigation(
     page.support.click()
     expected = support_summary(page.report).splitlines(keepends=True)
     expected[0] = f"{config.APP_NAME} support summary\n"
-    assert page.preview.toPlainText() == "".join(expected).replace("Studio", config.APP_NAME)
+    assert page.preview.toPlainText() == "".join(expected)
     assert str(game) not in page.preview.toPlainText()
     assert "private-test-player" not in page.preview.toPlainText()
     button(window, "Copy support summary").click()
@@ -73,7 +73,7 @@ def test_inspect_support_storage_and_navigation(
     button(window, "Open folder for Artwork").click()
     qtbot.waitUntil(lambda: bool(revealed))
     assert revealed == [game / "pics"]
-    qtbot.keyClick(button(window, "Back"), Qt.Key.Key_Return)
+    qtbot.keyClick(button(window, "Health check"), Qt.Key.Key_Return)
     page.rerun.click()
     qtbot.waitUntil(lambda: page.state == "overview")
     assert observed == [game, game]
@@ -278,7 +278,7 @@ def test_storage_back_cancels_read_without_publishing_old_result(
     monkeypatch.setattr(health, "storage_breakdown", measure)
     page.disk.click()
     qtbot.waitUntil(started.is_set)
-    button(window, "Back").click()
+    button(window, "Health check").click()
     qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
     assert page.state == "overview" and page.storage is None
 
@@ -385,6 +385,7 @@ def test_notes_stay_collapsed_and_explain_practice_matches(
     make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = make_window()
+    window.resize(960, 600)
     game = Path(window.ctx.installation.path)
     sample = ListConflict(game / "AI_Dragon.ydk", game / "lflist.conf", "Cup", 7, "Dragon", 2, 1)
     practice = finding(
@@ -409,6 +410,19 @@ def test_notes_stay_collapsed_and_explain_practice_matches(
     assert "2,400 matches count each card limit separately" in visible
     button(window, "Review card limit matches").click()
     assert page.state == "evidence"
+    preview = page.scroll.widget().findChild(QPlainTextEdit)
+    qtbot.waitUntil(
+        lambda: (
+            page.scroll.verticalScrollBar().maximum() == 0
+            and preview.verticalScrollBar().maximum() > 0
+        )
+    )
+    next_page = button(window, "Next")
+    qtbot.waitUntil(next_page.isVisible)
+    next_page.click()
+    assert any(
+        line.text() == "21–40 of 2,400" for line in page.scroll.widget().findChildren(QLabel)
+    )
     page.escape()
     assert button(window, "Notes").isChecked()
     report = DoctorReport(game, "1.0", None, (practice, passed, missing, warning))
@@ -419,3 +433,27 @@ def test_notes_stay_collapsed_and_explain_practice_matches(
     assert button(window, missing.title).accessibleDescription() == "Problem"
     assert button(window, warning.title).accessibleDescription() == "Warning"
     assert not button(window, "Notes").isChecked()
+
+
+def test_idle_lock_keeps_technical_wording_in_support_summary(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = make_window()
+    game = Path(window.ctx.installation.path)
+    marker = game / "private-lock-name"
+    idle = finding("state.lock_idle", path=marker)
+    report = DoctorReport(game, "1.0", None, (idle, finding("state.clean")))
+    monkeypatch.setattr(health, "inspect_installation", lambda *a, **k: report)
+    window.nav["health"].click()
+    page = window.current
+    qtbot.waitUntil(lambda: page.state == "overview")
+    button(window, "Notes").click()
+    button(window, "An earlier update left a marker").click()
+    words = [line.text() for line in page.findChildren(QLabel)]
+    assert "You can leave it in place and continue using the update tools." in words
+    assert all(marker.name not in line for line in words)
+    page.support.click()
+    support = page.preview.toPlainText()
+    assert f"Inactive {config.APP_NAME} lock file found" in support
+    assert f"No interrupted {config.APP_NAME} changes found" in support
+    assert marker.name not in support

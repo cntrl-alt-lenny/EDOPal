@@ -4,7 +4,16 @@ from collections.abc import Callable, Sequence
 from functools import partial
 from html import escape
 
-from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QObject, QRect, QSize, Qt
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QEvent,
+    QModelIndex,
+    QObject,
+    QPersistentModelIndex,
+    QRect,
+    QSize,
+    Qt,
+)
 from PySide6.QtGui import QColor, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -151,7 +160,6 @@ class CategoryChoice(Button):
             child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.toggled.connect(self._mark)
         self._mark(False)
-        self.setChecked(category in backup.DEFAULTS)
 
     def _mark(self, checked: bool) -> None:
         fill, edge = (t.GOLD, t.GOLD) if checked else (t.CLEAR, t.MUTED)
@@ -197,10 +205,19 @@ class RowDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.show_action = show_action
         self.compact = False
+        self.expanded = QPersistentModelIndex()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         height = t.TILE_H - t.SM if self.show_action else t.BUTTON_H + t.MD
-        return QSize(0, t.HUGE + t.SM if self.compact and self.show_action else height)
+        if self.compact and self.show_action:
+            height = t.HUGE - t.XS
+        if index == self.expanded:
+            height += t.LG * len(self._detail_lines(index.data(Qt.ItemDataRole.UserRole)))
+        return QSize(0, height)
+
+    def _detail_lines(self, row: Row) -> list[str]:
+        names = row.names.splitlines()
+        return ["  ·  ".join(names)] if self.compact and names else names
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         row = index.data(Qt.ItemDataRole.UserRole)
@@ -212,12 +229,16 @@ class RowDelegate(QStyledItemDelegate):
         painter.setPen(QColor(t.EDGE))
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
         top = rect.y() + (t.XS if self.compact else t.SM)
-        first, rest = (t.LG + t.XS, t.LG) if self.compact else (t.XL - t.XS, t.LG + t.XS)
-        for value, colour, size, height in (
+        first, rest = (t.LG, t.MD) if self.compact else (t.XL - t.XS, t.LG + t.XS)
+        lines = [
             (row.title, t.PALE if selected else t.INK, t.BODY, first),
-            (row.detail, t.TEXT, t.SMALL, rest - (t.XS // 2 if self.compact else 0)),
-            (row.action, t.GOLD, t.SMALL, rest - (t.XS // 2 if self.compact else 0)),
-        ):
+            (row.detail, t.TEXT, t.SMALL, rest),
+            (row.action, t.GOLD, t.SMALL, rest),
+        ]
+        if index == self.expanded:
+            top_details = [(name, t.MUTED, t.SMALL, t.LG) for name in self._detail_lines(row)]
+            lines.extend(top_details)
+        for value, colour, size, height in lines:
             if not value:
                 continue
             painter.setFont(t.font(size, bold=value == row.title))
@@ -282,20 +303,28 @@ class GroupedList(Panel):
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setMinimumHeight(t.TILE_H * 2)
         self.body.addWidget(self.empty, 1)
-        self.details = label("", "body", True)
-        self.details.setTextFormat(Qt.TextFormat.PlainText)
-        self.details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.details.hide()
-        self.details_button.toggled.connect(self.details.setVisible)
+        self.details_button.toggled.connect(self._expand_details)
         self.list.selectionModel().currentChanged.connect(self._item_changed)
-        self.body.addWidget(self.details)
         if not show_action:
             self.body.addWidget(self.details_button, 0, Qt.AlignmentFlag.AlignRight)
 
     def _item_changed(self, current: QModelIndex, _previous: QModelIndex) -> None:
         item = current.data(Qt.ItemDataRole.UserRole)
-        self.details.setText(item.tooltip if item else "")
-        self.details_button.setEnabled(item is not None)
+        self.details_button.setEnabled(bool(item and item.names))
+        self._expand_details(self.details_button.isChecked())
+
+    def _expand_details(self, opened: bool) -> None:
+        current = self.list.currentIndex()
+        delegate = self.list.itemDelegate()
+        expanded = QPersistentModelIndex(current) if opened else QPersistentModelIndex()
+        if expanded == delegate.expanded:
+            return
+        self.list.setUniformItemSizes(not opened)
+        delegate.expanded = expanded
+        self.list.doItemsLayout()
+        if opened:
+            self.list.scrollTo(current)
+        self.list.viewport().update()
 
     def close_details(self) -> bool:
         if not self.details_button.isChecked():
@@ -310,9 +339,9 @@ class GroupedList(Panel):
             delegate.compact = small
             self.list.doItemsLayout()
             self.list.viewport().update()
-        height = (
-            (t.HUGE + t.SM) * 3 + 2 * t.HAIR if small and delegate.show_action else t.TILE_H * 2
-        )
+        height = (t.HUGE - t.XS) * 3 + 2 * t.HAIR if small and delegate.show_action else t.TILE_H
+        margins(self.body, t.SM if small else t.LG)
+        self.body.setSpacing(t.SM if small else t.MD)
         self.list.setMinimumHeight(height)
         self.empty.setMinimumHeight(t.TILE_H if small else t.TILE_H * 2)
 

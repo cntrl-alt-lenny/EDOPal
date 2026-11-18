@@ -27,10 +27,10 @@ class PreviewScreen(Screen):
         super().__init__()
         source, target = Path(path).name, Path(destination).name
         paths = path_label(f"{path}\n{destination}", f"{source}  →  Restore to {target}")
-        self.heading("Restore preview", back, detail=paths)
+        self.heading("Restore preview", back, detail=paths, return_to="Backup contents")
         self.policy = SegmentedControl(
             [
-                ("Keep current files", "Recommended", "check"),
+                ("Keep current files", "Recommended", "folder"),
                 ("Replace with backup", "Use the backup version.", "download"),
                 ("Keep both", "Add the backup as a separate copy.", "library"),
             ]
@@ -51,16 +51,17 @@ class PreviewScreen(Screen):
         self.body.addWidget(self.grouped, 1)
         self.restore = action("Restore to this installation", restore, "primary", "download")
         self.status = label("", "body", True)
-        footer = Panel(t.LG)
+        self.footer = footer = Panel(t.LG)
         row = QHBoxLayout()
         row.addWidget(self.status, 1)
         row.addWidget(self.restore)
         footer.body.addLayout(row)
-        self.body.addWidget(footer)
+        self.pin_footer(footer)
         self.set_loading()
 
     def compact(self, small: bool) -> None:
         self.grouped.compact(small)
+        margins(self.footer.body, t.SM if small else t.LG)
         for index, button in enumerate(self.policy.buttons):
             button.hint.setVisible(not small or index == 0)
             button.setMinimumHeight(t.BUTTON_H if small else t.TILE_H)
@@ -100,7 +101,7 @@ class PreviewScreen(Screen):
 class CompareScreen(Screen):
     def __init__(self, path: str, review: Review, back: Callable[[], None]) -> None:
         super().__init__()
-        self.heading("Backup comparison", back, path)
+        self.heading("Backup comparison", back, path, return_to="Backup contents")
         self.body.addWidget(
             label(
                 "This installation and the backup were compared without changing either.",

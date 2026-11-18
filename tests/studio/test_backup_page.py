@@ -7,11 +7,12 @@ from time import sleep
 from zipfile import ZIP_STORED, ZipFile
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QLabel
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox
 from pytestqt.qtbot import QtBot
 
 import backup
+import config
 from backup.core import Cancel, Progress
 from studio.context import Installation
 from studio.pages.backup import BackupPage
@@ -22,7 +23,8 @@ from studio.pages.backup_screens import (
     HomeScreen,
     SaveScreen,
 )
-from studio.widgets import Button
+from studio.pages.health_layout import confirm_action
+from studio.widgets import Button, GameClosedBlock
 
 
 def put(root: Path, relative: str, data: bytes) -> Path:
@@ -86,6 +88,7 @@ def open_preview(page: BackupPage, qtbot: QtBot) -> None:
 
 def test_installation_states_and_keyboard(page: BackupPage, qtbot: QtBot) -> None:
     selected = page.ctx.installation
+    put(Path(selected.path), "replay/A duel.yrpX", b"duel")
     page.ctx.set_installation(Installation())
     assert "Choose your EDOPro folder" in words(page)
     qtbot.keyClick(button(page, "Choose folder"), Qt.Key.Key_Return)
@@ -136,6 +139,7 @@ def test_save_counts_retry_and_open_folder(
     assert manifest.created_at is not None
     assert all(entry.modified_at is not None for entry in manifest.entries)
     assert "Copy this file to your other device" in words(page)
+    assert f"Open {config.APP_NAME} on the other device" in words(page)
     opened = []
 
     def open_link(path: Path) -> bool:
@@ -163,7 +167,8 @@ def test_preview_case_policy_confirmation_and_undo(
     answers = iter((False, True, True))
     confirmations = []
     monkeypatch.setattr(
-        page.ctx, "confirm", lambda *args: confirmations.append(args) or next(answers)
+        "studio.pages.backup.confirm_action",
+        lambda _parent, *args: confirmations.append(args) or next(answers),
     )
     open_preview(page, qtbot)
     assert page.plan.policy == "keep_mine"
@@ -175,9 +180,10 @@ def test_preview_case_policy_confirmation_and_undo(
     assert "date unavailable" not in conflict.detail
     assert "Blue.ydk" in conflict.tooltip and "BLUE.ydk" in conflict.tooltip
     groups.details_button.click()
-    assert groups.details.isVisible() and "BLUE.ydk" in groups.details.text()
+    assert groups.list.itemDelegate().expanded == groups.list.currentIndex()
+    assert "BLUE.ydk" in conflict.names
     qtbot.keyClick(groups.details_button, Qt.Key.Key_Escape)
-    assert page.screen.grouped is groups and groups.details.isHidden()
+    assert page.screen.grouped is groups and not groups.list.itemDelegate().expanded.isValid()
     groups.tabs["identical"].click()
     assert groups.list.rows.rows[0].title == "Decks / Identical"
     groups.tabs["add"].click()
@@ -193,11 +199,13 @@ def test_preview_case_policy_confirmation_and_undo(
     assert local.read_bytes() == b"mine" and not new_copy.exists()
     assert confirmations[0][0].startswith("Apply ") and confirmations[0][0].endswith(" changes?")
     assert "Nothing has been changed yet" in confirmations[0][1]
+    assert confirmations[0][2] == f"Restore to {root.name}"
     page.screen.restore.click()
     qtbot.waitUntil(lambda: "Restore complete" in words(page) and page.job is None)
     assert local.read_bytes() == b"mine"
     assert new_copy.read_bytes() == b"incoming deck" and unrelated.exists()
     button(page, "Undo this restore").click()
+    assert confirmations[-1][2] == "Undo this restore"
     qtbot.waitUntil(lambda: "Previous files restored" in words(page))
     assert local.read_bytes() == b"mine" and unrelated.exists()
     assert not new_copy.exists() and not (root / "deck/New arrival.ydk").exists()
@@ -232,7 +240,7 @@ def test_undo_preflights_the_completion_and_history_on_a_worker(
     root = Path(page.ctx.installation.path)
     affected = root / "deck/New arrival.ydk"
     choose(monkeypatch, snapshot(tmp_path))
-    monkeypatch.setattr(page.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr("studio.pages.backup.confirm_action", lambda *_: True)
     started, release = Event(), Event()
     preview = backup.preview_undo
 
@@ -314,7 +322,7 @@ def test_compare_and_unknown_format(
     assert len(page.screen.grouped.groups["right only"]) == 1
     assert len(page.screen.grouped.groups["left only"]) == 1
     assert not (root / "deck/New arrival.ydk").exists()
-    button(page, "Back").click()
+    button(page, "Backup contents").click()
     changed = tmp_path / "New format.zip"
     with ZipFile(archive) as original, ZipFile(changed, "w", ZIP_STORED) as new:
         for name in original.namelist():
@@ -340,7 +348,7 @@ def test_busy_cancel_after_first_write_and_recover(
 ) -> None:
     source = snapshot(tmp_path)
     choose(monkeypatch, source)
-    monkeypatch.setattr(page.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr("studio.pages.backup.confirm_action", lambda *_: True)
     open_preview(page, qtbot)
     real_execute = backup.execute
     published = Event()
@@ -378,7 +386,7 @@ def test_busy_cancel_after_first_write_and_recover(
     cancel_button.click()
     qtbot.waitUntil(lambda: "Restore was interrupted" in words(page))
     assert not page.ctx.busy and window.change.isEnabled()
-    button(page, "Back").click()
+    button(page, "Backup & transfer").click()
     window.nav["cards"].click()
     window.nav["backup"].click()
     qtbot.waitUntil(lambda: "Restore was interrupted" in words(page))
@@ -388,6 +396,7 @@ def test_busy_cancel_after_first_write_and_recover(
     button(page, choice).click()
     if choice == "Undo interrupted restore":
         qtbot.waitUntil(lambda: "Close EDOPro to continue" in words(page))
+        assert page.screen.findChild(GameClosedBlock).retry.text() == "Retry"
         monkeypatch.setattr("studio.pages.backup._game_running", lambda _: False)
         button(page, "Retry").click()
     result = "Restore complete" if choice == "Finish restore" else "Previous files restored"
@@ -406,13 +415,14 @@ def test_close_game_and_retry_preferences(
     root = Path(page.ctx.installation.path)
     local = put(root, "config/system.conf", b"nickname = Local\ndpi = 144\n")
     choose(monkeypatch, snapshot(tmp_path, preferences=True))
-    monkeypatch.setattr(page.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr("studio.pages.backup.confirm_action", lambda *_: True)
     monkeypatch.setattr("studio.pages.backup._game_running", lambda _: True)
     open_preview(page, qtbot)
     page.screen.policy.buttons[1].click()
     qtbot.waitUntil(lambda: page.plan is not None and page.plan.policy == "take_theirs")
     page.screen.restore.click()
     qtbot.waitUntil(lambda: "Close EDOPro to continue" in words(page))
+    assert page.screen.findChild(GameClosedBlock).retry.text() == "Retry"
     assert local.read_bytes() == b"nickname = Local\ndpi = 144\n"
     assert not (root / "deck/New arrival.ydk").exists()
     monkeypatch.setattr("studio.pages.backup._game_running", lambda _: False)
@@ -429,7 +439,7 @@ def test_stale_preview_requires_new_confirmation(
     tmp_path: Path,
 ) -> None:
     choose(monkeypatch, snapshot(tmp_path))
-    monkeypatch.setattr(page.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr("studio.pages.backup.confirm_action", lambda *_: True)
     open_preview(page, qtbot)
     root = Path(page.ctx.installation.path)
     later = put(root, "deck/New arrival.ydk", b"later edit")
@@ -451,10 +461,11 @@ def test_preview_reflows_and_lists_thousands(
 ) -> None:
     window = page.window()
     window.resize(960, 600)
-    assert page.screen.width() <= page.scroll.viewport().width()
+    qtbot.waitUntil(lambda: page.scroll.widget().width() == page.scroll.viewport().width())
+
     page.screen.save.click()
     qtbot.waitUntil(lambda: isinstance(page.screen, SaveScreen))
-    assert page.screen.width() <= page.scroll.viewport().width()
+    qtbot.waitUntil(lambda: page.scroll.widget().width() == page.scroll.viewport().width())
     guidance = next(
         item for item in page.screen.findChildren(QLabel) if "Export library" in item.text()
     )
@@ -472,19 +483,22 @@ def test_preview_reflows_and_lists_thousands(
     put(root, "deck/New arrival.ydk", b"another deck")
     choose(monkeypatch, snapshot(tmp_path))
     open_preview(page, qtbot)
-    assert page.screen.width() <= page.scroll.viewport().width()
+    assert page.scroll.widget().width() == page.scroll.viewport().width()
     view = page.screen.grouped.list
 
     def three_conflicts_visible() -> bool:
         third = view.visualRect(view.model().index(2, 0))
-        bottom = view.viewport().mapTo(page.scroll.viewport(), third.bottomLeft()).y()
+        bottom = view.viewport().mapTo(page.screen, third.bottomLeft()).y()
         button = page.screen.restore
-        footer = button.mapTo(page.scroll.viewport(), button.rect().bottomLeft()).y()
+        footer = button.mapTo(page.screen, button.rect().bottomLeft()).y()
         return (
             view.viewport().rect().contains(third)
-            and bottom < footer < page.scroll.viewport().height()
+            and bottom < footer < page.screen.height()
+            and page.scroll.verticalScrollBar().maximum() == 0
         )
 
+    qtbot.waitUntil(three_conflicts_visible)
+    page.screen.grouped.details_button.click()
     qtbot.waitUntil(three_conflicts_visible)
     large_review = comparison_rows(
         tuple(
@@ -497,7 +511,7 @@ def test_preview_reflows_and_lists_thousands(
     view = compare.grouped.list
     qtbot.waitUntil(
         lambda: (
-            compare.width() <= page.scroll.viewport().width()
+            page.scroll.widget().width() == page.scroll.viewport().width()
             and compare.grouped.details_button.isVisible()
         )
     )
@@ -506,4 +520,42 @@ def test_preview_reflows_and_lists_thousands(
     view.scrollTo(last)
     qtbot.waitUntil(lambda: view.visualRect(last).intersects(view.viewport().rect()))
     window.resize(3840, 2160)
-    assert page.screen.width() <= page.scroll.viewport().width()
+    assert page.scroll.widget().width() == page.scroll.viewport().width()
+
+
+def test_empty_backup_categories_remain_unselected(
+    page: BackupPage, qtbot: QtBot, tmp_path: Path
+) -> None:
+    game = tmp_path / "Empty game"
+    game.mkdir()
+    put(tmp_path, "sleeves/Personal.png", b"original")
+    page.ctx.set_installation(Installation(str(game)))
+    qtbot.waitUntil(lambda: page.screen.save.isEnabled())
+    page.screen.save.click()
+    qtbot.waitUntil(lambda: isinstance(page.screen, SaveScreen))
+    screen = page.screen
+    assert screen.selected() == ()
+    for category in backup.DEFAULTS:
+        assert not screen.choices[category].isEnabled()
+    assert f"Select {config.APP_NAME} collection to continue" == screen.total.text()
+    assert not screen.save.isEnabled()
+    screen.choices["studio"].click()
+    assert screen.save.isEnabled()
+
+
+def test_named_confirmation_defaults_to_cancel(page: BackupPage, qtbot: QtBot) -> None:
+    roles = []
+
+    def escape() -> None:
+        dialog = QApplication.activeModalWidget()
+        if not isinstance(dialog, QMessageBox):
+            return
+        roles.extend((button.text(), dialog.buttonRole(button)) for button in dialog.buttons())
+        roles.append(dialog.defaultButton().text())
+        qtbot.keyClick(dialog, Qt.Key.Key_Escape)
+
+    QTimer.singleShot(0, escape)
+    assert not confirm_action(page, "Apply 1 change?", "Review changes.", "Restore to ProjectIgnis")
+    assert ("Restore to ProjectIgnis", QMessageBox.ButtonRole.AcceptRole) in roles
+    assert ("Cancel", QMessageBox.ButtonRole.RejectRole) in roles
+    assert roles[-1] == "Cancel"

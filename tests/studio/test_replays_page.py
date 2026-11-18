@@ -10,12 +10,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QLabel
 from pytestqt.qtbot import QtBot
 
-from replays import AnnotationStore, ReplayNotes, index_replays
+from replays import AnnotationStore, ReplayNotes, index_replays, preserve_last_replay
 from studio.context import Installation
 from studio.pages import replays as page_module
 from studio.pages.replays_library import format_tags, last_to_save, notes_from_fields, rules
 from studio.shell import StudioWindow
-from studio.widgets import Button
+from studio.widgets import Button, GameClosedBlock
 from tools.studio_health_replays_shots import seed_replays
 
 
@@ -36,6 +36,7 @@ def test_search_sort_edit_undo_export_and_reveal(
 ) -> None:
     window = library(make_window, qtbot)
     page = window.current
+    window.resize(960, 600)
     page.sort.setCurrentText("Most turns")
     page.search.setText("tournament")
     assert [e.details.turns for e in page.list.records.entries] == [12, 8]
@@ -45,16 +46,27 @@ def test_search_sort_edit_undo_export_and_reveal(
     qtbot.keyClick(page.list, Qt.Key.Key_Return)
     entry = page.selected
     assert page.state == "detail"
+    qtbot.waitUntil(
+        lambda: (
+            page.scroll.viewport()
+            .rect()
+            .contains(
+                page.form.name.mapTo(page.scroll.viewport(), page.form.name.rect().bottomLeft())
+            )
+        )
+    )
+    assert page.form.save.parentWidget() is page.footer
     page.form.name.setText("Final round")
     page.form.tags.setText('practice, "round, one", practice')
     page.form.notes.setPlainText("Remember turn seven.")
     assert page.form.save.isEnabled() and not page.form.export.isEnabled()
-    monkeypatch.setattr(window.ctx, "confirm", lambda *_: False)
+    monkeypatch.setattr(page_module, "confirm_action", lambda *_: False)
     assert not window.navigate("cards")
     qtbot.keyClick(page.form.name, Qt.Key.Key_Escape)
     assert page.state == "detail"
     page.form.save.click()
     qtbot.waitUntil(lambda: page.state == "detail" and page.form.undo.isVisible())
+    assert page.form.save.text() == "Saved" and not page.form.save.isEnabled()
     store = AnnotationStore(tmp_path)
     assert store.get(entry.replay_id) == ReplayNotes(
         "Final round", "Remember turn seven.", ("practice", "round, one")
@@ -98,6 +110,7 @@ def test_game_open_retry_busy_and_preserve(
     page.preserve.click()
     qtbot.waitUntil(lambda: page.state == "write_error")
     assert not window.ctx.busy and rolling.path.exists()
+    assert page.scroll.widget().findChild(GameClosedBlock).retry is button(window, "Retry")
     started, release = Event(), Event()
 
     def settle(_: float) -> None:
@@ -161,8 +174,9 @@ def test_empty_new_duel_unreadable_and_folder_change(
     ctx.set_installation(Installation(current.path, False))
     qtbot.waitUntil(lambda: page.state == "empty")
     assert any("waiting for card data" in line.text() for line in page.findChildren(QLabel))
-    page.watch.setInterval(50)
+    page.watch.stop()
     seed_replays(Path(current.path), tmp_path)
+    page._watch_folder()
     qtbot.waitUntil(lambda: page.state == "library")
     page.search.setText("Interrupted")
     index = page.list.records.index(0)
@@ -173,6 +187,9 @@ def test_empty_new_duel_unreadable_and_folder_change(
     assert any(
         "Check that the file is complete" in line.text() for line in page.findChildren(QLabel)
     )
+    assert not any(line.text() == "Watch in EDOPro" for line in page.findChildren(QLabel))
+    qtbot.waitUntil(lambda: button(window, "Show file").isVisible())
+    assert not page.form.export.isVisible()
     button(window, "Technical details").click()
     qtbot.waitUntil(
         lambda: any(
@@ -202,6 +219,85 @@ def test_tags_presets_and_two_rolling_formats(tmp_path: Path) -> None:
     assert notes_from_fields("Duel", "", "a\r\nb\nc").tags == ("a", "b", "c")
 
 
+@pytest.mark.parametrize("edited", [False, True])
+def test_remove_saved_copy_leaves_the_rolling_duel_alone(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, *, edited: bool
+) -> None:
+    window = library(make_window, qtbot)
+    page = window.current
+    page.watch.stop()
+    original = page.last.path
+    content = original.read_bytes()
+    monkeypatch.setattr(page_module, "_game_running", lambda _: False)
+    monkeypatch.setattr("replays.shelf.sleep", lambda _: None)
+    page.preserve.click()
+    qtbot.waitUntil(lambda: page.state == "library" and page.saved_copy is not None)
+    saved = page.saved
+    remove = button(window, "Remove saved copy")
+    assert remove.isVisible() and button(window, "Show saved copy").isVisible()
+    monkeypatch.setattr(page_module, "confirm_action", lambda *_: False)
+    remove.click()
+    assert saved.read_bytes() == content
+    if edited:
+        saved.write_bytes(b"keep my edits")
+    confirmed = []
+    monkeypatch.setattr(
+        page_module, "confirm_action", lambda *args: confirmed.append(args[-1]) or True
+    )
+    remove.click()
+    assert confirmed == ["Remove saved copy"]
+    if edited:
+        qtbot.waitUntil(lambda: page.state == "write_error")
+        assert saved.read_bytes() == b"keep my edits"
+    else:
+        qtbot.waitUntil(lambda: page.state == "library" and page.preserve is not None)
+        assert not saved.exists()
+    assert original.read_bytes() == content
+
+
+def test_existing_identical_archive_is_never_offered_for_removal(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = library(make_window, qtbot)
+    page = window.current
+    page.watch.stop()
+    game = Path(window.ctx.installation.path)
+    monkeypatch.setattr(page_module, "_game_running", lambda _: False)
+    monkeypatch.setattr("replays.shelf.sleep", lambda _: None)
+    existing = preserve_last_replay(game)
+    assert existing is not None
+    page.preserve.click()
+    qtbot.waitUntil(lambda: page.state == "library" and page.saved == existing)
+    assert page.saved_copy is None
+    assert not any(
+        button.text() == "Remove saved copy" for button in page.scroll.widget().findChildren(Button)
+    )
+
+
+def test_export_retry_preserves_the_selected_path(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = library(make_window, qtbot)
+    page = window.current
+    page.detail(next(entry for entry in page.entries if not entry.error))
+    destination = Path(window.ctx.installation.path) / "My recording.zip"
+    picks = []
+
+    def choose(*_: object) -> tuple[str, str]:
+        picks.append(destination)
+        return str(destination), ""
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", choose)
+    monkeypatch.setattr(page_module, "_game_running", lambda _: True)
+    page.form.export.click()
+    qtbot.waitUntil(lambda: page.state == "write_error")
+    assert not destination.exists()
+    monkeypatch.setattr(page_module, "_game_running", lambda _: False)
+    button(window, "Retry").click()
+    qtbot.waitUntil(lambda: page.state == "detail")
+    assert destination.is_file() and picks == [destination]
+
+
 def test_large_library_returns_to_the_same_replay_and_updates_in_place(
     make_window: Callable, qtbot: QtBot, tmp_path: Path
 ) -> None:
@@ -220,7 +316,7 @@ def test_large_library_returns_to_the_same_replay_and_updates_in_place(
     expected = page.list.records.entries[last.row()].path
     qtbot.keyClick(page.list, Qt.Key.Key_Return)
     assert page.selected.path == expected
-    qtbot.keyClick(button(window, "Back"), Qt.Key.Key_Escape)
+    qtbot.keyClick(button(window, "Replays"), Qt.Key.Key_Escape)
     assert page.list.currentIndex().row() == last.row()
     assert (
         page.list.viewport()

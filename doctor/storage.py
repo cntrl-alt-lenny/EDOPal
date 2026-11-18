@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import APP_NAME
+
 
 class ScanCancelled(Exception):
     """The caller cancelled the storage scan."""
@@ -46,9 +48,9 @@ _GAME = {
     "other": ("Other game files", ()),
 }
 _APP = {
-    "soundtracks": ("Studio soundtracks", ("soundtracks",)),
-    "backups": ("Studio backups", ("extras-backups",)),
-    "studio_state": ("Other Studio data", ()),
+    "soundtracks": (f"{APP_NAME} soundtracks", ("soundtracks",)),
+    "backups": (f"{APP_NAME} backups", ("extras-backups",)),
+    "studio_state": (f"Other {APP_NAME} data", ()),
 }
 
 

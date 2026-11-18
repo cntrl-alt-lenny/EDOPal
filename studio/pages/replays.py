@@ -2,9 +2,9 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, Qt, QTimer
+from PySide6.QtCore import QModelIndex, QTimer
 from PySide6.QtGui import QResizeEvent
-from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 import desktop_helpers
 from music.settings import _game_running
@@ -19,19 +19,20 @@ from replays import (
 )
 from studio import theme as t
 from studio.context import AppContext, Installation
-from studio.pages.health_layout import ToolPage, row
+from studio.pages.health_layout import ToolPage, confirm_action, task_heading
 from studio.pages.replays_details import ReplayForm
 from studio.pages.replays_library import (
     SORTS,
+    SavedCopy,
     details_line,
     folder_stamp,
     format_tags,
     last_to_save,
     played,
 )
-from studio.pages.replays_list import ReplayList
+from studio.pages.replays_list import ReplayShelf, last_duel_notice, saved_copy_notice
 from studio.tasks import Work, WorkerContext
-from studio.widgets import Button, Panel, SearchField, SectionHeader, glyph, label
+from studio.widgets import Button, GameClosedBlock, label
 
 
 class GameOpen(RuntimeError):
@@ -48,7 +49,7 @@ def require_closed(game: Path) -> None:
     except OSError as error:
         raise GameOpen("Couldn’t check if EDOPro is open. Close it, then choose Retry.") from error
     if running:
-        raise GameOpen("After the game closes, choose Retry to save the file.")
+        raise GameOpen("EDOPro is open in the selected game folder.")
 
 
 class ReplaysPage(ToolPage):
@@ -66,6 +67,7 @@ class ReplaysPage(ToolPage):
         self.query, self.order = "", "Newest first"
         self.undo_notes: dict[str, tuple[ReplayNotes, ReplayNotes]] = {}
         self.saved: Path | None = None
+        self.saved_copy: SavedCopy | None = None
         self.watch = QTimer(self)
         self.watch.setInterval(t.NOTICE_MS)
         self.watch.timeout.connect(self._watch_folder)
@@ -84,7 +86,7 @@ class ReplaysPage(ToolPage):
 
     def installation_changed(self, installation: Installation) -> None:
         self.query, self.order = "", "Newest first"
-        self.saved = None
+        self.saved = self.saved_copy = None
         if not self.writing:
             super().installation_changed(installation)
 
@@ -161,21 +163,7 @@ class ReplaysPage(ToolPage):
         self.preserve = None
         self.banner("Duel replays", self.introduction)
         if self.last:
-            panel = Panel(t.LG)
-            line = row()
-            line.addWidget(glyph("replays", t.ICON_BIG))
-            copy = QVBoxLayout()
-            copy.setSpacing(t.XS)
-            copy.addWidget(label("Your last duel is ready to save", "subheading", True))
-            copy.addWidget(
-                label("Save a copy before EDOPro replaces it in your next duel.", "body", True)
-            )
-            line.addLayout(copy, 1)
-            self.preserve = Button("Save my last duel", "primary", "download")
-            self.preserve.setToolTip(played(self.last))
-            self.preserve.clicked.connect(self._preserve)
-            line.addWidget(self.preserve)
-            panel.body.addLayout(line)
+            panel, self.preserve = last_duel_notice(played(self.last), self._preserve)
             self.body.addWidget(panel)
         if not self.ctx.installation.ready:
             self.body.addWidget(
@@ -187,62 +175,23 @@ class ReplaysPage(ToolPage):
             )
         if self.saved and any(e.path == self.saved for e in self.entries):
             self._saved_copy()
-        panel = Panel(t.LG)
-        self.count = label("", "muted")
-        self.reload = Button("Refresh", "quiet")
-        self.reload.clicked.connect(self.refresh)
+        shelf = ReplayShelf(self.query, self.order, bool(self.entries), self.refresh)
+        self.reload = shelf.reload
         if not self.entries:
             self.state = "empty"
-            panel.body.addWidget(self.reload, 0, Qt.AlignmentFlag.AlignRight)
-            panel.body.addStretch()
-            panel.body.addWidget(glyph("replays", t.BRAND_ICON))
-            panel.body.addWidget(
-                SectionHeader(
-                    "Your first replay goes here",
-                    "Finish a duel in EDOPro and save the replay. Return here and choose Refresh to see it.",
-                )
-            )
-            panel.body.addStretch()
-            self.body.addWidget(panel, 1)
+            self.body.addWidget(shelf)
+            self.body.addStretch()
             if focus:
                 self.reload.setFocus()
             return
-        controls = row()
-        self.search = SearchField("Search replays")
-        self.search.setToolTip("Search player names, labels, notes and tags.")
-        self.search.setText(self.query)
-        controls.addWidget(self.search, 1)
-        controls.addWidget(label("Sort by", "muted"))
-        self.sort = QComboBox()
-        self.sort.setAccessibleName("Sort replays")
-        self.sort.addItems(list(SORTS))
-        self.sort.setCurrentText(self.order)
-        self.sort.setStyleSheet(f"""QComboBox {{background:{t.RAISED}; border:{t.HAIR}px solid {t.EDGE};
-            border-radius:{t.R_SMALL}px; padding:{t.SM}px {t.MD}px; min-width:{t.TILE_H}px;}}
-            QComboBox:focus {{border-color:{t.PALE};}}""")
-        controls.addWidget(self.sort)
-        controls.addWidget(self.count)
-        controls.addWidget(self.reload)
-        panel.body.addLayout(controls)
-        self.list = ReplayList()
-        self.list.setMinimumHeight(t.TILE_H * 2)
-        panel.body.addWidget(self.list, 1)
-        self.no_matches = Panel()
-        self.no_matches.body.addStretch()
-        self.no_matches.body.addWidget(
-            SectionHeader("No matching duels", "Try another player, label or tag.")
-        )
-        clear = Button("Clear search")
-        clear.clicked.connect(self.search.clear)
-        self.no_matches.body.addWidget(clear, 0, Qt.AlignmentFlag.AlignLeft)
-        self.no_matches.body.addStretch()
-        panel.body.addWidget(self.no_matches, 1)
+        self.search, self.sort, self.list = shelf.search, shelf.sort, shelf.list
+        self.count, self.no_matches = shelf.count, shelf.no_matches
         self.list.clicked.connect(self._select)
         self.list.activated.connect(self._select)
         self.search.textChanged.connect(self._filter)
         self.sort.currentTextChanged.connect(self._filter)
-        self.body.addWidget(panel, 1)
-        panel.show()
+        self.body.addWidget(shelf, 1)
+        shelf.show()
         self._filter()
         if focus:
             (self.preserve or self.search).setFocus()
@@ -279,23 +228,48 @@ class ReplaysPage(ToolPage):
             self.detail(self.list.records.entries[index.row()])
 
     def _saved_copy(self) -> None:
-        panel = Panel(t.MD)
-        line = row()
-        line.addWidget(glyph("check", colour=t.GREEN))
-        line.addWidget(
-            label(
-                "Your copy appears in Replays the next time you start EDOPro. To remove it, choose Show saved copy and delete it in your file manager.",
-                "body",
-                True,
-            ),
-            1,
-        )
-        button = Button("Show saved copy", "secondary", "folder")
         path = self.saved
-        button.clicked.connect(lambda: self._reveal(path))
-        line.addWidget(button)
-        panel.body.addLayout(line)
-        self.body.addWidget(panel)
+        assert path is not None
+        self.body.addWidget(
+            saved_copy_notice(
+                lambda: self._reveal(path),
+                self._confirm_remove_saved if self.saved_copy is not None else None,
+            )
+        )
+
+    def _confirm_remove_saved(self) -> None:
+        if not self.saved_copy or not confirm_action(
+            self,
+            "Remove saved copy?",
+            "Remove the copy you saved here. EDOPro’s last duel stays in place.",
+            "Remove saved copy",
+        ):
+            return
+        self._remove_saved(self.saved_copy)
+
+    def _remove_saved(self, copy: SavedCopy) -> None:
+        game = Path(self.ctx.installation.path)
+
+        def remove(_: WorkerContext) -> None:
+            require_closed(game)
+            try:
+                copy.remove(game)
+            except ValueError as exc:
+                raise ChangedRecording(str(exc)) from exc
+
+        def done(_: object) -> None:
+            self.saved = self.saved_copy = None
+            self.refresh()
+            self.ctx.notify("Saved replay copy removed.")
+
+        self._write(
+            "Removing the saved copy…",
+            remove,
+            done,
+            lambda: self._remove_saved(copy),
+            self.refresh,
+            "The saved copy could not be removed",
+        )
 
     def _preserve(self) -> None:
         entry = self.last
@@ -303,19 +277,24 @@ class ReplaysPage(ToolPage):
             return
         game = Path(self.ctx.installation.path)
 
-        def save(_: WorkerContext) -> Path:
+        def save(_: WorkerContext) -> tuple[Path, SavedCopy | None]:
             require_closed(game)
             if entry.replay_id is None:
                 raise ChangedRecording("Refresh the library once the recording can be read.")
+            existing = {path.name.casefold() for path in entry.path.parent.iterdir()}
             path = preserve_last_replay(game, source=entry.path, expected_id=entry.replay_id)
             if not path:
                 raise ChangedRecording(
                     "The recording changed or could not be read. Refresh the library after the duel has finished."
                 )
-            return path
+            # The engine can return an identical file that predates this operation.
+            copy = (
+                None if path.name.casefold() in existing else SavedCopy.check(path, entry.replay_id)
+            )
+            return path, copy
 
-        def success(path: Path) -> None:
-            self.saved = path
+        def success(result: tuple[Path, SavedCopy | None]) -> None:
+            self.saved, self.saved_copy = result
             self.refresh()
 
         self._write(
@@ -333,11 +312,13 @@ class ReplaysPage(ToolPage):
         self.selected = entry
         self.surface("detail")
         back = self.back_button(self._back)
-        self.banner("Replay details", played(entry) + "  ·  " + details_line(entry))
+        task_heading(self.body, "Replay details", played(entry) + "  ·  " + details_line(entry))
         prior = self.undo_notes.get(entry.replay_id or "")
         self.form = ReplayForm(entry, bool(prior and prior[0] == entry.annotation))
         self.body.addWidget(self.form, 1)
-        self.form.arrange(self.width(), self.height())
+        self.form.arrange(self.width())
+        if entry.replay_id:
+            self.pin_footer(self.form.footer)
         self.form.reveal.clicked.connect(lambda: self._reveal(entry.path))
         self.form.export.clicked.connect(self._export)
         self.form.save.clicked.connect(lambda: self._store(self.form.draft()))
@@ -347,7 +328,7 @@ class ReplaysPage(ToolPage):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         if self.state == "detail" and hasattr(self, "form"):
-            self.form.arrange(self.width(), self.height())
+            self.form.arrange(self.width())
 
     def _undo(self) -> None:
         if self.selected and self.selected.replay_id:
@@ -382,7 +363,6 @@ class ReplaysPage(ToolPage):
             )
             if not undo:
                 self.form.undo.setFocus()
-                self.scroll.ensureWidgetVisible(self.form.undo)
 
         self._write(
             "Saving replay details…",
@@ -401,7 +381,7 @@ class ReplaysPage(ToolPage):
 
     def _export(self) -> None:
         entry = self.selected
-        if not entry:
+        if not entry or entry.error:
             return
         profile = Path(self.ctx.cfg.config_path).parent
         destination, _ = QFileDialog.getSaveFileName(
@@ -412,10 +392,13 @@ class ReplaysPage(ToolPage):
         )
         if not destination:
             return
-        game = Path(self.ctx.installation.path)
         path = Path(destination)
         if not path.suffix:
             path = path.with_suffix(".zip")
+        self._export_to(entry, path)
+
+    def _export_to(self, entry: ReplayEntry, path: Path) -> None:
+        game = Path(self.ctx.installation.path)
 
         def export(_: WorkerContext) -> Path:
             if path.resolve().is_relative_to(game.resolve()):
@@ -430,7 +413,7 @@ class ReplaysPage(ToolPage):
             "Exporting your replay…",
             export,
             success,
-            self._export,
+            lambda: self._export_to(entry, path),
             lambda: self.detail(entry),
             "Replay ZIP could not be exported",
         )
@@ -454,6 +437,7 @@ class ReplaysPage(ToolPage):
         if self.writing:
             return
         game = self.ctx.installation.path
+        previous = "Replay details" if self.selected else self.title
         self.stop_read()
         self.writing = True
         self.ctx.set_busy(True)
@@ -476,7 +460,17 @@ class ReplaysPage(ToolPage):
             if release():
                 stale = isinstance(exc, ChangedRecording)
                 blocked = isinstance(exc, GameOpen)
-                if stale or blocked:
+                if blocked:
+                    self.surface("write_error")
+                    self.back_button(back, previous)
+                    block = GameClosedBlock()
+                    self.body.addWidget(block)
+                    self.body.addStretch()
+                    block.retry.clicked.connect(retry)
+                    block.show_reason(str(exc))
+                    self.retry_back = back
+                    return
+                if stale:
                     explanation = str(exc)
                 elif isinstance(exc, FileExistsError):
                     explanation = (
@@ -486,12 +480,16 @@ class ReplaysPage(ToolPage):
                     explanation = "Check that the folder is available and writable, then try again."
                 self.state_view(
                     "write_error",
-                    "Close EDOPro to continue" if blocked else failure_title,
+                    failure_title,
                     explanation,
                     "Refresh" if stale else "Retry",
-                    self.refresh if stale else retry,
+                    self.refresh
+                    if stale
+                    else self._export
+                    if isinstance(exc, FileExistsError)
+                    else retry,
                     back=back,
-                    technical="" if stale or blocked else str(exc),
+                    technical="" if stale else str(exc),
                 )
                 self.retry_back = back
 
@@ -504,9 +502,11 @@ class ReplaysPage(ToolPage):
             and self.selected
             and self.form.draft() != self.selected.annotation
         ):
-            return self.ctx.confirm(
+            return confirm_action(
+                self,
                 "Discard unsaved changes?",
                 "Your changes to the label, tags and notes will be lost.",
+                "Discard changes",
             )
         return True
 

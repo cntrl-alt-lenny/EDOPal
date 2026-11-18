@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from config import APP_NAME
+
 Severity = Literal["ok", "info", "warning", "problem"]
 
 
@@ -35,7 +37,7 @@ CATALOGUE = {
     "installation.version_unknown": FindingText(
         "info",
         "Game version unavailable",
-        "The game files do not expose a version that Studio can read on this platform.",
+        f"The game files do not expose a version that {APP_NAME} can read on this platform.",
     ),
     "installation.writable": FindingText(
         "ok",
@@ -51,7 +53,7 @@ CATALOGUE = {
     "installation.write_unknown": FindingText(
         "info",
         "Write access could not be checked",
-        "Studio could not determine write access to at least one game folder.",
+        f"{APP_NAME} could not determine write access to at least one game folder.",
     ),
     "process.running": FindingText(
         "info",
@@ -65,7 +67,7 @@ CATALOGUE = {
         "The process check did not find the selected client.",
     ),
     "process.unknown": FindingText(
-        "info", "Running status unavailable", "Studio could not complete the process check."
+        "info", "Running status unavailable", f"{APP_NAME} could not complete the process check."
     ),
     "repositories.config": FindingText(
         "info",
@@ -117,7 +119,7 @@ CATALOGUE = {
     "databases.available": FindingText(
         "ok",
         "Card databases are available",
-        "Studio read the installed databases and counted distinct card IDs.",
+        f"{APP_NAME} read the installed databases and counted distinct card IDs.",
         support_counts=("files", "cards", "duplicates", "artwork_index_cards"),
     ),
     "databases.missing": FindingText(
@@ -174,12 +176,12 @@ CATALOGUE = {
         support_counts=("cards_have", "cards_total", "fields_have", "fields_total", "disk_bytes"),
     ),
     "artwork.unavailable": FindingText(
-        "info", "Artwork coverage unavailable", "Studio could not scan the artwork folders."
+        "info", "Artwork coverage unavailable", f"{APP_NAME} could not scan the artwork folders."
     ),
     "decks.inventory": FindingText(
         "ok",
         "Saved decks checked",
-        "Studio read the saved deck files and compared their card IDs with installed card data.",
+        f"{APP_NAME} read the saved deck files and compared their card IDs with installed card data.",
         support_counts=("files", "parsed"),
     ),
     "decks.unreadable": FindingText(
@@ -195,7 +197,7 @@ CATALOGUE = {
         "Let EDOPro update, then check for any custom databases the deck needs.",
     ),
     "settings.unavailable": FindingText(
-        "info", "Game settings unavailable", "Studio could not read the game settings file."
+        "info", "Game settings unavailable", f"{APP_NAME} could not read the game settings file."
     ),
     "skin.default": FindingText(
         "ok", "Built-in skin selected", "The game is using its built-in appearance."
@@ -215,7 +217,7 @@ CATALOGUE = {
     "skin.malformed": FindingText(
         "warning",
         "Active skin definition is malformed",
-        "Studio could not read the active skin's XML definition.",
+        f"{APP_NAME} could not read the active skin's XML definition.",
         "Choose a different skin or ask the skin author for an updated copy.",
     ),
     "skin.images": FindingText(
@@ -263,7 +265,7 @@ CATALOGUE = {
         "warning",
         "Music is on but tracks are missing",
         "At least one game scene has no supported music files.",
-        "Restore the original sound files or select a playlist in Studio.",
+        f"Restore the original sound files or select a playlist in {APP_NAME}.",
         ("files", "affected"),
     ),
     "music.available": FindingText(
@@ -308,7 +310,7 @@ CATALOGUE = {
     "windbot.available": FindingText(
         "ok",
         "WindBot is present",
-        "Studio found the practice bot executable and its supporting files.",
+        f"{APP_NAME} found the practice bot executable and its supporting files.",
         support_counts=("decks", "catalogue_entries", "matched_entries"),
     ),
     "windbot.missing": FindingText(
@@ -355,35 +357,35 @@ CATALOGUE = {
     "storage.unknown": FindingText(
         "info",
         "Artwork disk space unavailable",
-        "Studio could not measure free space or estimate the remaining artwork.",
+        f"{APP_NAME} could not measure free space or estimate the remaining artwork.",
     ),
     "state.clean": FindingText(
         "ok",
-        "No interrupted Studio changes found",
+        f"No interrupted {APP_NAME} changes found",
         "No known interrupted journals were found for this installation.",
     ),
     "state.lock_idle": FindingText(
         "info",
-        "Inactive Studio lock file found",
-        "This marker is reused by Studio. The operating system released its lock.",
+        f"Inactive {APP_NAME} lock file found",
+        f"This marker is reused by {APP_NAME}. The operating system released its lock.",
         "Leave the file in place.",
     ),
     "state.lock_busy": FindingText(
         "info",
-        "Studio is using an update lock",
+        f"{APP_NAME} is using an update lock",
         "Another operation appears to hold this lock.",
         "Wait for the operation to finish before changing these files.",
     ),
     "state.lock_unknown": FindingText(
         "info",
-        "Studio lock state could not be checked",
+        f"{APP_NAME} lock state could not be checked",
         "A lock file is present but its current state could not be determined.",
     ),
     "state.interrupted": FindingText(
         "warning",
-        "An interrupted Studio change needs attention",
+        f"An interrupted {APP_NAME} change needs attention",
         "An unfinished appearance or playlist journal remains on disk.",
-        "Close EDOPro, then use the matching Restore or Undo action in Studio. Keep the journal and backups.",
+        f"Close EDOPro, then use the matching Restore or Undo action in {APP_NAME}. Keep the journal and backups.",
     ),
 }
 

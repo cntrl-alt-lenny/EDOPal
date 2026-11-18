@@ -9,7 +9,8 @@ from threading import Event
 from unittest.mock import patch
 from zipfile import ZIP_STORED, ZipFile
 
-from PySide6.QtWidgets import QFileDialog, QLabel
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox
 
 import backup
 from backup.core import Cancel, Progress
@@ -17,6 +18,7 @@ from studio.context import Installation
 from studio.pages.backup import BackupPage
 from studio.pages.backup_review import CompareScreen
 from studio.pages.backup_screens import ArchiveScreen, HomeScreen, SaveScreen
+from studio.pages.health_layout import confirm_action
 from studio.shell import StudioWindow
 from studio.widgets import Button
 
@@ -96,12 +98,20 @@ def capture_backup(
     assert isinstance(page, BackupPage)
 
     def click(title: str) -> None:
-        control = next(
-            widget
-            for widget in page.screen.findChildren(Button)
-            if widget.isVisible() and title in {widget.text(), widget.accessibleName()}
-        )
-        control.click()
+        def control() -> Button | None:
+            return next(
+                (
+                    widget
+                    for widget in page.screen.findChildren(Button)
+                    if widget.isVisible() and title in {widget.text(), widget.accessibleName()}
+                ),
+                None,
+            )
+
+        settle(lambda: control() is not None)
+        button = control()
+        assert button is not None
+        button.click()
 
     def showing(title: str) -> bool:
         return any(
@@ -112,11 +122,38 @@ def capture_backup(
     def home() -> None:
         settle(lambda: isinstance(page.screen, HomeScreen) and page.job is None)
 
+    pending_shots = {
+        f"Restore to {game.name}": "backup-confirm-restore",
+        "Undo this restore": "backup-confirm-undo",
+    }
+
+    def confirm(page: BackupPage, title: str, message: str, affirmative: str) -> bool:
+        def accept() -> None:
+            dialog = QApplication.activeModalWidget()
+            assert isinstance(dialog, QMessageBox)
+            if name := pending_shots.pop(affirmative, ""):
+                overlay = QLabel(window)
+                overlay.setPixmap(dialog.grab())
+                overlay.adjustSize()
+                overlay.move(
+                    (window.width() - overlay.width()) // 2,
+                    (window.height() - overlay.height()) // 2,
+                )
+                overlay.show()
+                overlay.raise_()
+                shot(name)
+                overlay.hide()
+                overlay.deleteLater()
+            next(button for button in dialog.buttons() if button.text() == affirmative).click()
+
+        QTimer.singleShot(0, accept)
+        return confirm_action(page, title, message, affirmative)
+
     path = incoming
     with (
         patch.object(QFileDialog, "getSaveFileName", return_value=(str(saved), "")),
         patch.object(QFileDialog, "getOpenFileName", side_effect=lambda *_: (str(path), "")),
-        patch.object(ctx, "confirm", return_value=True),
+        patch("studio.pages.backup.confirm_action", side_effect=confirm),
         patch("studio.pages.backup._game_running", return_value=False) as process,
         patch("backup.restore._game_running", return_value=False),
     ):
@@ -155,7 +192,7 @@ def capture_backup(
                 release_save.set()
             settle(lambda: showing("Backup saved"))
         shot("backup-03-saved")
-        click("Back")
+        click("Done")
         home()
         click("Restore from backup")
         settle(lambda: isinstance(page.screen, ArchiveScreen))
@@ -208,13 +245,13 @@ def capture_backup(
                 release.set()
             settle(lambda: showing("Restore complete") and page.job is None)
         shot("backup-09-restored")
-        click("Back")
+        click("Done")
         home()
         shot("backup-10-history")
         click("Undo this restore")
         settle(lambda: showing("Previous files restored"))
         shot("backup-11-undone")
-        click("Back")
+        click("Done")
         home()
         click("Compare with backup")
         settle(lambda: isinstance(page.screen, ArchiveScreen))
@@ -222,7 +259,7 @@ def capture_backup(
         settle(lambda: isinstance(page.screen, CompareScreen))
         click("Name clashes  2")
         shot("backup-12-comparison")
-        click("Back")
+        click("Backup contents")
         path = future
         click("Choose another backup")
         settle(lambda: showing("This backup needs another version"))
@@ -261,7 +298,7 @@ def capture_backup(
                 click("Cancel backup operation")
             finally:
                 release_save.set()
-            settle(lambda: showing("Stopped"))
+            settle(lambda: showing("Backup cancelled"))
         assert not stopped_path.exists()
         shot("backup-20-cancelled")
         new_game = game.parent / "Steam Deck"
@@ -271,7 +308,7 @@ def capture_backup(
         click("Save a backup")
         settle(lambda: isinstance(page.screen, SaveScreen))
         shot("backup-21-nothing-to-save")
-        click("Back")
+        click("Backup & transfer")
         home()
         path = incoming
         click("Restore from backup")

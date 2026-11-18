@@ -1,11 +1,22 @@
+from collections.abc import Callable
+
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QPersistentModelIndex, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QListView, QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PySide6.QtWidgets import (
+    QComboBox,
+    QListView,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QVBoxLayout,
+)
 
 from replays import ReplayEntry
 from studio import theme as t
 from studio.icons import icon
-from studio.pages.replays_library import details_line, played, players, title
+from studio.pages.health_layout import row
+from studio.pages.replays_library import SORTS, details_line, played, players, title
+from studio.widgets import Button, Panel, SearchField, SectionHeader, glyph, label
 
 
 class ReplayModel(QAbstractListModel):
@@ -141,3 +152,87 @@ class ReplayList(QListView):
         self.records = ReplayModel(self)
         self.setModel(self.records)
         self.setItemDelegate(ReplayRow(self))
+
+
+class ReplayShelf(Panel):
+    def __init__(
+        self, query: str, order: str, populated: bool, refresh: Callable[[], None]
+    ) -> None:
+        super().__init__(t.LG)
+        self.count = label("", "muted")
+        self.reload = Button("Refresh", "quiet" if populated else "secondary")
+        self.reload.clicked.connect(refresh)
+        if not populated:
+            self.body.addWidget(glyph("replays", t.BRAND_ICON))
+            self.body.addWidget(
+                SectionHeader(
+                    "Your first replay goes here",
+                    "Finish a duel in EDOPro and save the replay. Refresh when you return to see it here.",
+                )
+            )
+            self.body.addWidget(self.reload, 0, Qt.AlignmentFlag.AlignLeft)
+            return
+        controls = row()
+        self.search = SearchField("Search replays")
+        self.search.setToolTip("Search player names, labels, notes and tags.")
+        self.search.setText(query)
+        controls.addWidget(self.search, 1)
+        controls.addWidget(label("Sort by", "muted"))
+        self.sort = QComboBox()
+        self.sort.setAccessibleName("Sort replays")
+        self.sort.addItems(list(SORTS))
+        self.sort.setCurrentText(order)
+        self.sort.setStyleSheet(f"""QComboBox {{background:{t.RAISED}; border:{t.HAIR}px solid {t.EDGE};
+            border-radius:{t.R_SMALL}px; padding:{t.SM}px {t.MD}px; min-width:{t.TILE_H}px;}}
+            QComboBox:focus {{border-color:{t.PALE};}}""")
+        controls.addWidget(self.sort)
+        controls.addWidget(self.count)
+        controls.addWidget(self.reload)
+        self.body.addLayout(controls)
+        self.list = ReplayList()
+        self.list.setMinimumHeight(t.TILE_H)
+        self.body.addWidget(self.list, 1)
+        self.no_matches = Panel()
+        self.no_matches.body.addWidget(
+            SectionHeader("No matching duels", "Try another player, label or tag.")
+        )
+        clear = Button("Clear search")
+        clear.clicked.connect(self.search.clear)
+        self.no_matches.body.addWidget(clear, 0, Qt.AlignmentFlag.AlignLeft)
+        self.no_matches.body.addStretch()
+        self.body.addWidget(self.no_matches, 1)
+
+
+def last_duel_notice(date: str, save: Callable[[], None]) -> tuple[Panel, Button]:
+    panel = Panel(t.LG)
+    line = row()
+    line.addWidget(glyph("replays", t.ICON_BIG))
+    copy = QVBoxLayout()
+    copy.setSpacing(t.XS)
+    copy.addWidget(label("Your last duel is ready to save", "subheading", True))
+    copy.addWidget(label("Save a copy before EDOPro replaces it in your next duel.", "body", True))
+    line.addLayout(copy, 1)
+    button = Button("Save my last duel", "primary", "download")
+    button.setToolTip(date)
+    button.clicked.connect(save)
+    line.addWidget(button)
+    panel.body.addLayout(line)
+    return panel, button
+
+
+def saved_copy_notice(reveal: Callable[[], None], remove: Callable[[], None] | None) -> Panel:
+    panel = Panel(t.MD)
+    line = row()
+    line.addWidget(glyph("check", colour=t.GREEN))
+    line.addWidget(
+        label("Replay saved. You can watch it the next time you start EDOPro.", "body", True), 1
+    )
+    show_file = Button("Show saved copy", "secondary", "folder")
+    show_file.clicked.connect(reveal)
+    line.addWidget(show_file)
+    if remove:
+        remove_copy = Button("Remove saved copy", "secondary")
+        remove_copy.clicked.connect(remove)
+        line.addWidget(remove_copy)
+    panel.body.addLayout(line)
+    return panel

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLayout,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -39,6 +40,7 @@ from studio.pages.backup_views import (
     path_label,
     serif,
 )
+from studio.pages.health_layout import task_heading
 from studio.widgets import (
     ActionTile,
     Button,
@@ -57,11 +59,28 @@ UNDO_DESCRIPTION = "Undo puts back the files and preferences this restore replac
 class Screen(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.body = QVBoxLayout(self)
+        self.frame = QVBoxLayout(self)
+        margins(self.frame, 0)
+        self.frame.setSpacing(0)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.frame.addWidget(self.scroll, 1)
+        canvas = QWidget()
+        self.body = QVBoxLayout(canvas)
         self.body.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         margins(self.body, t.XXL)
         self.body.setSpacing(t.LG)
+        self.scroll.setWidget(canvas)
+        self.fixed_footer: QWidget | None = None
         self.focus: QWidget | None = None
+
+    def pin_footer(self, panel: QWidget) -> None:
+        footer = QWidget()
+        layout = QVBoxLayout(footer)
+        layout.addWidget(panel)
+        self.frame.addWidget(footer)
+        self.fixed_footer = footer
 
     def heading(
         self,
@@ -70,34 +89,36 @@ class Screen(QWidget):
         path: str = "",
         *,
         detail: QLabel | None = None,
+        return_to: str = "Backup & transfer",
     ) -> None:
         if back:
-            self.back = action("Back", back, "quiet", "back")
-            self.focus = self.back
-        header = QHBoxLayout()
-        header.setSpacing(t.LG)
-        if back:
-            header.addWidget(self.back, 0, Qt.AlignmentFlag.AlignTop)
+            self.return_link(back, return_to)
         copy = QVBoxLayout()
         copy.setSpacing(t.XS)
-        copy.addWidget(serif(title, t.DISPLAY - t.SM))
+        copy.addWidget(label(title, "heading", True))
         if detail is not None:
             copy.addWidget(detail)
         elif path:
             copy.addWidget(path_label(path, Path(path).name))
-        header.addLayout(copy, 1)
-        self.body.addLayout(header)
+        self.body.addLayout(copy)
 
-    def banner(
-        self, title: str, description: str, symbol: str, back: Callable[[], None] | None = None
+    def task(
+        self,
+        title: str,
+        description: str,
+        back: Callable[[], None] | None = None,
+        *,
+        return_to: str = "Backup & transfer",
     ) -> None:
         if back:
-            button = action("Back", back, "quiet", "back")
-            self.body.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
-            self.focus = button
-        hero = Hero("Backup & transfer", title, description, symbol)
-        hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.body.addWidget(hero, 1)
+            self.return_link(back, return_to)
+        task_heading(self.body, title, description)
+
+    def return_link(self, back: Callable[[], None], destination: str) -> None:
+        link = action(destination.replace("&", "&&"), back, "quiet", "back")
+        link.setAccessibleName(destination)
+        self.body.addWidget(link, 0, Qt.AlignmentFlag.AlignLeft)
+        self.focus = link
 
 
 class HomeScreen(Screen):
@@ -170,6 +191,7 @@ class HomeScreen(Screen):
             self.focus = action("Choose folder", change_folder, "primary", "folder")
             panel.body.addWidget(self.focus, 0, Qt.AlignmentFlag.AlignRight)
             self.body.addWidget(panel)
+            self.body.addStretch()
 
     def set_history(
         self,
@@ -304,7 +326,7 @@ class SaveScreen(Screen):
         self.heading("Save a backup", back)
         self.body.addWidget(
             label(
-                "Select what to put in the ZIP. Decks and replays are selected by default.",
+                "Select what to put in the ZIP. Saved decks and replays are selected by default.",
                 "body",
                 True,
             ),
@@ -318,7 +340,8 @@ class SaveScreen(Screen):
         self.choices: dict[str, CategoryChoice] = {}
         for i, key in enumerate(SAVE_CATEGORIES):
             choice = CategoryChoice(key, items[key])
-            choice.setChecked(key in selected)
+            choice.setChecked(bool(items[key].count) and key in selected)
+            choice.setEnabled(bool(items[key].count))
             choice.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             choice.setMinimumHeight(t.TILE_H)
             self.choices[key] = choice
@@ -348,14 +371,22 @@ class SaveScreen(Screen):
             0,
             Qt.AlignmentFlag.AlignBottom,
         )
-        self.body.addWidget(self.footer)
+        self.pin_footer(self.footer)
+
+        available = [CATEGORIES[key][0] for key, total in items.items() if total.count]
 
         def update() -> None:
             picked = self.selected()
             total = backup.Total(
                 sum(items[k].count for k in picked), sum(items[k].bytes for k in picked)
             )
-            self.total.setText(amount(total) if total.count else "Select a category with items")
+            if total.count:
+                summary = amount(total)
+            elif len(available) == 1:
+                summary = f"Select {available[0]} to continue"
+            else:
+                summary = "Select a category with items" if available else "No items to back up"
+            self.total.setText(summary)
             self.save.setEnabled(total.count > 0)
 
         for choice in self.choices.values():
@@ -369,6 +400,8 @@ class SaveScreen(Screen):
         self.grid.setSpacing(t.SM if small else t.MD)
         margins(self.footer.body, t.MD if small else t.XL)
         for choice in self.choices.values():
+            choice.layout().setSpacing(t.SM if small else t.MD)
+            margins(choice.layout(), t.SM if small else t.MD)
             choice.setMinimumHeight(t.BUTTON_H + t.LG if small else t.TILE_H)
 
 
@@ -393,7 +426,6 @@ class ArchiveScreen(Screen):
         info.body.addWidget(glyph("backup", t.BRAND_ICON))
         info.body.addWidget(serif("Inside this backup", t.HEADING + t.XS))
         info.body.addWidget(serif(amount(overall), t.DISPLAY - t.SM))
-        info.body.addStretch()
         info.body.addWidget(label("SAVED ON", "goldKicker"))
         info.body.addWidget(label(f"{source} · {date_text(manifest.created_at)}", "body", True))
         version = f"EDOPro {manifest.edopro_version}   ·   " if manifest.edopro_version else ""
@@ -402,7 +434,6 @@ class ArchiveScreen(Screen):
         )
         included = Panel(t.XL)
         included.body.addWidget(serif("Included categories", t.HEADING + t.XS))
-        included.body.addStretch()
         for key, total in items.items():
             title, _, symbol = CATEGORIES[key]
             panel = Panel(t.MD)
@@ -416,19 +447,19 @@ class ArchiveScreen(Screen):
             included.body.addWidget(panel)
         if not items:
             included.body.addWidget(label("This backup has no saved categories.", "body", True))
-        included.body.addStretch()
         summary = QHBoxLayout()
         summary.setSpacing(t.LG)
         summary.addWidget(info, 2)
         summary.addWidget(included, 3)
-        self.body.addLayout(summary, 1)
+        self.body.addLayout(summary)
+        self.body.addStretch()
         self.review = action(
             "Compare files" if compare else "Preview changes",
             review,
             "primary",
             "arrow",
         )
-        self.body.addWidget(
+        self.pin_footer(
             actions(
                 action("Choose another backup", choose),
                 self.review,

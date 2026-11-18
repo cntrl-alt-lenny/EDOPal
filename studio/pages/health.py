@@ -21,7 +21,7 @@ from doctor import (
 )
 from studio import theme as t
 from studio.context import AppContext, Installation
-from studio.pages.health_layout import ToolPage, editor, row
+from studio.pages.health_layout import ToolPage, editor, row, task_heading
 from studio.pages.health_links import open_finding
 from studio.pages.health_report import (
     PAGE_NAMES,
@@ -224,6 +224,10 @@ class HealthPage(ToolPage):
         details.hide()
 
         def expand(opened: bool) -> None:
+            if opened:
+                for _, other in self.disclosures:
+                    if other is not toggle:
+                        other.setChecked(False)
             if opened and not content.count():
                 self._explain(content, item)
             marker.setText("−" if opened else "+")
@@ -237,14 +241,15 @@ class HealthPage(ToolPage):
         explanation = practice_summary(item) if practice else item.explanation
         action = item.action
         if item.id == "state.lock_idle":
-            explanation = "No update is using this file."
+            explanation = "You can leave it in place and continue using the update tools."
+            action = ""
         elif item.id == "state.interrupted" and route(item) in {"backup", "skins"}:
             explanation = "An unfinished change was found for this EDOPro folder."
             action = f"Close EDOPro, then open {PAGE_NAMES[route(item)]} to recover the change."
-        content.addWidget(label(explanation.replace("Studio", config.APP_NAME), "body", True))
+        content.addWidget(label(explanation, "body", True))
         if action and not practice:
-            content.addWidget(label(action.replace("Studio", config.APP_NAME), "body", True))
-        for key, value in evidence(item):
+            content.addWidget(label(action, "body", True))
+        for key, value in () if item.id == "state.lock_idle" else evidence(item):
             line = row()
             line.addWidget(label(key, "muted"))
             fact = ElidedLabel()
@@ -279,11 +284,11 @@ class HealthPage(ToolPage):
         self.surface("evidence")
         self.evidence_finding = item
         self.back_button(self._end_evidence)
-        self.banner("Technical details", heading(item))
+        task_heading(self.body, "Technical details", heading(item))
         panel = Panel()
         panel.body.addWidget(label(name, "heading"))
         preview = editor("Technical details", readonly=True)
-        preview.setMinimumHeight(t.HERO_MIN)
+        preview.setMinimumHeight(t.TILE_LARGE)
         panel.body.addWidget(preview, 1)
         nav = row()
         previous, following = Button("Previous"), Button("Next")
@@ -330,7 +335,7 @@ class HealthPage(ToolPage):
             return
         self.surface("support")
         self.back_button(lambda: self._return_to_findings("support"))
-        self.banner(f"{config.APP_NAME} support summary", "Review before sharing.")
+        task_heading(self.body, f"{config.APP_NAME} support summary", "Review before sharing.")
         panel = Panel()
         panel.body.addWidget(
             SectionHeader(
@@ -342,8 +347,8 @@ class HealthPage(ToolPage):
         lines = support_summary(self.report).splitlines()
         # Retitle the allowlisted report without adding any local finding details.
         lines[0] = f"{config.APP_NAME} support summary"
-        self.preview.setPlainText("\n".join(lines).replace("Studio", config.APP_NAME))
-        self.preview.setMinimumHeight(t.HERO_MIN)
+        self.preview.setPlainText("\n".join(lines))
+        self.preview.setMinimumHeight(t.TILE_LARGE)
         panel.body.addWidget(self.preview, 1)
         button = Button("Copy support summary", "primary", "library")
         button.clicked.connect(self._copy)
@@ -361,11 +366,12 @@ class HealthPage(ToolPage):
             return
         self.surface("storage_loading")
         back = self.back_button(lambda: self._return_to_findings("disk"))
-        self.banner(
+        task_heading(
+            self.body,
             "Measuring storage…",
             f"Counting files in your EDOPro folder and {config.APP_NAME} data. Choose Back to stop.",
-            large=True,
         )
+        self.body.addStretch()
         back.setFocus()
         game = self.ctx.installation.path
         profile = Path(self.ctx.cfg.config_path).parent
@@ -390,7 +396,11 @@ class HealthPage(ToolPage):
         self.storage = result
         self.surface("storage")
         back = self.back_button(lambda: self._return_to_findings("disk"))
-        self.banner("Storage breakdown", "Space used by your game files, soundtracks and backups.")
+        task_heading(
+            self.body,
+            "Storage breakdown",
+            "Space used by your game files, soundtracks and backups.",
+        )
         panel = Panel()
         panel.body.addWidget(label(f"{byte_size(result.total_bytes)} in use", "heading"))
         categories = sorted(result.categories, key=lambda c: -c.bytes)
@@ -402,7 +412,7 @@ class HealthPage(ToolPage):
         grid.setVerticalSpacing(t.SM)
         for index, category in enumerate(categories):
             colour = STORAGE_COLOURS[index % len(STORAGE_COLOURS)]
-            title = category.title.replace("Studio", config.APP_NAME)
+            title = category.title
             if category.bytes:
                 piece = QWidget()
                 piece.setStyleSheet(f"background: {colour};")
