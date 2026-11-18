@@ -105,5 +105,5 @@ with TemporaryDirectory(dir=Path.cwd()) as folder:
     tx = backup.execute(plan)
     print(tx.status, backup.compare(target, path)[0].status)
     print(backup.recover(target, tx.id, "rollback").status)
-'@ | & 'C:\Users\leona\Dev\edopro-agents\venv\Scripts\python.exe' -
+'@ | & 'python' -
 ```

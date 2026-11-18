@@ -7,7 +7,7 @@
 From the repository root, the following PowerShell commands create a disposable game with a real 128-card SQLite database, a deck and some existing images. Use a new demo directory for each clean installation.
 
 ```powershell
-$py = 'C:\Users\leona\Dev\edopro-agents\venv\Scripts\python.exe'
+$py = 'python'
 & $py -c "from pathlib import Path; from tools.studio_screenshots import create_demo; create_demo(Path('build/demo').resolve())"
 & $py main.py --gui --config build/demo/config.json --edopro-path build/demo/Games/ProjectIgnis
 ```
