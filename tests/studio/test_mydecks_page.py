@@ -1,0 +1,368 @@
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable, Iterator
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
+from pytestqt.qtbot import QtBot
+
+from config import Config
+from decks import DeckIndexer, Library, Sections, encode_ydke
+from studio.context import Installation
+from studio.pages import mydecks_files as copies
+from studio.pages.mydecks import MyDecksPage
+from studio.pages.mydecks_checks import FormatCheck
+from studio.pages.mydecks_library import Collection
+from studio.pages.mydecks_logic import change_lines, library_rows
+from studio.pages.mydecks_widgets import Screen
+from studio.shell import StudioWindow
+from studio.widgets import Button
+from tools.studio_screenshots_mydecks import seed_game
+
+
+@pytest.fixture
+def saved(
+    make_window: Callable, tmp_path: Path, qtbot: QtBot
+) -> Iterator[tuple[StudioWindow, MyDecksPage]]:
+    config = seed_game(tmp_path / "collections")
+    window = make_window()
+    window.ctx.set_installation(Installation.inspect(config.edopro_path))
+    window.nav["mydecks"].click()
+    page = window.current
+    qtbot.waitUntil(lambda: isinstance(page.view, Collection))
+    yield window, page
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+
+
+def control(screen: Screen, name: str) -> Button:
+    return next(b for b in screen.findChildren(Button) if b.text() == name)
+
+
+def open_row(view: Collection, title: str, qtbot: QtBot) -> None:
+    row = next(i for i, r in enumerate(view.model.rows) if r.deck.name == title)
+    index = view.model.index(row)
+    view.rows.scrollTo(index)
+    qtbot.mouseClick(
+        view.rows.viewport(), Qt.MouseButton.LeftButton, pos=view.rows.visualRect(index).center()
+    )
+
+
+def test_filter_sort_search_and_open_by_keyboard(saved: tuple, qtbot: QtBot) -> None:
+    win, p = saved
+    lib = p.view
+    assert lib.search.hasFocus()
+    lib.search.setText("Empty Jar")
+    assert len(lib.model.rows) == 5
+    lib.folder.setCurrentText("Tournament")
+    assert lib.empty.isVisible()
+    lib.folder.setCurrentIndex(0)
+    lib.search.clear()
+    lib.sort.setCurrentText("Last changed")
+    stamps = [r.deck.modified_ns for r in lib.model.rows]
+    assert stamps == sorted(stamps, reverse=True)
+    lib.mode.setCurrentIndex(1)
+    lib.search.setText("Pot of Greed")
+    assert all("Main" in r.counts for r in lib.model.rows)
+    lib.folder.setCurrentText("Goat")
+    row = next(r for r in lib.model.rows if r.deck.name == "Empty Jar - Athens")
+    assert row.counts == "1 Main   ·   0 Extra   ·   0 Side"
+    qtbot.keyClick(lib.search, Qt.Key.Key_Return)
+    qtbot.keyClick(lib.rows, Qt.Key.Key_Return)
+    assert p.view.contents.grid.isVisible()
+    qtbot.keyClick(win, Qt.Key.Key_Escape)
+    assert p.view is lib and lib.search.text() == "Pot of Greed"
+
+
+def test_deck_contents_clipboard_artwork_and_file_reveal(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win, p = saved
+    open_row(p.view, "Empty Jar - Athens", qtbot)
+    d = next(d for d in p.lib.decks if d.name == "Empty Jar - Athens")
+    view = p.view
+    view.contents.sections.button(2).click()
+    assert [t.title for t in view.contents.grid.tiles.items] == [
+        "1 × Buster Blader",
+        "1 × Jinzo",
+        "1 × Black Luster Soldier",
+    ]
+    control(view, "Copy code").click()
+    assert QApplication.clipboard().text() == encode_ydke(d.preview.sections)
+    revealed = []
+    monkeypatch.setattr("studio.pages.mydecks.reveal_file", revealed.append)
+    control(view, "Show file").click()
+    qtbot.waitUntil(lambda: revealed == [d.path])
+    running = [True, False]
+    monkeypatch.setattr(copies, "_game_running", lambda _: running.pop(0))
+    handoffs = []
+    monkeypatch.setattr(win.ctx, "sync_deck_files", lambda *args: handoffs.append(args) or True)
+    control(view, "Get HD artwork").click()
+    qtbot.waitUntil(lambda: p.retry.isVisible())
+    assert not handoffs
+    p.retry.click()
+    qtbot.waitUntil(lambda: handoffs == [(p.lib.game, (d.path,))])
+
+
+def test_every_deck_checked_and_findings_drill_down(saved: tuple, qtbot: QtBot) -> None:
+    win, p = saved
+    p.view.check.click()
+    check = p.view
+    qtbot.waitUntil(lambda: bool(check.verdicts))
+    assert check.results.isVisible()
+    assert check.results.count() == len(p.lib.decks)
+    assert {v.status for v in check.verdicts} == {"legal", "illegal", "could not verify"}
+    check.filter.setCurrentText("Legal")
+    for i, v in enumerate(check.verdicts):
+        assert check.results.item(i).isHidden() == (v.status != "legal")
+    check.filter.setCurrentIndex(0)
+    i = next(i for i, d in enumerate(p.lib.decks) if d.name == "Relinquished")
+    item = check.results.item(i)
+    check.results.setCurrentItem(item)
+    qtbot.keyClick(check.results, Qt.Key.Key_Return)
+    qtbot.waitUntil(
+        lambda: isinstance(p.view, FormatCheck) and p.view is not check and bool(p.view.verdicts)
+    )
+    assert p.view.summary.text().startswith("Could not verify")
+    assert "999" in p.view.details.toPlainText()
+    p.view.lists.setCurrentText("Traditional")
+    qtbot.waitUntil(lambda: bool(p.view.verdicts))
+    qtbot.keyClick(win, Qt.Key.Key_Escape)
+    assert p.view is check
+    check.lists.setCurrentText("Traditional")
+    qtbot.waitUntil(lambda: check.results.count() == len(p.lib.decks))
+    assert check.lists.currentText() == "Traditional"
+
+
+def test_compare_all_change_kinds_and_equal_decks(saved: tuple, qtbot: QtBot) -> None:
+    _, p = saved
+    p.view.compare.click()
+    comp = p.view
+    qtbot.waitUntil(lambda: bool(comp.hint.text()))
+    comp.before.setCurrentText("Goat/Empty Jar - Athens")
+    comp.after.setCurrentText("Goat/Empty Jar - Locals")
+    report = comp.report.toPlainText()
+    for line in (
+        "Magician of Faith · 1 moved from Main to Side",
+        "1 added to Main",
+        "1 removed from Extra",
+        "Main changed from 3 to 2",
+    ):
+        assert line in report
+    comp.after.setCurrentIndex(comp.before.currentIndex())
+    assert "two different decks" in comp.report.toPlainText()
+
+
+def test_import_busy_retry_no_clobber_and_undo(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win, p = saved
+    lib = p.lib
+    original = lib.game / "deck/Spellcasters.ydk"
+    data = original.read_bytes()
+    p.view.import_btn.click()
+    review = p.view
+    review.code.setText("broken")
+    review.preview_btn.click()
+    assert not review.save_btn.isEnabled() and "could not be read" in review.message.text()
+    code = encode_ydke(Sections((1001, 1002), (), (1000,)))
+    review.code.setText(code)
+    review.preview_btn.click()
+    assert len(review.contents.grid.tiles.items) == 2
+    review.code.setText(code + "!")
+    assert not review.save_btn.isEnabled() and review.contents is None
+    review.code.setText(code)
+    review.preview_btn.click()
+    review.name.setText("Spellcasters")
+    gate = threading.Event()
+
+    def held(_: Path) -> bool:
+        assert threading.current_thread() is not threading.main_thread()
+        gate.wait(5)
+        return True
+
+    monkeypatch.setattr(copies, "_game_running", held)
+    review.save_btn.click()
+    try:
+        assert win.ctx.busy and not win.change.isEnabled()
+        assert not win.navigate("cards") and not p.request_close() and p.escape()
+        assert "Stay on this page" in p.message.text()
+    finally:
+        gate.set()
+    qtbot.waitUntil(lambda: p.retry.isVisible())
+    assert "Close this copy" in p.message.text()
+    assert not (original.parent / "Spellcasters (2).ydk").exists()
+    monkeypatch.setattr(copies, "_game_running", lambda _: False)
+    p.retry.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+    new = original.with_name("Spellcasters (2).ydk")
+    assert new in p.receipts and new.is_file() and original.read_bytes() == data
+    monkeypatch.setattr(win.ctx, "confirm", lambda *_: False)
+    control(p.view, "Remove saved copy").click()
+    assert new.is_file()
+    monkeypatch.setattr(win.ctx, "confirm", lambda *_: True)
+    control(p.view, "Remove saved copy").click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection) and not p.receipts)
+    assert not new.exists() and original.read_bytes() == data
+
+
+def test_repair_preview_original_and_edited_copy_preserved(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win, p = saved
+    original = p.lib.game / "deck/Archive/Relinquished.ydk"
+    data = original.read_bytes()
+    open_row(p.view, "Relinquished", qtbot)
+    control(p.view, "Repair a copy").click()
+    assert "Morphing Jar" in p.view.message.text()
+    monkeypatch.setattr(copies, "_game_running", lambda _: False)
+    p.view.save_btn.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+    new = next(iter(p.receipts))
+    assert new.name == "Relinquished repaired.ydk" and original.read_bytes() == data
+    assert "999" not in new.read_text()
+    new.write_text("#main\n1001\n")
+    monkeypatch.setattr(win.ctx, "confirm", lambda *_: True)
+    control(p.view, "Remove saved copy").click()
+    qtbot.waitUntil(lambda: p.retry.isVisible())
+    assert "edits have been kept" in p.message.text() and new.read_text() == "#main\n1001\n"
+
+
+def test_unreadable_and_no_verified_replacement(saved: tuple, qtbot: QtBot) -> None:
+    _, p = saved
+    open_row(p.view, "Damaged copy", qtbot)
+    assert not any(b.text() == "Copy code" for b in p.view.findChildren(Button))
+    control(p.view, "Check format").click()
+    qtbot.waitUntil(lambda: bool(p.view.verdicts))
+    assert p.view.verdicts[0].status == "could not verify"
+    p.escape()
+    p.escape()
+    (p.lib.game / "mappings.json").write_text('{"mappings":[]}')
+    p.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+    open_row(p.view, "Relinquished", qtbot)
+    control(p.view, "Repair a copy").click()
+    assert not p.view.save_btn.isEnabled() and "No verified" in p.view.message.text()
+
+
+def test_no_selection_not_ready_scan_error_and_empty(
+    saved: tuple, qtbot: QtBot, tmp_path: Path
+) -> None:
+    win, p = saved
+    win.ctx.set_installation(Installation())
+    assert p.view.initial.text() == "Choose folder"
+    win.ctx.set_installation(Installation(str(tmp_path / "unavailable"), True))
+    qtbot.waitUntil(lambda: p.view.initial is not None and p.view.initial.text() == "Retry")
+    game = tmp_path / "fresh"
+    game.mkdir()
+    win.ctx.set_installation(Installation(str(game)))
+    assert p.view.initial.text() == "Check again"
+    (game / "cards.cdb").touch()
+    p.view.initial.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+    assert p.view.empty.isVisible() and p.view.import_btn.isEnabled()
+
+
+def test_old_scan_ignored_after_installation_change(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win, p = saved
+    gate = threading.Event()
+    old = p.lib
+
+    def scan(_: DeckIndexer) -> Library:
+        gate.wait(5)
+        return old
+
+    monkeypatch.setattr(DeckIndexer, "scan", scan)
+    p.view.refresh.click()
+    win.ctx.set_installation(Installation())
+    gate.set()
+    qtbot.waitUntil(lambda: not win.ctx.tasks.jobs)
+    assert p.lib is None and p.view.initial.text() == "Choose folder"
+
+
+def test_no_lists_and_long_filename_at_minimum_size(saved: tuple, qtbot: QtBot) -> None:
+    win, p = saved
+    (p.lib.game / "lflist.conf").unlink()
+    old = p.lib.game / "deck/Spellcasters.ydk"
+    name = "Spellcasters with a very long name " * 4 + "one"
+    old.rename(old.with_name(name + ".ydk"))
+    p.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+    win.resize(960, 600)
+    open_row(p.view, name, qtbot)
+    assert p.view.width() <= p.scroll.viewport().width()
+    control(p.view, "Check format").click()
+    assert "No forbidden lists installed" in p.view.summary.text()
+
+
+def test_section_counts_for_card_in_multiple_folders_and_sections(saved: tuple) -> None:
+    _, p = saved
+    rows = library_rows(p.lib, "magician of faith", True, Path("Goat"), 0)
+    locals_deck = next(r for r in rows if r.deck.name == "Empty Jar - Locals")
+    assert locals_deck.counts == "1 Main   ·   0 Extra   ·   1 Side"
+    assert all(r.folder == "Goat" for r in rows)
+    assert change_lines(locals_deck.deck.preview, locals_deck.deck.preview, ()) == []
+
+
+def test_hundreds_of_decks_sort_filter_and_open_last(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, p = saved
+    lib = p.lib
+    base = next(d for d in lib.decks if d.name == "Empty Jar - Athens")
+    decks = tuple(
+        replace(base, path=base.path.with_name(f"Version {i:03}.ydk")) for i in range(700)
+    )
+    many = Library(lib.game, decks, lib.catalog, lib.banlists, ())
+    monkeypatch.setattr(DeckIndexer, "scan", lambda _: many)
+    p.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+    view = p.view
+    assert view.model.rowCount() == 700
+    view.mode.setCurrentIndex(1)
+    view.search.setText("Pot of Greed")
+    assert view.model.rowCount() == 700
+    open_row(view, "Version 699", qtbot)
+    assert control(p.view, "Copy code").isEnabled()
+
+
+def test_failed_save_does_not_publish_stale_preview(
+    saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, p = saved
+    p.view.import_btn.click()
+    review = p.view
+    review.code.setText(encode_ydke(Sections((1000,), (), ())))
+    review.preview_btn.click()
+    monkeypatch.setattr(copies, "_game_running", lambda _: True)
+    review.save_btn.click()
+    qtbot.waitUntil(lambda: p.retry.isVisible())
+    review.code.setText("a different sharing code")
+    assert not p.retry.isVisible() and not review.save_btn.isEnabled()
+    assert not (p.lib.game / "deck/Imported deck.ydk").exists()
+
+
+def test_selected_deck_reaches_real_artwork_handoff(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    synced = []
+
+    async def offline(cfg: Config) -> None:
+        synced.extend(cfg.deck_paths)
+
+    window = make_window(offline)
+    window.nav["mydecks"].click()
+    page = window.current
+    qtbot.waitUntil(lambda: isinstance(page.view, Collection))
+    deck = page.lib.decks[0]
+    open_row(page.view, deck.name, qtbot)
+    monkeypatch.setattr(copies, "_game_running", lambda _: False)
+    control(page.view, "Get HD artwork").click()
+    cards = window.pages["cards"]
+    qtbot.waitUntil(lambda: cards.state == "results")
+    assert window.current is cards and synced == [str(deck.path)]

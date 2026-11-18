@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
 
@@ -191,17 +192,22 @@ def parse_size(raw: str) -> tuple[int, int]:
     return w, h
 
 
+PAGE_RENDERERS = {"mydecks": "tools.studio_screenshots_mydecks"}
+
+
 def main_cli() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--page", choices=PAGE_RENDERERS, help="Render a page-specific gallery")
     parser.add_argument("--size", type=parse_size, action="append", help="WxH, repeatable")
     args = parser.parse_args()
     app = QApplication.instance() or QApplication(["EDOPro Studio"])
     app.setQuitOnLastWindowClosed(False)
+    renderer = import_module(PAGE_RENDERERS[args.page]).render if args.page else render
     for width, height in args.size or [(1280, 800), (1600, 1000)]:
         name = f"{width}x{height}"
         with tempfile.TemporaryDirectory(prefix=".studio-preview-", dir=ROOT) as temporary:
-            files = render(args.out / name, (width, height), Path(temporary))
+            files = renderer(args.out / name, (width, height), Path(temporary))
         print(f"Rendered {len(files)} views at {name} in {files[0].parent}")
 
 
