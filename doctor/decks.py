@@ -176,6 +176,14 @@ def _conflicts(
     return results
 
 
+def missing_windbot_files(root: Path) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name in ("WindBot.exe", "ExecutorBase.dll")
+        if not (root / "WindBot" / name).is_file()
+    )
+
+
 def scan_windbot(
     root: Path,
     cards: dict[int, Card],
@@ -184,7 +192,8 @@ def scan_windbot(
     findings: list[Finding],
 ) -> None:
     folder = root / "WindBot"
-    if not (folder / "WindBot.exe").is_file():
+    missing = missing_windbot_files(root)
+    if "WindBot.exe" in missing:
         findings.append(finding("windbot.missing", path=folder))
         return
     paths = files_in(root, folder / "Decks", ".ydk")
@@ -208,7 +217,7 @@ def scan_windbot(
         catalogue_entries=len(entries),
         matched_entries=len(expected) - len(unmatched),
     )
-    complete = bool(paths and entries and (folder / "ExecutorBase.dll").is_file())
+    complete = bool(paths and entries and not missing)
     findings.append(finding("windbot.available" if complete else "windbot.incomplete", **details))
     if unmatched:
         findings.append(finding("windbot.unmatched", affected=len(unmatched), entries=unmatched))

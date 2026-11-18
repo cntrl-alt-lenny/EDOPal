@@ -37,6 +37,7 @@ def test_sidebar_navigation_and_keyboard(
         "music",
         "decks",
         "mydecks",
+        "practice",
         "replays",
         "backup",
         "health",
