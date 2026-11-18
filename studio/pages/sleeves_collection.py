@@ -99,13 +99,13 @@ def filtered(
         entry = item.entry
         if (source == "Ready-made" and entry) or (source == "Saved sleeves" and not entry):
             continue
-        if source == "Favourites" and not (entry and entry.favourite):
+        if source == "Favorites" and not (entry and entry.favourite):
             continue
         if source == "Recently used" and not (entry and entry.last_used):
             continue
         if (source == "Pack sleeve" or source in SOURCES.values()) and item.detail != source:
             continue
-        if colour != "All colours" and (item.family or measured.get(item.key)) != colour:
+        if colour != "All colors" and (item.family or measured.get(item.key)) != colour:
             continue
         fields = [item.name, item.detail, item.palette, item.family]
         if entry:

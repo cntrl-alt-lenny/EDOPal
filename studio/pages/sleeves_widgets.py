@@ -151,7 +151,7 @@ class SlotBanner(ArchiveArt):
         intro.addWidget(label("APPEARANCE", "goldKicker"))
         self.title = label("Card sleeves", "display")
         intro.addWidget(self.title)
-        intro.addWidget(label("Choose a slot to fill.", "body"))
+        intro.addWidget(label("Choose a sleeve for yourself or your opponent.", "body", True))
         intro.addStretch()
         row.addLayout(intro, 3)
         self.slots = {}
@@ -170,7 +170,6 @@ class Preview(QWidget):
         self.caption = "Sleeve preview"
         self.draggable = False
         self.last: QPointF | None = None
-        self.card = QRectF()
         self.setAccessibleName(self.caption)
         self.setMinimumSize(t.TILE_H, t.TILE_H)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -186,6 +185,18 @@ class Preview(QWidget):
         self.setAccessibleDescription(
             "Drag or use the arrow keys to move the crop." if enabled else ""
         )
+
+    def card_rect(self) -> QRectF:
+        if self.image.isNull():
+            return QRectF()
+        inset = t.LG + 1
+        available = QRectF(self.rect()).adjusted(inset, inset, -inset, -inset)
+        size = self.image.size().scaled(
+            available.size().toSize(), Qt.AspectRatioMode.KeepAspectRatio
+        )
+        card = QRectF(QPointF(), size)
+        card.moveCenter(available.center())
+        return card
 
     def paintEvent(self, event: QPaintEvent) -> None:
         with QPainter(self) as p:
@@ -222,17 +233,12 @@ class Preview(QWidget):
                     self.caption,
                 )
                 return
-            size = self.image.size().scaled(
-                available.size().toSize(), Qt.AspectRatioMode.KeepAspectRatio
-            )
-            self.card = QRectF(QPointF(), size)
-            self.card.moveCenter(available.center())
-            p.drawImage(self.card, self.image)
+            p.drawImage(self.card_rect(), self.image)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if (
             self.draggable
-            and self.card.contains(event.position())
+            and self.card_rect().contains(event.position())
             and event.button() == Qt.MouseButton.LeftButton
         ):
             self.last = event.position()
@@ -240,14 +246,17 @@ class Preview(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self.last is not None and self.draggable:
-            delta = event.position() - self.last
-            self.last = event.position()
-            self.moved.emit(
-                delta.x() / max(1, self.card.width()), delta.y() / max(1, self.card.height())
-            )
+        self.drag_to(event.position())
+
+    def drag_to(self, position: QPointF) -> None:
+        if self.last is not None and self.draggable and position != self.last:
+            delta = position - self.last
+            self.last = position
+            card = self.card_rect()
+            self.moved.emit(delta.x() / max(1, card.width()), delta.y() / max(1, card.height()))
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self.drag_to(event.position())
         self.last = None
         super().mouseReleaseEvent(event)
 

@@ -119,3 +119,99 @@ class AppearanceTests(unittest.TestCase):
                 self.apply(skin="Moon")
         self.assertEqual(self.conf.read_text(), "skin = Custom\n")
         self.assertFalse(extras.can_restore(str(self.root), self.config))
+
+    def test_restore_keeps_later_settings_and_recovers_individual_assets(self) -> None:
+        self.conf.write_text("skin = Indigo\ntextfont = Original\n")
+        folder = self.root / "skin/Monokai Moon"
+        folder.mkdir(parents=True)
+        xml = folder / "skin.xml"
+        xml.write_bytes(b"original xml")
+        self.apply(skin="Moon")
+        background = folder / "textures/bg.png"
+        background.write_bytes(b"player artwork")
+        self.conf.write_text("skin = Later\ntextfont = Player\nnumfont = fonts/Inter-Medium.ttf\n")
+        self.apply(restore=True)
+        self.assertEqual(self.conf.read_text(), "skin = Later\ntextfont = Player\n")
+        self.assertEqual(xml.read_bytes(), b"original xml")
+        self.assertEqual(background.read_bytes(), b"player artwork")
+        self.assertFalse((self.root / "fonts/Inter-Medium.ttf").exists())
+
+    def test_first_failed_pack_publication_has_recoverable_originals(self) -> None:
+        original = extras._atomic_write
+        writes = []
+
+        def interrupt(path: Path, data: bytes) -> None:
+            if path.is_relative_to(self.root):
+                if writes:
+                    raise PermissionError("simulated interruption")
+                writes.append(path)
+            original(path, data)
+
+        with patch.object(extras, "_atomic_write", interrupt), self.assertRaises(PermissionError):
+            self.apply(skin="Moon")
+        self.assertTrue(extras.can_restore(str(self.root), self.config))
+        self.apply(restore=True)
+        self.assertFalse(writes[0].exists())
+
+    def test_zip_directory_checked_before_open(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, patch.object(extras, "PACKS", Path(folder)):
+            (Path(folder) / "moon.zip").write_bytes(b"not a zip")
+            with (
+                patch.object(extras, "ZipFile", side_effect=AssertionError("directory allocated")),
+                self.assertRaises(ValueError),
+            ):
+                self.apply(skin="Moon")
+
+    def test_legacy_receipt_restores_only_recognizable_pack_settings(self) -> None:
+        backup = extras._backup_dir(self.root, self.config)
+        backup.mkdir(parents=True)
+        (backup / "prior-skin.json").write_text(
+            json.dumps({"skin": "Old", "textfont": "Original", "numfont": None})
+        )
+        self.conf.write_text(
+            "skin = Newer personal skin\ntextfont = Other\nnumfont = fonts/Inter-Medium.ttf\nvolume = 10\n"
+        )
+        self.apply(restore=True)
+        self.assertEqual(
+            self.conf.read_text(), "skin = Newer personal skin\ntextfont = Other\nvolume = 10\n"
+        )
+
+    def test_restore_leaves_earlier_pack_selected_by_player(self) -> None:
+        self.conf.write_text("skin = Personal\n")
+        self.apply(skin="Moon")
+        self.apply(skin="Abyss")
+        self.conf.write_bytes(self.conf.read_bytes().replace(b"Monokai Abyss", b"Monokai Moon"))
+        self.apply(restore=True)
+        self.assertEqual(extras.current_skin(str(self.root)), "Monokai Moon")
+        self.assertTrue((self.root / "skin/Monokai Moon/skin.xml").is_file())
+
+    def test_restore_keeps_font_used_by_later_font_size_choice(self) -> None:
+        self.apply(skin="Moon")
+        self.conf.write_bytes(self.conf.read_bytes().replace(b"Regular.ttf 12", b"Regular.ttf 19"))
+        self.apply(restore=True)
+        self.assertIn(b"Regular.ttf 19", self.conf.read_bytes())
+        self.assertTrue((self.root / "fonts/InterEDO-Regular.ttf").is_file())
+
+    def test_oversized_skin_definition_rejected_before_member_read(self) -> None:
+        archive_path = self.root / "oversized.zip"
+        name = "skin/Monokai Moon/skin.xml"
+        with ZipFile(archive_path, "w") as archive:
+            archive.writestr(name, b"x" * (1024**2 + 1))
+        with (
+            patch.object(ZipFile, "read", side_effect=AssertionError("oversized member read")),
+            self.assertRaisesRegex(ValueError, "too large"),
+        ):
+            extras._install_pack(
+                self.root,
+                self.root / "backup",
+                "Moon",
+                "skin/Monokai Moon/",
+                archive_path=archive_path,
+            )
+
+    def test_oversized_active_definition_is_not_read_to_detect_highlight(self) -> None:
+        xml = self.root / "skin/Monokai Moon/skin.xml"
+        xml.parent.mkdir(parents=True)
+        xml.write_bytes(b"x" * (1024**2 + 1))
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("oversized XML read")):
+            self.assertFalse(extras.turn_highlight_enabled(self.root, "Moon"))

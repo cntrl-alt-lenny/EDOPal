@@ -15,14 +15,15 @@ from PySide6.QtWidgets import (
 from studio import theme as t
 from studio.context import AppContext
 from studio.icons import icon
-from studio.widgets import Button, ImageTileGrid, SearchField, Tile, glyph, label, margins
+from studio.widgets import Button, SearchField, Tile, glyph, label, margins
 
+from .skins_grid import AppearanceGrid
 from .sleeves_collection import FAMILIES, SOURCES, Choice, filtered
 from .sleeves_widgets import Menu
-from .sleeves_work import PRINTS, Thumbnails
+from .sleeves_work import Thumbnails, prints
 
 
-class PrintGrid(ImageTileGrid):
+class PrintGrid(AppearanceGrid):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         available = max(1, self.viewport().width() - 1)
@@ -82,7 +83,8 @@ class Gallery(QWidget):
     def __init__(self, ctx: AppContext, thumbs: Thumbnails) -> None:
         super().__init__()
         self.ctx, self.thumbs = ctx, thumbs
-        self.measuring = False
+        self.measuring = None
+        self.measure_generation = 0
         self.items: list[Choice] = []
         self.visible: list[Choice] = []
         self.measured: dict[Path, str] = {}
@@ -115,7 +117,7 @@ class Gallery(QWidget):
             "Filter by source",
             (
                 "All sleeves",
-                "Favourites",
+                "Favorites",
                 "Recently used",
                 "Ready-made",
                 "Saved sleeves",
@@ -123,7 +125,7 @@ class Gallery(QWidget):
                 *SOURCES.values(),
             ),
         )
-        self.colour = Menu("Filter by colour", ("All colours", *FAMILIES))
+        self.colour = Menu("Filter by color", ("All colors", *FAMILIES))
         self.surprise = Button("Surprise me", "secondary", "spark")
         filters.addWidget(self.search, 4)
         filters.addWidget(self.source, 2)
@@ -180,13 +182,14 @@ class Gallery(QWidget):
             self.choose(idx)
 
     def set_items(self, items: list[Choice]) -> None:
+        self.grid.invalidate()
         previous = {item.key: item.entry.image for item in self.items if item.entry}
         self.measured = {
             item.key: self.measured[item.key]
             for item in items
             if item.key in self.measured and previous.get(item.key) == item.entry.image
         }
-        self.items = [*items, *PRINTS.values()]
+        self.items = [*items, *prints().values()]
         self.filter()
 
     def filter(self) -> None:
@@ -205,17 +208,27 @@ class Gallery(QWidget):
         if self.colour.currentIndex() > 0:
             self.measure()
 
+    def stop_measurement(self) -> None:
+        if self.measuring:
+            self.measuring.cancel()
+            self.measuring = None
+
     def measure(self) -> None:
         if self.measuring:
             return
         missing = [item for item in self.items if not item.family and item.key not in self.measured]
         if not missing:
             return
-        self.measuring = True
-        job = self.ctx.tasks.start(lambda worker: self.thumbs.colours(missing, worker))
+        self.measure_generation += 1
+        generation = self.measure_generation
+        job = self.measuring = self.ctx.tasks.start(
+            lambda worker: self.thumbs.colours(missing, worker)
+        )
 
         def ready(colours: dict[Path, str]) -> None:
-            self.measuring = False
+            if not self.measuring or generation != self.measure_generation:
+                return
+            self.measuring = None
             current = {item.key: item for item in self.items if item.entry}
             self.measured.update(
                 {
@@ -227,8 +240,10 @@ class Gallery(QWidget):
             self.filter()
 
         def failed(_: Exception) -> None:
-            self.measuring = False
-            self.ctx.notify("Could not read a saved sleeve’s colours.")
+            if not self.measuring or generation != self.measure_generation:
+                return
+            self.measuring = None
+            self.ctx.notify("Could not read a saved sleeve’s colors.")
 
         job.result.connect(ready)
         job.error.connect(failed)

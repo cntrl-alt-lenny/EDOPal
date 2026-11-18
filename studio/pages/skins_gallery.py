@@ -20,7 +20,6 @@ from studio.context import AppContext
 from studio.widgets import (
     Button,
     Hero,
-    ImageTileGrid,
     Panel,
     SearchField,
     Tile,
@@ -29,6 +28,7 @@ from studio.widgets import (
     margins,
 )
 
+from .skins_grid import AppearanceGrid
 from .skins_model import FILTERS, Look, filter_looks
 from .skins_service import Collection, SkinStore
 
@@ -61,7 +61,7 @@ class Choices(QWidget):
         return self.group.checkedButton().text()
 
 
-class LookGrid(ImageTileGrid):
+class LookGrid(AppearanceGrid):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         # Reserve room for the scrollbar when a new layout makes it appear.
@@ -149,17 +149,17 @@ class Gallery(QWidget):
         layout.setSpacing(t.MD)
         self.hero = Hero(
             "Appearance",
-            "Skin gallery",
-            "Pick a look for your next duel, or mix your own colours.",
+            "Skins and themes",
+            "Preview a skin or create a theme for your next duel.",
             "skins",
         )
         layout.addWidget(self.hero)
         heading = QHBoxLayout()
-        self.count = label("Looks", "heading")
+        self.count = label("Skins and themes", "heading")
         heading.addWidget(self.count)
         heading.addStretch()
-        self.import_file = Button("Import", "quiet", "download")
-        self.create = Button("Create your own", "primary", "spark")
+        self.import_file = Button("Import theme", "quiet", "download")
+        self.create = Button("Create theme", "primary", "spark")
         self.more = Button("Get more wallpapers", "quiet", "download")
         heading.addWidget(self.more)
         heading.addWidget(self.import_file)
@@ -167,7 +167,7 @@ class Gallery(QWidget):
         layout.addLayout(heading)
         tools = QHBoxLayout()
         self.filters = Choices(FILTERS)
-        self.search = SearchField("Search looks")
+        self.search = SearchField("Search skins and themes")
         self.search.setMinimumWidth(t.TILE_SIZE[0] - t.XXL)
         tools.addWidget(self.filters)
         tools.addWidget(self.search, 1)
@@ -175,7 +175,7 @@ class Gallery(QWidget):
         self.filters.changed.connect(self.filter)
         self.search.textChanged.connect(self.filter)
         self.grid = LookGrid(ctx.tasks)
-        self.grid.setAccessibleName("Looks")
+        self.grid.setAccessibleName("Skins and themes")
         self.grid.setStyleSheet(f"QListView {{background:{t.CANVAS}; border:none; padding:0;}}")
         self.delegate = LookDelegate(self.grid)
         self.grid.setItemDelegate(self.delegate)
@@ -192,7 +192,7 @@ class Gallery(QWidget):
         self.empty = label("", "body", True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_panel.body.addWidget(self.empty)
-        browse = Button("Browse all looks", "secondary", "library")
+        browse = Button("Clear filters", "secondary", "library")
         browse.clicked.connect(self._browse)
         self.empty_panel.body.addWidget(browse, 0, Qt.AlignmentFlag.AlignCenter)
         self.empty_panel.body.addStretch()
@@ -200,7 +200,7 @@ class Gallery(QWidget):
         footer = QHBoxLayout()
         self.info = label("", "muted", True)
         footer.addWidget(self.info, 1)
-        self.restore = Button("Restore previous pack settings", "quiet")
+        self.restore = Button("Restore appearance from before skin packs", "quiet")
         self.restore.hide()
         self.refresh = Button("Refresh packs", "quiet")
         footer.addWidget(self.restore)
@@ -209,6 +209,7 @@ class Gallery(QWidget):
         self.filter()
 
     def set_collection(self, data: Collection, game: Path | None) -> None:
+        self.grid.invalidate()
         self.data = data
         self.looks, self.game, self.scale = data.looks, game, data.scale
         self.restore.setVisible(data.restore_pack)
@@ -216,23 +217,28 @@ class Gallery(QWidget):
 
     def _browse(self) -> None:
         self.search.clear()
-        self.filters.buttons["All looks"].click()
+        self.filters.buttons["All"].click()
 
     def filter(self) -> None:
         group = self.filters.value
         if self.data:
-            parts = [f"Current look · {self.data.active_name}"] if self.game else []
+            parts = [f"Current skin · {self.data.active_name}"] if self.game else []
             if self.data.sleeve_summary:
                 parts.append(self.data.sleeve_summary)
+            self.info.setToolTip(
+                f"Technical details\n{self.data.catalogue.detail}"
+                if self.data.catalogue.detail
+                else ""
+            )
             if self.data.catalogue.detail:
-                parts.append("Showing the offline catalogue. " + self.data.catalogue.detail)
+                parts.append("Offline catalog. Refresh packs to check for downloads.")
             elif group == "Downloadable":
                 count = sum(bool(look.pack) for look in self.looks)
                 parts.append(f"{count} downloadable skin{'s' if count != 1 else ''}")
             self.info.setText("    ·    ".join(parts))
         visible = filter_looks(self.looks, group, self.search.text())
         self.delegate.looks = visible
-        self.count.setText(f"{len(visible)} look" + ("" if len(visible) == 1 else "s"))
+        self.count.setText(f"{len(visible)} " + ("item" if len(visible) == 1 else "items"))
         self.grid.set_tiles(
             [
                 Tile(
@@ -246,18 +252,18 @@ class Gallery(QWidget):
         )
         self.grid.setVisible(bool(visible))
         message = {
-            "Mine": "Your saved themes appear here. Choose Create your own to start.",
-            "Downloadable": "No skin packs are available here yet. The built-in looks are ready to use.",
-        }.get(group, "No looks match your search.")
+            "My themes": "Your saved themes appear here. Choose Create theme to start.",
+            "Downloadable": "No skin packs are available here yet. The built-in themes are ready to use.",
+        }.get(group, "No skins or themes match your search.")
         self.empty_title.setText(
-            "No matching looks"
+            "No matching skins or themes"
             if self.search.text()
             else "Your theme library"
-            if group == "Mine"
+            if group == "My themes"
             else "Downloadable skins"
         )
         self.empty.setText(
-            "Try another name or browse all looks." if self.search.text() else message
+            "Try another name or clear the filters." if self.search.text() else message
         )
         self.empty_panel.setVisible(not visible)
 

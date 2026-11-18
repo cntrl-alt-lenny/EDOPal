@@ -16,6 +16,7 @@ from zipfile import ZipFile
 
 from PySide6.QtWidgets import QApplication, QFileDialog
 
+import config
 import extras
 import sleeves
 import themes
@@ -82,9 +83,9 @@ def library_archive(kind: str) -> tuple[Pack, bytes]:
         kind=kind,
         title="Lakeside",
         description="A mountain lake at sunset.",
-        author="Studio demo",
+        author=f"{config.APP_NAME} demo",
         license="Demo artwork",
-        attribution="Evening lake, from the Studio illustration collection.",
+        attribution=f"Evening lake, from the {config.APP_NAME} illustration collection.",
         source_url="https://example.invalid/lakeside",
         sha256=hashlib.sha256(raw).hexdigest(),
         size_bytes=len(raw),
@@ -107,7 +108,7 @@ def capture_library(
     offline = catalogue.Catalogue(
         empty.manifest,
         catalogue.CatalogueSource.BUNDLED,
-        "Could not reach the catalogue. You can still use your local collection.",
+        "Could not reach the catalog. You can still use your local collection.",
     )
     with patch("content.catalogue.fetch_catalogue", return_value=offline):
         browser.refresh.click()
@@ -210,7 +211,7 @@ def capture_library(
             return remove(cache, pack_id)
 
         with (
-            patch.object(page.ctx, "confirm", return_value=True),
+            patch.object(page, "confirm", return_value=True),
             patch("content.libraries.remove_pack", paused_remove),
         ):
             browser.remove.click()
@@ -270,6 +271,15 @@ def render_skins(
 
     gallery_ready()
     shot("skins-gallery")
+    folder = page.store.library.directory
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / ("a" * 32 + " (incoming).json")).write_bytes(b"incomplete")
+    page.reload()
+    settle(lambda: page.retry_button.text() == "Set aside file")
+    gallery_ready()
+    shot("skins-library-issue")
+    page.retry_button.click()
+    settle(lambda: loaded() and not page.data.issues)
     capture_library(page, shot, settle)
     gallery_ready()
     gallery.create.click()
@@ -279,15 +289,15 @@ def render_skins(
     QApplication.processEvents()
     view.scroll.ensureWidgetVisible(page.maker.credit)
     frame("downloaded-wallpaper")
-    with patch.object(ctx, "confirm", return_value=True):
+    with patch("studio.pages.skins_feedback.AppearancePage.confirm", return_value=True):
         page.escape()
     gallery.filters.buttons["Light"].click()
     gallery_ready()
     shot("skins-light")
-    gallery.search.setText("Missing look")
+    gallery.search.setText("Missing theme")
     shot("skins-no-results")
     gallery.search.clear()
-    gallery.filters.buttons["Mine"].click()
+    gallery.filters.buttons["My themes"].click()
     shot("skins-empty-library")
     gallery.create.click()
     frame("maker-quick")
@@ -322,7 +332,7 @@ def render_skins(
     page.escape()
     gallery_ready()
     shot("skins-my-library")
-    gallery.filters.buttons["All looks"].click()
+    gallery.filters.buttons["All"].click()
     choose("Deep Current")
     frame("preview-menu")
     view.preview.scenes.buttons["Deck editor"].click()
@@ -398,7 +408,7 @@ def render_skins(
     ctx.set_installation(installation)
     gallery_ready()
     empty = catalogue.Catalogue(
-        Manifest(1, ()), catalogue.CatalogueSource.BUNDLED, "Could not reach the pack catalogue."
+        Manifest(1, ()), catalogue.CatalogueSource.BUNDLED, "Could not reach the pack catalog."
     )
     with patch("content.catalogue.fetch_catalogue", return_value=empty):
         gallery.filters.buttons["Downloadable"].click()
@@ -430,7 +440,7 @@ def render_skins(
         async def simulate(skin: Pack, shared: Pack, worker: WorkerContext) -> None:
             worker.progress((skin.title, Progress(4200000, 10000000, 512000)))
             worker.cancel.wait(6)
-            raise DownloadError(DownloadFailure.CANCELLED, "Download cancelled.")
+            raise DownloadError(DownloadFailure.CANCELLED, "Download canceled.")
 
         with patch.object(page.store, "download", simulate):
             view.inspector.apply.click()
@@ -458,7 +468,7 @@ def render_skins(
             settle(lambda: loaded() and not page.data.restore_pack)
             frame("pack-restored")
         page.escape()
-    gallery.filters.buttons["All looks"].click()
+    gallery.filters.buttons["All"].click()
     gallery_ready()
 
 

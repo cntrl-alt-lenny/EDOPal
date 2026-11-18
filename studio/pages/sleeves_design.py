@@ -39,8 +39,10 @@ class Designer(Editor):
         for key, spec in PATTERNS.items():
             self.pattern.addItem(spec.name, key)
         self.palette = palette_menu("Palette")
-        self.palette.setPlaceholderText("Custom colours")
-        self.frame = Menu("Frame", (s.title() for s in FRAMES))
+        self.palette.setPlaceholderText("Custom colors")
+        self.frame = Menu("Frame")
+        for frame in FRAMES:
+            self.frame.addItem("Thin border" if frame == "keyline" else frame.title(), frame)
         self.emblem = Menu("Emblem", ("None", *(s.title() for s in EMBLEMS)))
         self.controls = QGridLayout()
         self.controls.setHorizontalSpacing(t.MD)
@@ -56,14 +58,14 @@ class Designer(Editor):
             self.controls.addWidget(widget, i // 2 * 2 + 1, i % 2)
         self.form.addLayout(self.controls)
         self.inks = Inks()
-        self.field("Print colours", self.inks)
+        self.field("Sleeve colors", self.inks)
         self.inks.set_colours(PALETTES[self.palette.currentText()])
         self.inks.changed.connect(self.custom_colours)
         self.inks.editing.connect(self.show_ink_control)
         self.parameters = QWidget()
         self.form.addWidget(self.parameters)
         self.sliders: dict[str, tuple[QSlider, int]] = {}
-        self.randomise = Button("Randomise", "secondary", "spark")
+        self.randomise = Button("Randomize", "secondary", "spark")
         self.tools.addWidget(self.randomise)
         self.randomise.clicked.connect(self.random)
         self.seed: int | None = None
@@ -71,7 +73,7 @@ class Designer(Editor):
         self.palette.currentTextChanged.connect(self.palette_changed)
         for menu in (self.frame, self.emblem):
             menu.currentTextChanged.connect(self.update_preview)
-        self.frame.setCurrentText("Keyline")
+        self.frame.setCurrentIndex(self.frame.findData("keyline"))
         self.pattern.setCurrentIndex(self.pattern.findData("sun"))
         if choice and choice.recipe:
             recipe = choice.recipe
@@ -82,7 +84,7 @@ class Designer(Editor):
 
                 self.inks.set_colours(tuple(c.name() for c in inks(recipe.palette)))
                 self.palette.setCurrentIndex(-1)
-            self.frame.setCurrentText(recipe.frame.title())
+            self.frame.setCurrentIndex(self.frame.findData(recipe.frame))
             self.emblem.setCurrentText(recipe.emblem.shape.title() if recipe.emblem else "None")
             for key, value in recipe.params.items():
                 slider, multiplier = self.sliders[key]
@@ -90,6 +92,11 @@ class Designer(Editor):
             self.seed = recipe.seed
         self.update_preview()
         self.save.clicked.connect(self.save_design)
+        self.initial = self.name.text(), self.recipe()
+
+    @property
+    def dirty(self) -> bool:
+        return self.initial != (self.name.text(), self.recipe())
 
     def show_ink_control(self, slider: QWidget) -> None:
         # Scroll after the newly expanded controls have received their final geometry.
@@ -137,7 +144,7 @@ class Designer(Editor):
             self.inks.values,
             {k: s.value() / mult for k, (s, mult) in self.sliders.items()},
             self.seed,
-            self.frame.currentText().lower(),
+            self.frame.currentData(),
             None if emblem == "none" else Emblem(emblem),
         )
 

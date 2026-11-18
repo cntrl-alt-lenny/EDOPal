@@ -39,6 +39,7 @@ class ImageEditor(Editor):
             else "Choose a picture to preview its sleeve"
         )
         self.original = b""
+        self.source_image = QImage()
         self.dimensions = (1, 1)
         self.centre = (0.5, 0.5)
         self.card: Card | None = None
@@ -47,7 +48,7 @@ class ImageEditor(Editor):
         self.retry_action: Callable[[], None] | None = None
         self.generation = 0
         if game:
-            self.search = SearchField("Search card names or passcodes")
+            self.search = SearchField("Search card names or numbers")
             self.form.addWidget(self.search)
             self.results = QListWidget()
             self.results.setAccessibleName("Choose a card to load its artwork")
@@ -68,8 +69,8 @@ class ImageEditor(Editor):
             "Image layout",
             ("Framed", "Fill sleeve") if game else ("Fill sleeve", "Fit whole image"),
         )
-        self.palette = palette_menu("Frame colours", from_art=True)
-        self.background = Menu("Background colour")
+        self.palette = palette_menu("Frame colors", from_art=True)
+        self.background = Menu("Background color")
         unused = self.background if game else self.palette
         unused.setParent(self)
         unused.hide()
@@ -87,7 +88,7 @@ class ImageEditor(Editor):
         row = QHBoxLayout()
         row.addWidget(self.mode, 1)
         row.addWidget(self.palette if game else self.background, 1)
-        self.form.addWidget(label("Layout and colours", "small"))
+        self.form.addWidget(label("Layout and colors", "small"))
         self.form.addLayout(row)
         self.zoom = Slider("Crop zoom")
         self.zoom.setRange(100, 300)
@@ -140,7 +141,9 @@ class ImageEditor(Editor):
             self.results.addItem(item)
         if not self.loading and not self.original and not self.retry.isVisible():
             self.hint.setText(
-                "" if self.results.count() else "No matching cards. Try another name or passcode."
+                ""
+                if self.results.count()
+                else "No matching cards. Try another name or card number."
             )
 
     def pick_card(self, item: QListWidgetItem) -> None:
@@ -171,6 +174,7 @@ class ImageEditor(Editor):
         generation = self.generation
         self.invalidate()
         self.original = b""
+        self.source_image = QImage()
         self.preview.set_image(QImage())
         self.loading = True
         self.retry.hide()
@@ -181,14 +185,15 @@ class ImageEditor(Editor):
         if self.game:
             self.results.setEnabled(False)
 
-        def work() -> tuple[bytes, tuple[int, int]]:
+        def work() -> tuple[bytes, QImage]:
             data = read_source(get_path())
             image = decode(data)
-            return data, (image.width(), image.height())
+            return data, image
 
-        def ready(result: tuple[bytes, tuple[int, int]]) -> None:
+        def ready(result: tuple[bytes, QImage]) -> None:
             if self.active and generation == self.generation:
-                self.original, self.dimensions = result
+                self.original, self.source_image = result
+                self.dimensions = self.source_image.size().toTuple()
                 self.centre = (0.5, 0.5)
                 self.zoom.setValue(100)
                 self.hint.setText("")
@@ -250,7 +255,7 @@ class ImageEditor(Editor):
         self.palette.setEnabled(not fill)
         self.zoom.setEnabled(bool(self.original))
         if self.original:
-            data, layout = self.original, self.layout_choice()
+            data, layout = self.source_image, self.layout_choice()
             self.schedule(lambda: compose(data, layout))
 
     def move_crop(self, dx: float, dy: float) -> None:
@@ -263,6 +268,15 @@ class ImageEditor(Editor):
             max(0, min(1, self.centre[1] - dy * ch / max(1, h - ch))),
         )
         self.update_preview()
+
+    @property
+    def dirty(self) -> bool:
+        return bool(self.original)
+
+    def leave(self) -> None:
+        super().leave()
+        self.original = b""
+        self.source_image = QImage()
 
     def save_image(self) -> None:
         library, name, data, layout = (

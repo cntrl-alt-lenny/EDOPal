@@ -73,6 +73,10 @@ class Editor(QWidget):
         self.name.textChanged.connect(self._can_save)
         self.name.returnPressed.connect(self.save.click)
 
+    @property
+    def dirty(self) -> bool:
+        return False
+
     def _can_save(self) -> None:
         self.save.setEnabled(self.valid and bool(self.name.text().strip()))
 

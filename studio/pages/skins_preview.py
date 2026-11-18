@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 import extras
 import themes
 from studio import theme as t
-from studio.tasks import TaskRunner, WorkerContext
+from studio.tasks import Job, TaskRunner, WorkerContext
 from studio.widgets import Button, Panel, label, margins
 
 from .skins_gallery import Choices
@@ -78,6 +78,7 @@ class Preview(QWidget):
         self.wanted: Frame | None = None
         self.completed: Frame | None = None
         self.running = False
+        self.job: Job | None = None
         # Accessed only by the one render worker, scoped to this page.
         self._asset: tuple | None = None
         self._image: QImage | None = None
@@ -125,6 +126,11 @@ class Preview(QWidget):
         self.refresh()
 
     def clear(self) -> None:
+        self.timer.stop()
+        if self.job:
+            self.job.cancel()
+        else:
+            self._image = self._asset = None
         self.wanted = self.completed = self.look = None
         self.canvas.pix = QPixmap()
         self.canvas.message = "Preparing preview…"
@@ -209,13 +215,16 @@ class Preview(QWidget):
         if self.running or frame is None or frame == self.completed:
             return
         self.running = True
-        job = self.tasks.start(lambda worker: self._render(frame, worker))
+        job = self.job = self.tasks.start(lambda worker: self._render(frame, worker))
         job.result.connect(lambda image: self._finish(frame, image, "Preview unavailable."))
         job.error.connect(lambda exc: self._finish(frame, QImage(), f"Preview unavailable. {exc}"))
 
     def _finish(self, frame: Frame, image: QImage, message: str) -> None:
         self.running = False
+        self.job = None
         current = self.wanted
+        if current is None:
+            self._image = self._asset = None
         if frame == current or (
             current
             and frame.maker

@@ -23,7 +23,7 @@ def test_pack_browser_install_use_and_remove(
     kind: str,
 ) -> None:
     window = make_window()
-    monkeypatch.setattr(window, "confirm", lambda *_: True)
+    monkeypatch.setattr(window.pages[section], "confirm", lambda *_: True)
     window.ctx.set_installation(Installation())
     window.navigate(section)
     page = window.current
@@ -95,7 +95,7 @@ def test_pack_browser_install_use_and_remove(
     # Cache eviction and a withdrawn catalogue entry must leave the installed edition manageable.
     browser.cache.remove_pack(pack.id)
     monkeypatch.setattr(
-        catalogue, "fetch_catalogue", AsyncMock(side_effect=ValueError("Invalid catalogue URL"))
+        catalogue, "fetch_catalogue", AsyncMock(side_effect=ValueError("Invalid catalog URL"))
     )
     page.gallery.more.click()
     qtbot.waitUntil(lambda: not browser.loading)

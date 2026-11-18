@@ -4,6 +4,7 @@ import colorsys
 import re
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -13,14 +14,17 @@ import extras
 import sleeves
 import themes
 from config import folder_has_card_databases
-from music import settings
 from sleeves import Library, SlotStatus
+from studio.context import AppContext
 from studio.tasks import WorkerContext
 
 from .skins_model import preset_id
 from .sleeves_collection import Choice, collection, saved
 
-PRINTS = {item.key: item for item in collection()}
+
+@cache
+def prints() -> dict[Path, Choice]:
+    return {item.key: item for item in collection()}
 
 
 def small(image: QImage) -> QImage:
@@ -36,8 +40,7 @@ class Thumbnails:
     def __call__(self, key: Path, ctx: WorkerContext) -> QImage:
         if ctx.cancel.is_set():
             return QImage()
-        if key in PRINTS:
-            item = PRINTS[key]
+        if item := prints().get(key):
             path = self.library.root / "print-previews-v1" / key.with_suffix(".png")
             image = QImage(str(path))
             if image.isNull():
@@ -102,6 +105,7 @@ class Snapshot:
 
 
 def inspect(library: Library, game: Path | None, config: Path) -> Snapshot:
+    prints()  # Prepare the immutable gallery on the collection worker.
     items = [saved(e) for e in library.entries()]
     removed = [saved(e) for e in library.entries(in_bin=True)]
     by_id = {item.entry.id: item for item in (*items, *removed)}
@@ -143,21 +147,12 @@ def inspect(library: Library, game: Path | None, config: Path) -> Snapshot:
     )
 
 
-class GameOpen(Exception):
-    pass
-
-
 def check_closed(game: Path) -> None:
     if not game.is_dir() or not folder_has_card_databases(str(game)):
         raise ValueError(
             "The game folder is no longer ready. Reconnect it or choose another folder."
         )
-    try:
-        running = settings._game_running(game)
-    except OSError as exc:
-        raise GameOpen("Could not check whether EDOPro is open. Close it and retry.") from exc
-    if running:
-        raise GameOpen("Close EDOPro, then retry your sleeve change.")
+    AppContext.require_game_closed(game)
 
 
 def write(

@@ -29,7 +29,7 @@ class Manager(Editor):
         self.removed = removed
         if current and current.key not in {c.key for c in (*items, *removed)}:
             self.items.insert(0, current)
-        self.group = Menu("Collection or bin", ["Collection", f"Bin ({len(removed)})"])
+        self.group = Menu("Collection or Trash", ["Collection", f"Trash ({len(removed)})"])
         self.tools.addWidget(self.group)
         self.group.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.group.setFixedWidth(t.TILE_LARGE)
@@ -39,9 +39,9 @@ class Manager(Editor):
         self.tags.setAccessibleName("Tags")
         self.tags.setPlaceholderText("Separate tags with commas")
         self.field("Tags", self.tags)
-        self.favourite = ToggleSwitch("Favourite", "Show this sleeve in your favourites.", False)
+        self.favourite = ToggleSwitch("Favorite", "Show this sleeve in your favorites.", False)
         self.form.addWidget(self.favourite)
-        self.remove = Button("Move to bin")
+        self.remove = Button("Move to Trash")
         self.form.addWidget(self.remove)
         self.save.setText("Save changes")
         self.listing.currentIndexChanged.connect(self.selected)
@@ -78,14 +78,16 @@ class Manager(Editor):
             self.name.clear()
             self.tags.clear()
             self.favourite.setChecked(False)
-            self.hint.setText("The bin is empty." if in_bin else "Save a sleeve to manage it here.")
+            self.hint.setText(
+                "The Trash is empty." if in_bin else "Save a sleeve to manage it here."
+            )
             return
         choice = self.choices[idx]
         entry = choice.entry
         self.name.setText(choice.full_name)
         self.tags.setText(", ".join(entry.tags) if entry else "")
         self.favourite.setChecked(bool(entry and entry.favourite))
-        self.remove.setText("Restore to collection" if in_bin else "Move to bin")
+        self.remove.setText("Restore to collection" if in_bin else "Move to Trash")
         self.save.setText("Save changes" if entry else "Save to collection")
         source = choice.detail if entry else "Ready-made design"
         self.hint.setText(
@@ -99,6 +101,19 @@ class Manager(Editor):
         else:
             self.schedule(lambda: render(choice.recipe))
 
+    @property
+    def dirty(self) -> bool:
+        index = self.listing.currentIndex()
+        if index < 0 or self.group.currentIndex():
+            return False
+        choice = self.choices[index]
+        entry = choice.entry
+        return (self.name.text(), self.tags.text(), self.favourite.isChecked()) != (
+            choice.full_name,
+            ", ".join(entry.tags) if entry else "",
+            bool(entry and entry.favourite),
+        )
+
     def save_entry(self) -> None:
         choice = self.choices[self.listing.currentIndex()]
         name, tags = self.name.text(), self.tags.text().split(",")
@@ -106,7 +121,12 @@ class Manager(Editor):
 
         def work() -> Entry:
             entry = choice.entry or library.add_design(name, choice.recipe)
-            return library.edit(entry.id, name=name, tags=tags, favourite=favourite)
+            return library.edit(
+                entry.id,
+                name=name if name != entry.name else None,
+                tags=tags if tuple(t.strip() for t in tags if t.strip()) != entry.tags else None,
+                favourite=favourite if favourite != entry.favourite else None,
+            )
 
         self.commit.emit(work)
 
@@ -114,8 +134,8 @@ class Manager(Editor):
         choice = self.choices[self.listing.currentIndex()]
         in_bin = not self.group.currentIndex()
         if in_bin and not self.confirm(
-            "Move sleeve to bin?",
-            f"Remove {choice.name} from your collection? You can restore it from the bin. Your game keeps its current sleeves.",
+            "Move to Trash?",
+            f"Remove {choice.name} from your collection? You can restore it from the Trash. Your game keeps its current sleeves.",
         ):
             return
         library = self.library

@@ -14,12 +14,12 @@ import extras
 import themes
 from content.download import DownloadError, DownloadFailure, Progress
 from studio import theme as t
-from studio.context import AppContext, Installation
-from studio.pages.base import Page
+from studio.context import AppContext, GameOpenError, Installation
 from studio.tasks import Job, Work
 from studio.widgets import Button, label, margins
 
 from .skins_detail import Workspace
+from .skins_feedback import AppearancePage
 from .skins_gallery import Gallery
 from .skins_library import LibraryActions
 from .skins_model import Look, download_message
@@ -27,11 +27,15 @@ from .skins_packs import PackBrowser
 from .skins_service import Collection, SkinStore
 
 
-class SkinsPage(Page):
+class SkinsPage(AppearancePage):
     id, title, icon = "skins", "Skins", "skins"
 
     def __init__(self, context: AppContext) -> None:
         super().__init__(context)
+        self.built = False
+
+    def _build(self, context: AppContext) -> None:
+        self.built = True
         self.store = SkinStore(context.cfg, context.version)
         self.data: Collection | None = None
         self.look: Look | None = None
@@ -53,6 +57,12 @@ class SkinsPage(Page):
         self.retry_button = Button("Retry")
         self.retry_button.clicked.connect(lambda: self.retry and self.retry())
         row.addWidget(self.message, 1)
+        self.setup_feedback()
+        row.addWidget(self.details)
+        self.dismiss = Button("Back", "quiet")
+        self.dismiss.clicked.connect(lambda: self.note())
+        self.dismiss.hide()
+        row.addWidget(self.dismiss)
         row.addWidget(self.retry_button)
         body.addWidget(self.message_bar)
         self.message_bar.hide()
@@ -61,7 +71,7 @@ class SkinsPage(Page):
         margins(row, 0)
         self.install_hint = label("", "body", True)
         self.choose = Button("Choose folder", "secondary", "folder")
-        self.choose.clicked.connect(context.installations_requested.emit)
+        self.choose.clicked.connect(self.check_folder)
         row.addWidget(self.install_hint, 1)
         row.addWidget(self.choose)
         body.addWidget(self.install)
@@ -73,7 +83,9 @@ class SkinsPage(Page):
         body.addWidget(self.stack, 1)
         self.gallery = Gallery(context, self.store)
         self.view = Workspace(context, self.store)
-        self.packs = PackBrowser(context, "wallpaper")
+        self.packs = PackBrowser(
+            context, "wallpaper", lambda title, message: self.confirm(title, message)
+        )
         self.packs.back.clicked.connect(self.escape)
         self.gallery.more.clicked.connect(self.open_packs)
         self.maker = self.view.maker
@@ -99,6 +111,7 @@ class SkinsPage(Page):
             button.clicked.connect(partial(self.change_game, action))
         self.files = LibraryActions(self)
         self.maker.changed.connect(self._edited)
+        self.view.progress.cancel.setText("Pause download")
         self.view.progress.cancel.clicked.connect(self._cancel)
 
     @property
@@ -114,6 +127,8 @@ class SkinsPage(Page):
 
     def note(self, text: str = "", action: Callable | None = None, button: str = "Retry") -> None:
         self.retry = action
+        self.technical_error(None)
+        self.dismiss.hide()
         self.message.setText(text)
         self.message.setToolTip("")
         self.message_bar.setVisible(bool(text))
@@ -121,6 +136,8 @@ class SkinsPage(Page):
         self.retry_button.setVisible(action is not None)
 
     def installation_changed(self, installation: Installation) -> None:
+        if not self.built:
+            return
         self.generation += 1
         self.data = None
         self.gallery.data = None
@@ -130,11 +147,11 @@ class SkinsPage(Page):
         self.tried_recovery = False
         self.install.setVisible(not installation.ready)
         self.install_hint.setText(
-            "Choose a game folder to apply a look. You can still design and save themes."
+            "Choose your EDOPro folder. You can still design and save themes."
             if not installation.path
-            else "Open EDOPro once to finish setting up this folder, then select it again."
+            else "Finish setting up EDOPro. Open EDOPro and let its updates finish, then choose Check again."
         )
-        self.choose.setText("Change folder" if installation.path else "Choose folder")
+        self.choose.setText("Check again" if installation.path else "Choose folder")
         if self.mode == "packs":
             return  # Library transfers are independent of the selected game.
         if self.entered and not self._discard():
@@ -145,7 +162,16 @@ class SkinsPage(Page):
         if self.entered:
             self.reload()
 
+    def check_folder(self) -> None:
+        if self.game:
+            self.ctx.select_installation_requested.emit(str(self.game))
+        else:
+            self.ctx.installations_requested.emit()
+
     def shown(self) -> None:
+        if not self.built:
+            self._build(self.ctx)
+            self.installation_changed(self.ctx.installation)
         self.entered = True
         self.tried_recovery = False
         if self.mode == "packs":
@@ -155,16 +181,21 @@ class SkinsPage(Page):
             self.gallery.search.setFocus()
 
     def hidden(self) -> bool:
+        if not self.built:
+            return True
         if self.job or not self._discard():
             return False
         self.entered = False
+        self.motion.stop()
+        self.gallery.grid.suspend()
+        self.maker.samples.stop()
         self.generation += 1
         if self.mode != "packs":
             self.to_gallery()
         return True
 
     def _discard(self) -> bool:
-        return not (self.dirty or self.files.name_edited) or self.ctx.confirm(
+        return not (self.dirty or self.files.name_edited) or self.confirm(
             "Discard unsaved changes?", "Leave without saving your theme edits?"
         )
 
@@ -174,14 +205,17 @@ class SkinsPage(Page):
         if self.mode == "packs":
             self.to_gallery()
             self.reload()
+            self.gallery.more.setFocus()
         elif self.naming:
             self.files.cancel_name()
         elif self.mode == "maker":
             if self._discard():
                 if self.origin:
                     self.open_look(self.origin)
+                    self.view.inspector.edit.setFocus()
                 else:
                     self.to_gallery()
+                    self.gallery.create.setFocus()
         elif self.mode == "detail":
             self.to_gallery()
         else:
@@ -225,7 +259,9 @@ class SkinsPage(Page):
         source = self.data.catalogue if self.data else None
         if online:
             self.online = True
-        self.gallery.info.setText("Checking for skin packs…" if online else "Reading your looks…")
+        self.gallery.info.setText(
+            "Checking for skin packs…" if online else "Reading skins and themes…"
+        )
         self.gallery.refresh.setEnabled(False)
         job = self.ctx.tasks.start(lambda _: self.store.collection(installation, source, online))
 
@@ -252,6 +288,22 @@ class SkinsPage(Page):
                 self.stack.setCurrentWidget(self.gallery)
                 self.view.preview.clear()
                 self.gallery.grid.setFocus()
+            if data.issues:
+                issue = data.issues[0]
+
+                def set_aside() -> None:
+                    self._run(
+                        lambda _: self.store.library.set_aside(issue),
+                        lambda _: (self.note(), self.reload()),
+                        "Moving the file to quarantine…",
+                    )
+
+                self.note(
+                    f"Could not load {issue.filename}. Set this file aside or repair it in the theme library.",
+                    set_aside if issue.stamp else None,
+                    "Set aside file",
+                )
+                self.message.setToolTip(f"Technical details\n{issue.reason}")
             if data.pending and installation.ready and not self.tried_recovery:
                 self.tried_recovery = True
                 self.change_game("recover")
@@ -265,7 +317,11 @@ class SkinsPage(Page):
                     self.note()
                     self.reload(online=online)
 
-                self.note(str(exc), retry_load)
+                self.note(
+                    "Could not read your themes. Check that the library folder is accessible, then choose Retry.",
+                    retry_load,
+                )
+                self.technical_error(exc)
 
         job.result.connect(loaded)
         job.error.connect(failed)
@@ -278,11 +334,14 @@ class SkinsPage(Page):
             self.view.preview.scenes.buttons["Main menu"].setChecked(True)
             self.view.preview.turn.setChecked(False)
         self.mode, self.naming, self.look = "detail", "", look
-        self.view.back.setText("Gallery")
+        self.view.back.setText("Back")
+        self.view.back.setAccessibleName("Back to skins and themes")
         self._show(self.view)
         self.view.show_panel(self.view.inspector)
         self.view.title.set_value(look.name)
-        self.view.kicker.setText("ACTIVE IN GAME" if look.active else "LOOK PREVIEW")
+        self.view.kicker.setText(
+            "APPLIED IN EDOPRO" if look.active else "SKIN PREVIEW" if look.pack else "THEME PREVIEW"
+        )
         self.view.inspector.display(
             look, self.ctx.installation.ready, bool(self.data and self.data.restore_pack)
         )
@@ -313,12 +372,12 @@ class SkinsPage(Page):
         look = self.look
         if look:
             theme = look.theme
-            if look.group != "Mine":
+            if look.group != "My themes":
                 theme = replace(theme, name=f"{look.name[:54]} remix")
             self._maker(look, theme)
             if look.pack:
                 self.note(
-                    "Your new theme starts with this skin’s colours. Its original artwork stays with the pack."
+                    "Your new theme starts with this skin’s colors. Its original artwork stays with the pack."
                 )
 
     def _maker(self, origin: Look | None, theme: themes.Theme) -> None:
@@ -329,7 +388,10 @@ class SkinsPage(Page):
         self._show(self.view)
         self.view.show_panel(self.view.maker_panel)
         self.view.title.set_value("Theme maker")
-        self.view.back.setText("Look preview" if origin else "Gallery")
+        self.view.back.setText("Back")
+        self.view.back.setAccessibleName(
+            "Back to preview" if origin else "Back to skins and themes"
+        )
         self.maker.reset(theme)
         self.maker.name.setFocus()
 
@@ -338,8 +400,8 @@ class SkinsPage(Page):
             self.view.kicker.setText(
                 "UNSAVED CHANGES"
                 if self.dirty
-                else "MY LIBRARY"
-                if self.look.group == "Mine"
+                else "MY THEMES"
+                if self.look.group == "My themes"
                 else "NEW THEME"
             )
             self._preview()
@@ -358,6 +420,8 @@ class SkinsPage(Page):
             return
         self.generation += 1
         self.note(message)
+        apply_enabled = self.view.inspector.apply.isEnabled()
+        self.view.inspector.apply.setEnabled(False)
         self.view.back.setEnabled(False)
         self.gallery.setEnabled(False)
         for panel in self.view.panels:
@@ -368,6 +432,7 @@ class SkinsPage(Page):
 
         def release() -> None:
             self.job = None
+            self.view.inspector.apply.setEnabled(apply_enabled)
             self.view.back.setEnabled(True)
             self.gallery.setEnabled(True)
             self.gallery.refresh.setEnabled(True)
@@ -386,15 +451,21 @@ class SkinsPage(Page):
                 self.view.show_panel(self.view.inspector)
                 self.reload()
             if isinstance(exc, DownloadError) and exc.reason == DownloadFailure.CANCELLED:
-                self.note("Download cancelled. You can resume it here.", retry, "Resume")
+                self.note("Download canceled. You can resume it here.", retry, "Resume")
             elif isinstance(exc, DownloadError):
                 self.note(download_message(exc), retry)
                 self.message.setToolTip(str(exc))
             else:
                 self.note(
-                    str(exc),
+                    self.game_warning(exc)
+                    if isinstance(exc, GameOpenError)
+                    else "Could not finish the change. Check folder permissions and free space, then retry."
+                    if isinstance(exc, OSError) and not isinstance(exc, extras.SleeveReapplyError)
+                    else str(exc),
                     self.retry_sleeves if isinstance(exc, extras.SleeveReapplyError) else retry,
                 )
+            self.technical_error(exc)
+            self.dismiss.setVisible(isinstance(exc, GameOpenError))
             if writing:
                 self.reload()
 
@@ -421,9 +492,9 @@ class SkinsPage(Page):
         game, look = self.game, self.look
         if self.job or not game or not self.ctx.installation.ready or not self.data:
             return
-        if action == "remove" and not self.ctx.confirm(
-            "Remove theme from game?",
-            "Remove the installed theme files? If this look is active, the game will return to its previous look.",
+        if action == "remove" and not self.confirm(
+            "Remove theme from EDOPro?",
+            "Remove the installed theme files? EDOPro will restore any previous skin settings this theme still controls.",
         ):
             return
         shared = self.data.shared
@@ -440,7 +511,7 @@ class SkinsPage(Page):
         self._run(
             lambda _: self.store.change(game, action, look, shared, highlight),
             done,
-            "Updating this installation. Keep this page open until the change finishes.",
+            "Updating the skin… You can change folders when this finishes.",
             writing=True,
             retry=partial(self.change_game, action, chosen_highlight=highlight),
         )
@@ -471,7 +542,7 @@ class SkinsPage(Page):
 
         def done(_: object) -> None:
             self.view.show_panel(self.view.inspector)
-            self.note("Skin and shared fonts verified. Apply when you’re ready.")
+            self.note("Download complete. Choose Apply skin to use it in EDOPro.")
             self.reload()
 
         self._run(

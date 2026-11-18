@@ -135,12 +135,12 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         shot("06-manage")
         manager.save.click()
         loaded()
-        gallery.source.setCurrentText("Favourites")
+        gallery.source.setCurrentText("Favorites")
         loaded()
         shot("07-favourites")
         gallery.actions["manage"].click()
         manager = page.editor
-        with patch.object(window, "confirm", return_value=True):
+        with patch.object(page, "confirm", return_value=True):
             manager.remove.click()
         loaded()
         gallery.actions["manage"].click()
@@ -188,7 +188,8 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
             editor.results.itemClicked.emit(editor.results.item(2))
             settle(lambda: not editor.loading)
             shot("14-card-retry")
-        page.escape()
+        with patch.object(page, "confirm", return_value=True):
+            page.escape()
         gallery.actions["image"].click()
         editor = page.editor
         with patch.object(QFileDialog, "getOpenFileName", return_value=(str(broken), "")):
@@ -238,7 +239,7 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
             page.apply.click()
             settle(lambda: not page.writing)
             loaded()
-            with patch.object(ctx, "confirm", return_value=True):
+            with patch.object(page, "confirm", return_value=True):
                 page.undo.click()
             settle(lambda: not page.writing)
             loaded()
@@ -259,6 +260,7 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     finally:
         release.set()
         settle(lambda: not ctx.tasks.jobs)
-        window.close()
+        with patch.object(page, "confirm", return_value=True):
+            window.close()
         app.processEvents()
     return files
