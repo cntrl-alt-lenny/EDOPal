@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+import config
 from content.cache import CacheBusyError, PackCache
 from content.catalogue import Catalogue, CatalogueSource, PackState, PackStatus, fetch_catalogue
 from content.download import DownloadError, DownloadFailure, Progress
@@ -21,6 +22,7 @@ from studio.tasks import Job, WorkerContext
 from studio.widgets import Button, Panel, ProgressBlock, label
 
 from .music_albums import credit_text
+from .music_sounds_controls import pack_size
 from .music_widgets import RecordHero, action
 
 if TYPE_CHECKING:
@@ -40,7 +42,7 @@ class Entry:
             return "Available in library"
         state = self.status.state
         if state == PackState.INCOMPATIBLE:
-            return f"Requires Studio {self.status.pack.min_app_version}"
+            return f"Requires {config.APP_NAME} {self.status.pack.min_app_version}"
         if state == PackState.DOWNLOADING:
             return "Downloading in another window"
         if self.installed:
@@ -76,7 +78,7 @@ def entries(cache: PackCache, catalogue: Catalogue, version: str) -> list[Entry]
 def failure(exc: BaseException) -> tuple[str, str]:
     if isinstance(exc, DownloadError):
         if exc.reason == DownloadFailure.CANCELLED:
-            return "Download cancelled", "Resume"
+            return "Download canceled", "Resume"
         title = {
             DownloadFailure.NOT_FOUND: "Pack unavailable",
             DownloadFailure.DISK_SPACE: "Insufficient disk space",
@@ -127,7 +129,7 @@ class MusicPacks:
             return
         cache, version = self.cache, self.page.ctx.version
         url, catalogue = self.page.ctx.cfg.content_manifest_url, self.catalogue
-        self.banner.setText("Checking the catalogue…" if online else "Reading installed packs…")
+        self.banner.setText("Checking the catalog…" if online else "Reading installed packs…")
         self.enable(False)
 
         def read(_: WorkerContext) -> tuple[Catalogue, list[Entry]]:
@@ -148,7 +150,7 @@ class MusicPacks:
         job.finished.connect(self.loaded)
 
     def load_error(self, error: BaseException) -> None:
-        self.message = f"Could not read the catalogue. {error}"
+        self.message = "Could not read the catalog. Check your connection and refresh the catalog."
 
     def loaded(self) -> None:
         self.job = None
@@ -172,22 +174,22 @@ class MusicPacks:
             offline = self.catalogue and self.catalogue.source != CatalogueSource.LIVE
             if offline:
                 self.banner.setText(
-                    "Catalogue offline. Your installed music and covers are available."
+                    "Catalog offline. Your installed music and covers are available."
                 )
             else:
                 self.banner.setText(
-                    "Add recordings and covers to your library. Choose playlists separately."
+                    "Add tracks and covers to your library. Choose playlists separately."
                 )
-        refresh = action("Refresh catalogue", self.load)
+        refresh = action("Refresh catalog", self.load)
         self.buttons.append(refresh)
         if self.catalogue and not self.items and not self.message:
             offline = self.catalogue.source != CatalogueSource.LIVE
             empty = RecordHero(
                 "Music and covers",
-                "Catalogue offline" if offline else "No packs available yet",
-                "You can still add your own recordings and use the music in your library."
+                "Catalog offline" if offline else "No packs available yet",
+                "You can still add your own tracks and use the music in your library."
                 if offline
-                else "Add your own recordings, or check back here for music and covers.",
+                else "Add your own tracks, or check back here for music and covers.",
                 "music",
             )
             layout.addWidget(empty)
@@ -205,7 +207,7 @@ class MusicPacks:
             panel = Panel(t.LG)
             panel.body.addWidget(
                 label(
-                    f"{pack.kind.title()}  ·  {pack.version}"
+                    f"{pack.kind.title()}  ·  {pack.version}  ·  {pack_size(pack.size_bytes)}"
                     if pack
                     else f"Installed pack  ·  {item.origin.version}",
                     "goldKicker",
@@ -271,9 +273,9 @@ class MusicPacks:
             return
         p = self.page
         key = item.origin.id
-        if remove and not p.ctx.confirm(
-            "Remove pack?",
-            "Remove this pack from your library? Applied playlists keep their recordings.",
+        if remove and not p.confirm(
+            "Remove pack",
+            "Remove this pack from your library and downloads? Applied playlists keep their tracks. You can download it again if it is still available.",
         ):
             return
         panel = self.cards[key]
@@ -306,7 +308,7 @@ class MusicPacks:
                 total = value.total_bytes or item.status.pack.size_bytes
                 progress.advance_to(value.bytes_done, total)
                 progress.counts.setText(
-                    f"{value.bytes_done:,} / {total:,} bytes  ·  {value.bytes_per_second / 1024:,.0f} KiB/s"
+                    f"{pack_size(value.bytes_done)} / {pack_size(total)}  ·  {pack_size(value.bytes_per_second)}/s"
                 )
             else:
                 progress.begin(value.capitalize() + "…")

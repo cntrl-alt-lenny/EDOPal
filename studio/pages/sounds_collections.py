@@ -129,8 +129,12 @@ class SoundCollections:
             self.page.feedback.show_message(success)
 
         def error(exc: BaseException) -> None:
-            hint = explain(exc) if explain else f"Could not complete that set action. {exc}"
-            self.page.feedback.show_message(hint)
+            hint = (
+                explain(exc)
+                if explain
+                else "Check the sound set and choose a writable library folder, then retry."
+            )
+            self.page.feedback.show_message(hint, details=str(exc))
 
         def finish() -> None:
             self.local_job = None
@@ -151,21 +155,21 @@ class SoundCollections:
         self.name.heading.setText(action)
         self.name.submit.setText(action)
         hints = {
-            "Save mix": "Give this mix a name so you can find it again.",
+            "Save sound set": "Give this mix a name so you can find it again.",
             "Duplicate set": "Give the copy a name. The original set stays in your library.",
             "Rename set": "Choose a new name for this saved set.",
         }
         self.name.description.setText(hints[action])
         playable, silent = coverage(sound_set)
         chants = len(sound_set.assignments) - playable - silent
-        summary = f"{playable} of {EVENT_COUNT} duel events have sound"
+        summary = f"{playable} of {EVENT_COUNT} sound slots have a clip"
         if silent:
             summary += f" · {silent} silent"
         if chants:
             summary += f" · {chants} card chant choices"
         self.name.summary.setText(summary + ".")
         name = sound_set.name + " copy" if action == "Duplicate set" else sound_set.name
-        self.name.name.setText(name[:120] if action != "Save mix" else "")
+        self.name.name.setText(name[:120] if action != "Save sound set" else "")
         self.page.clear_feedback()
         self.page.open_view("name", self.name.name)
         self.name.name.selectAll()
@@ -222,8 +226,8 @@ class SoundCollections:
             )
 
     def delete(self, set_id: str, name: str) -> None:
-        if self.local_job or not self.page.ctx.confirm(
-            "Delete saved set?",
+        if self.local_job or not self.page.confirm(
+            "Delete saved set",
             f"Delete “{name}” from your saved sets? You can import an exported copy again.",
         ):
             return
@@ -254,7 +258,7 @@ class SoundCollections:
             return online_sets(cache, version, catalogue)
 
         def error(_exc: BaseException) -> None:
-            self.downloads.hint.show_message("Could not load the catalogue. Try refreshing it.")
+            self.downloads.hint.show_message("Could not load the catalog. Try refreshing it.")
 
         def finish() -> None:
             self.catalogue_job = None
@@ -284,7 +288,7 @@ class SoundCollections:
         self.downloads.empty.headline.setText(
             "No sets available yet"
             if online.catalogue.source is CatalogueSource.LIVE
-            else "Catalogue offline"
+            else "Catalog offline"
         )
         self.downloads.empty.description.setText("Built-in and saved sounds are still available.")
         self.downloads.empty.setVisible(not online.packs)
@@ -301,15 +305,15 @@ class SoundCollections:
 
     def add_download_controls(self, card: DownloadCard, item: Downloadable) -> None:
         sound_set = item.sound_set
-        play = Button("Play sampler")
+        play = Button("Preview set")
         play.setEnabled(any(sound_set.assignments.values()))
         play.clicked.connect(partial(self.page.audio.play, play, sound_set))
-        use = Button("Use set", "quiet")
+        use = Button("Select set", "quiet")
         use.clicked.connect(partial(self.page.use_download, item))
         card.buttons.addWidget(play)
         card.buttons.addWidget(use)
         playable, silent = coverage(sound_set)
-        count = f"{playable} of {EVENT_COUNT} events with sound"
+        count = f"{playable} of {EVENT_COUNT} sound slots have a clip"
         if silent:
             count += f"  ·  {silent} silent"
         if item.status.state is PackState.UPDATE_AVAILABLE:
@@ -351,7 +355,7 @@ class SoundCollections:
                 hints = {
                     DownloadFailure.DISK_SPACE: "There isn’t enough disk space. Free some space and retry.",
                     DownloadFailure.INTEGRITY: "The file didn’t pass verification. Try downloading it again.",
-                    DownloadFailure.NOT_FOUND: "This set is no longer available. Refresh the catalogue.",
+                    DownloadFailure.NOT_FOUND: "This set is no longer available. Refresh the catalog.",
                 }
                 hint = hints.get(
                     getattr(exc, "reason", None), "Could not download this set. Please retry."

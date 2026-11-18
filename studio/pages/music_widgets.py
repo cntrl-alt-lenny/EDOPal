@@ -253,3 +253,31 @@ class AlbumGrid(ImageTileGrid):
 
 def cover(album: Album) -> Path:
     return album.cover or t.ASSETS / "music/grid" / (album.game.id + ".png")
+
+
+def show_music_error(layout: QVBoxLayout, title: str, error: Exception, retry: Callable) -> None:
+    heading = {
+        "Restoring the playlist": "Could not restore the playlist",
+        "Updating the playlist": "Could not update the playlist",
+        "Reading your soundtracks": "Could not read your music library",
+    }.get(title, f"{title} could not finish")
+    layout.addWidget(label(heading, "heading", True))
+    message = (
+        "Go back to review the playlist."
+        if title == "Restoring the playlist"
+        else "Check that the game and library folders are available, then retry."
+    )
+    if "Cannot verify" in str(error):
+        message = "The playlist recovery record could not be verified. Your files were kept. Go back to review the playlist."
+    elif "restore" in str(error).lower() and "playlist" in str(error).lower():
+        message = "Open the playlist and choose Restore original music for this playlist."
+    layout.addWidget(label(message, "body", True))
+    details = label(str(error), "muted", True)
+    details.hide()
+    show = action("Technical details", lambda: details.setVisible(not details.isVisible()))
+    layout.addWidget(show, 0, Qt.AlignmentFlag.AlignLeft)
+    layout.addWidget(details)
+    layout.addStretch()
+    retry_button = action("Retry", retry, "primary")
+    layout.addWidget(retry_button, 0, Qt.AlignmentFlag.AlignRight)
+    retry_button.setFocus()

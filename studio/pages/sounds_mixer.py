@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QScrollArea, QVBoxLayout, 
 import sounds
 from studio import theme as t
 from studio.pages.card_views import line
-from studio.pages.sounds_model import display_text
+from studio.pages.sounds_model import display_text, event_description
 from studio.pages.sounds_views import InlineView, button_row, elided
 from studio.widgets import Button, Panel, label, margins
 
@@ -31,8 +31,8 @@ class EventRow(QWidget):
         self.duration = label("", "muted")
         self.duration.setMinimumWidth(t.HUGE)
         row.addWidget(self.duration)
-        self.play = Button("Play", "secondary")
-        self.play.setAccessibleName(f"Play {name}")
+        self.play = Button("Preview", "secondary")
+        self.play.setAccessibleName(f"Preview {name}")
         row.addWidget(self.play)
         self.edit = Button("Choose sound", "quiet")
         self.edit.setAccessibleName(f"Choose sound for {name}")
@@ -54,7 +54,7 @@ class MixerView(InlineView):
             if chants
             else (
                 "Mix your own",
-                "Choose a sound for each event. Use ↑ and ↓ between events. Tab to Play or Choose sound.",
+                "Choose a sound for each event. Use ↑ and ↓ between events. Tab to Preview or Choose sound.",
             )
         )
         super().__init__(title, hint)
@@ -112,7 +112,7 @@ class MixerView(InlineView):
                 self.groups_body.addWidget(panel)
             panel = groups[group]
             panel.body.addWidget(line())
-            row = self.rows[key] = EventRow(name, event.description)
+            row = self.rows[key] = EventRow(name, event_description(key))
             panel.body.addWidget(row)
             row.play.clicked.connect(partial(play, key))
             row.edit.clicked.connect(partial(edit, key))
@@ -181,8 +181,8 @@ class PickerView(InlineView):
         row.addWidget(title, 1)
         detail = "Silent" if clip is None else f"{clip.duration:.2f} s"
         row.addWidget(label(f"{category}  ·  {detail}", "muted"))
-        preview = Button("Play", "quiet")
-        preview.setAccessibleName(f"Play sound from {display_text(name)}")
+        preview = Button("Preview", "quiet")
+        preview.setAccessibleName(f"Preview sound from {display_text(name)}")
         preview.setEnabled(clip is not None)
         row.addWidget(preview)
         choose = Button("Use sound")

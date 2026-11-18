@@ -43,7 +43,7 @@ STATUS = {
     "duplicate": "Already in library",
     "unsupported": "Unsupported",
     "failed": "Couldn’t add",
-    "cancelled": "Skipped on cancellation",
+    "cancelled": "Skipped because import was canceled",
 }
 
 
@@ -98,12 +98,12 @@ class ImportViews:
         actions = [
             (
                 "Add a folder",
-                "Review recordings and choose their games and scenes.",
+                "Review tracks and choose their games and scenes.",
                 "folder",
                 self.folder,
             ),
             (
-                "Create a game",
+                "Create album",
                 "Give your own soundtrack a place in the library.",
                 "library",
                 self.new_game,
@@ -116,7 +116,7 @@ class ImportViews:
             ),
             (
                 "Export library",
-                "Copy your games and recordings to a folder.",
+                "Copy your games and tracks to a folder.",
                 "arrow",
                 partial(self.transfer, "export"),
             ),
@@ -126,7 +126,7 @@ class ImportViews:
                 "cards",
                 partial(self.transfer, "chaos"),
             ),
-            ("Add files", "Choose an album for individual recordings.", "music", p.albums.gallery),
+            ("Add files", "Choose an album for individual tracks.", "music", p.albums.gallery),
         ]
         grid = QGridLayout()
         grid.setSpacing(t.MD)
@@ -144,22 +144,22 @@ class ImportViews:
 
     def new_game(self) -> None:
         p = self.page
-        layout = p.screen("create", self.manage, "Create a game", "YOUR LIBRARY")
+        layout = p.screen("create", self.manage, "Create album", "YOUR LIBRARY")
         hero = RecordHero(
             "Personal collection",
             "Your new album",
-            "Add recordings to this game after you create it.",
+            "Add tracks to this album after you create it.",
             "music",
         )
         hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(hero, 1)
         panel = Panel()
-        panel.body.addWidget(label("Game name", "subheading"))
+        panel.body.addWidget(label("Album name", "subheading"))
         self.name = QLineEdit()
-        self.name.setAccessibleName("Game name")
-        self.name.setPlaceholderText("Name your game or collection")
+        self.name.setAccessibleName("Album name")
+        self.name.setPlaceholderText("Name your album")
         panel.body.addWidget(self.name)
-        self.create = action("Create game", self.create_game, "primary")
+        self.create = action("Create album", self.create_game, "primary")
         self.create.setEnabled(False)
         self.name.textChanged.connect(lambda text: self.create.setEnabled(bool(text.strip())))
         self.name.textChanged.connect(
@@ -185,7 +185,7 @@ class ImportViews:
 
     def create_game(self) -> None:
         p, title, root = self.page, self.name.text().strip(), self.page.root
-        receipt = Receipt(root, "game creation")
+        receipt = Receipt(root, "album creation")
 
         def work(_: WorkerContext) -> str:
             game = engine.create_game(title, root=root)
@@ -197,7 +197,7 @@ class ImportViews:
             p.refresh(partial(p.albums.open_game, key, back=self.manage))
 
         p.run(
-            "Creating your game", work, done, lock=True, cancellable=False, fallback=self.new_game
+            "Creating your album", work, done, lock=True, cancellable=False, fallback=self.new_game
         )
 
     def folder(self) -> None:
@@ -208,7 +208,7 @@ class ImportViews:
     def files(self, key: str) -> None:
         selected, _ = QFileDialog.getOpenFileNames(
             self.page,
-            "Add recordings to this album",
+            "Add tracks to this album",
             "",
             "Audio (*.flac *.ogg *.mp3 *.wav);;All files (*)",
         )
@@ -228,19 +228,19 @@ class ImportViews:
             self.plan = [replace(x, game=key) for x in plan] if key else plan
             self.review()
 
-        p.run("Finding recordings", read, done, fallback=p.albums.album if key else self.manage)
+        p.run("Finding tracks", read, done, fallback=p.albums.album if key else self.manage)
 
     def review(self) -> None:
         p = self.page
         layout = p.screen(
             "review",
             p.albums.album if self.target else self.manage,
-            "Review recordings",
+            "Review tracks",
             "ADD MUSIC",
         )
         layout.addWidget(
             label(
-                "Choose a game and a suggested scene for each recording. You can use it in any scene later.",
+                "Choose a game and a suggested scene for each track. You can use it in any scene later.",
                 "body",
                 True,
             )
@@ -313,7 +313,7 @@ class ImportViews:
         if missing:
             message = f"Files needing a game: {missing}. Choose a game or uncheck those files."
         elif not self.plan:
-            message = "The folder contains no recordings."
+            message = "The folder contains no tracks."
         else:
             message = f"{len(plan)} of {len(self.plan)} files selected"
         self.hint.setText(message)
@@ -345,7 +345,7 @@ class ImportViews:
                 self.receipts.append(receipt)
             p.refresh(self.outcomes)
 
-        p.run("Adding recordings", work, done, lock=True, fallback=self.review)
+        p.run("Adding tracks", work, done, lock=True, fallback=self.review)
 
     def outcomes(self) -> None:
         p = self.page
@@ -372,7 +372,7 @@ class ImportViews:
         layout.addWidget(view, 1)
         if self.result_receipt:
             self.undo_button(layout)
-        done = action("Browse games", p.albums.gallery, "primary", "library")
+        done = action("Done", self.manage, "primary", "check")
         layout.addWidget(done, 0, Qt.AlignmentFlag.AlignRight)
         done.setFocus()
 
@@ -425,9 +425,11 @@ class ImportViews:
                     created=receipt.record,
                     checkpoint=lambda: checkpoint(worker),
                 )
-                return f"{titles[kind]} complete. {added} recordings copied, {duplicates} already present."
+                return (
+                    f"{titles[kind]} complete. {added} tracks copied, {duplicates} already present."
+                )
             except Stopped:
-                return f"Stopped. Kept {len(receipt.files)} newly copied files."
+                return f"Canceled. Kept {len(receipt.files)} newly copied files."
             except (OSError, ValueError) as exc:
                 return f"{titles[kind]} could not finish. {exc}"
 
@@ -466,9 +468,9 @@ class ImportViews:
         from .music import checkpoint
 
         p = self.page
-        if p.ctx.confirm(
-            "Undo this library change?",
-            f"Remove the {len(receipt.files)} newly added files from “{receipt.title}”? Existing recordings are kept.",
+        if p.confirm(
+            "Undo library change",
+            f"Remove the {len(receipt.files)} newly added files from “{receipt.title}”? Existing tracks are kept.",
         ):
 
             def done(_: object) -> None:

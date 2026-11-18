@@ -9,7 +9,6 @@ import shutil
 import wave
 from collections.abc import Callable
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
@@ -29,6 +28,7 @@ from content.download import DownloadError, DownloadFailure, Progress, ProgressC
 from content.libraries import make_available
 from content.manifest import Manifest, Pack
 from content.media import Changes
+from music_player import PreviewPlayer
 from studio import theme
 from studio.context import AppContext, Installation
 from studio.pages.music import MusicPage
@@ -192,7 +192,7 @@ def render_packs(p: MusicPage, root: Path, shot: Callable[[str], None]) -> None:
         if outcome == "pause":
             while not cancel.is_set():
                 await asyncio.sleep(0.01)
-            raise DownloadError(DownloadFailure.CANCELLED, "Download cancelled.")
+            raise DownloadError(DownloadFailure.CANCELLED, "Download canceled.")
         if outcome == "error":
             raise DownloadError(DownloadFailure.TRANSIENT, "The connection closed.")
         folder = cache.root / f"pack-{pack.id}"
@@ -217,17 +217,17 @@ def render_packs(p: MusicPage, root: Path, shot: Callable[[str], None]) -> None:
         patch("studio.pages.music_packs.fetch_catalogue", fetch),
         patch("content.libraries.download_pack", transfer),
         patch("studio.pages.music_packs.make_available", install),
-        patch.object(p.ctx, "confirm", return_value=True),
+        patch.object(p, "confirm", return_value=True),
     ):
         click("Get more music")
         idle()
         shot("23-pack-catalogue-offline")
         listing = Catalogue(Manifest(1, ()), CatalogueSource.LIVE)
-        click("Refresh catalogue")
+        click("Refresh catalog")
         idle()
         shot("24-pack-catalogue-empty")
         listing = Catalogue(Manifest(1, (music, covers)), CatalogueSource.LIVE)
-        click("Refresh catalogue")
+        click("Refresh catalog")
         idle()
         shot("25-music-and-cover-packs")
         click("Download")
@@ -271,7 +271,7 @@ def render_packs(p: MusicPage, root: Path, shot: Callable[[str], None]) -> None:
             ),
             CatalogueSource.LIVE,
         )
-        click("Refresh catalogue")
+        click("Refresh catalog")
         idle()
         shot("34-update-and-incompatible")
         click("Remove pack")
@@ -298,7 +298,7 @@ def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     files = []
     out.mkdir(parents=True, exist_ok=True)
 
-    def shot(name: str) -> None:
+    def shot(name: str, *, preview: bool = False) -> None:
         window.setFocus(Qt.FocusReason.MouseFocusReason)
         window.animation.setCurrentTime(theme.MOTION_MS)
         p.transition.setCurrentTime(theme.MOTION_MS)
@@ -306,6 +306,11 @@ def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         app.processEvents()
         if p.state in ("home", "gallery", "album"):
             settle(lambda: not ctx.tasks.jobs)
+        if preview:
+            p.scroll.ensureWidgetVisible(
+                p.preview.notice if p.preview.notice.isVisible() else p.preview.play
+            )
+            app.processEvents()
         target = out / (name + ".png")
         if not window.grab().save(str(target), "PNG"):
             raise OSError(str(target))
@@ -315,6 +320,13 @@ def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     try:
         settle(lambda: p.state == "home")
         shot("01-soundtrack")
+        from music.settings import GameProcessUnknown
+
+        with patch("music.settings._game_running", side_effect=GameProcessUnknown()):
+            p.toggle_music.click()
+            settle(lambda: p.state == "error")
+            shot("36-process-unknown")
+            p.escape()
         with patch("music.settings._game_running", return_value=True):
             p.toggle_music.click()
             settle(lambda: p.state == "error")
@@ -342,17 +354,17 @@ def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         p.albums.field.setText("Does not exist")
         shot("08-no-matches")
         p.albums.open_game("forbidden")
-        with patch.object(
-            miniaudio,
-            "PlaybackDevice",
-            partial(miniaudio.PlaybackDevice, backends=[miniaudio.Backend.NULL]),
-        ):
+        with patch.object(p.preview.player, "play", side_effect=OSError("No audio device")):
+            p.preview.play.click()
+            settle(lambda: p.preview.notice.isVisible() and not p.preview.pending)
+            shot("37-no-audio-device", preview=True)
+        with patch.object(p.preview, "player", PreviewPlayer(backends=[miniaudio.Backend.NULL])):
             p.preview.play.click()
             settle(lambda: not p.preview.pending and p.preview.player.playing)
             p.preview.scrub(0.4)
             p.preview.release()
             settle(lambda: not p.preview.pending)
-            shot("09-album-preview")
+            shot("09-album-preview", preview=True)
             p.albums.tracks.cellWidget(0, 2).click()
             shot("10-choose-scene")
         p.albums.open_game("dm3")
@@ -360,7 +372,7 @@ def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         p.imports.manage()
         shot("12-add-music")
         render_packs(p, root, shot)
-        p.imports.tools["Create a game"].click()
+        p.imports.tools["Create album"].click()
         p.imports.name.setText("Duel night mixtape")
         shot("13-create-game")
         p.imports.create.click()
@@ -416,6 +428,16 @@ def render_music(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
         shot("17-no-installation")
         ctx.set_installation(Installation(str(game)))
         shot("18-waiting-for-game")
+        state = game / "sound/.edopro-hd-sync/win"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "selection.json").write_bytes(b"{")
+        ctx.set_installation(install)
+        settle(lambda: p.state == "home")
+        p.scene_buttons["win"].click()
+        with patch.object(p, "confirm", return_value=True):
+            p.albums.restore.click()
+            settle(lambda: p.state == "error")
+            shot("38-recovery-record")
         clean = create_demo(root / "Second installation")
         ctx.set_installation(Installation.inspect(clean.edopro_path))
         settle(lambda: p.state == "home")

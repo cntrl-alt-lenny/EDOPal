@@ -3,19 +3,19 @@ from __future__ import annotations
 import shutil
 import struct
 from collections.abc import Callable, Iterator
-from functools import partial
 from pathlib import Path
 from threading import Event, get_ident
 
 import miniaudio
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QFileDialog
+from PySide6.QtWidgets import QComboBox, QFileDialog, QLabel
 from pytestqt.qtbot import QtBot
 
 import music_import
 import music_library as engine
 from music import settings
+from music_player import PreviewPlayer
 from studio.context import Installation
 from studio.pages import music as music_page
 from studio.pages.music import MusicPage
@@ -45,7 +45,7 @@ def ready(
     recording(p.root / "roses/lose/Last rose.wav", 3)
     recording(p.root / "tf5/deck/Opening hand.wav", 4)
     monkeypatch.setattr(settings, "_game_running", lambda _: False)
-    monkeypatch.setattr(p.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr(p, "confirm", lambda *_: True)
     window.nav["music"].click()
     wait(qtbot, p, "home")
     yield p
@@ -100,7 +100,7 @@ def test_game_and_track_search_cross_scene_playlist_editor(ready: MusicPage, qtb
     v.field.setText("openinghand")
     assert [a.game.id for a in v.grid.albums] == ["tf5"]
     qtbot.keyClick(v.grid, Qt.Key.Key_Return)
-    button(p, "Use this whole game").click()
+    button(p, "Replace a playlist with this album").click()
     v.destinations["win"].click()
     wait(qtbot, p, "playlist")
     assert v.list.item(0, 0).text() == "Opening hand"
@@ -128,7 +128,7 @@ def test_running_game_retry_and_busy_lifecycle(
         qtbot.waitUntil(entered.is_set)
         assert p.ctx.busy and not p.hidden() and not p.ctx.navigate("cards")
         assert not p.window().change.isEnabled()
-        assert "installation" in p.progress.detail.text()
+        assert "change folders" in p.progress.detail.text()
         assert get_ident() not in threads
     finally:
         release.set()
@@ -154,32 +154,29 @@ def test_selection_reload_and_corrupt_playlist(
     assert p.state == "unavailable" and button(p, "Choose folder").isEnabled()
     p.ctx.set_installation(Installation(str(game)))
     assert p.state == "unavailable" and p.data is None
-    original = game / "sound/BGM/win/Original.wav"
-    original_bytes = original.read_bytes()
-    engine.use_track(
-        game,
-        engine.Track("tf5", "Opening hand", p.root / "tf5/deck/Opening hand.wav", "win"),
-        root=p.root,
-    )
-    journal = game / "sound/.edopro-hd-sync/win/selection.json"
-    intact = journal.read_bytes()
-    journal.write_bytes(b"{")
+    with qtbot.waitSignal(p.ctx.select_installation_requested) as checked:
+        button(p, "Check again").click()
+    assert checked.args == [str(game)]
+    folder = game / "sound/.edopro-hd-sync/win"
+    folder.mkdir(parents=True)
+    (folder / "selection.json").write_text("{")
     p.ctx.set_installation(Installation(str(game), True))
     wait(qtbot, p, "home")
     p.scene_buttons["win"].click()
     assert p.albums.restore.isEnabled() and p.albums.list.rowCount() == 1
     p.albums.restore.click()
     wait(qtbot, p, "error")
-    assert journal.read_bytes() == b"{"
-    assert (journal.parent / "saved/win/Original.wav").read_bytes() == original_bytes
-    journal.write_bytes(intact)
-    button(p, "Retry").click()
+    button(p, "Technical details").click()
+    assert any(
+        "selection.json" in text.text() and text.isVisible() for text in p.findChildren(QLabel)
+    )
+    assert (folder / "selection.json").read_bytes() == b"{"
+    p.back_button.click()
     wait(qtbot, p, "playlist")
-    assert not p.albums.restore.isEnabled()
-    assert original.read_bytes() == original_bytes
+    assert p.albums.restore.isEnabled()
     p.escape()
     recording(p.root / "tf2/deck/After refresh.wav", 9)
-    button(p, "Reload").click()
+    button(p, "Refresh").click()
     wait(qtbot, p, "home")
     assert p.data.albums["tf2"].tracks[0].title == "After refresh"
     second = tmp_path / "Second"
@@ -207,7 +204,7 @@ def test_failed_and_superseded_scan(
         return read(path, root, checkpoint)
 
     monkeypatch.setattr(music_page, "read_library", blocked)
-    button(p, "Reload").click()
+    button(p, "Refresh").click()
     try:
         qtbot.waitUntil(entered.is_set)
         p.ctx.set_installation(Installation(str(second), True))
@@ -229,11 +226,7 @@ def test_preview_seek_pause_and_stop_on_hide(
     ready: MusicPage, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     p = ready
-    monkeypatch.setattr(
-        miniaudio,
-        "PlaybackDevice",
-        partial(miniaudio.PlaybackDevice, backends=[miniaudio.Backend.NULL]),
-    )
+    monkeypatch.setattr(p.preview, "player", PreviewPlayer(backends=[miniaudio.Backend.NULL]))
     game_search(p, qtbot, "Rose garden")
     play = p.preview
     qtbot.keyClick(play.play, Qt.Key.Key_Return)
@@ -315,7 +308,7 @@ def test_personal_game_add_files_and_portable_transfer(
 ) -> None:
     p, imp = ready, ready.imports
     p.manage.click()
-    imp.tools["Create a game"].click()
+    imp.tools["Create album"].click()
     imp.name.setText("Friday night")
     qtbot.keyClick(imp.name, Qt.Key.Key_Return)
     wait(qtbot, p, "album")
@@ -446,7 +439,7 @@ def test_failed_process_check_is_retryable(
     from studio.widgets import GameClosedBlock
 
     block = p.scroll.widget().findChild(GameClosedBlock)
-    assert "Could not check" in block.detail.text()
+    assert "could not tell whether EDOPro is open" in block.detail.text()
     assert settings.music_enabled(p.game) is False
     monkeypatch.setattr(settings, "_game_running", lambda _: False)
     block.retry.click()

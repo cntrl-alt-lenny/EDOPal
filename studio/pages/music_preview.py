@@ -9,6 +9,7 @@ from threading import Lock
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QSlider
+from shiboken6 import isValid
 
 from music.view import SeekState
 from music_player import PreviewPlayer
@@ -16,6 +17,7 @@ from studio import theme as t
 from studio.tasks import TaskRunner, WorkerContext
 from studio.widgets import Panel, label
 
+from .music_sounds_controls import no_device
 from .music_widgets import action, row
 
 
@@ -64,6 +66,11 @@ class Preview(Panel):
         self.slider = SeekBar(self)
         self.time = label("0:00 / 0:00", "small")
         self.body.addLayout(row(self.play, self.slider, self.time))
+        self.notice = label(
+            "No audio device. Connect an audio output and play again.", "muted", True
+        )
+        self.body.addWidget(self.notice)
+        self.notice.hide()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_clock)
         self.timer.setInterval(t.MOTION_MS)
@@ -72,6 +79,7 @@ class Preview(Panel):
     def command(self, work: Callable[[], None]) -> None:
         self.generation += 1
         current = self.generation
+        self.notice.hide()
         self.pending = True
         self.play.setEnabled(False)
         self.slider.setEnabled(False)
@@ -82,16 +90,26 @@ class Preview(Panel):
                     work()
 
         job = self.tasks.start(run)
-        job.error.connect(lambda exc: self.error(str(exc)) if current == self.generation else None)
+
+        def failed(exc: Exception) -> None:
+            if current == self.generation and isValid(self):
+                if no_device(exc):
+                    self.notice.show()
+                else:
+                    self.error(str(exc))
+
+        job.error.connect(failed)
 
         def finished() -> None:
-            if current == self.generation:
+            # The audio worker may finish releasing a device after window teardown.
+            if current == self.generation and isValid(self):
                 self.pending = False
                 self.update_clock()
 
         job.finished.connect(finished)
 
     def stop(self) -> None:
+        self.notice.hide()
         self.path = None
         self.seek.fraction = None
         self.timer.stop()
