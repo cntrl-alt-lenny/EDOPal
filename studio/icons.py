@@ -16,6 +16,7 @@ PATHS = {
     "sounds": "M3 10v4 M7 6v12 M12 3v18 M17 8v8 M21 10v4",
     "music": "M9 17V6l11-3v12 M9 9l11-3 M9 17c0 4-7 5-7 2 0-3 7-5 7-2z M20 15c0 4-7 5-7 2 0-3 7-5 7-2z",
     "decks": "M7 3h10v5c0 4-2 6-5 7-3-1-5-3-5-7z M7 5H3v2c0 3 2 5 5 5 M17 5h4v2c0 3-2 5-5 5 M12 15v4 M8 21h8 M10 19h4",
+    "backup": "M4 8h16v12H4z M3 4h18v4H3z M9 12h6 M12 12v5 M10 15l2 2 2-2",
     "settings": "M4 6h5m5 0h6 M4 12h9m5 0h2 M4 18h2m5 0h9 M10 4h3v4h-3z M14 10h3v4h-3z M7 16h3v4H7z",
     "folder": "M3 6h7l2 2h9v11H3z M3 6V4h7l2 2",
     "library": "M3 5h4v15H3z M10 4h4v16h-4z M16 6l3-1 3 14-3 1z",

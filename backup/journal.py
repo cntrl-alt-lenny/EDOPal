@@ -6,7 +6,7 @@ import os
 import re
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from extras import _atomic_write
@@ -33,6 +33,8 @@ class Change:
 class Transaction:
     id: str
     status: str
+    updated_at: int | None = field(default=None, compare=False)
+    files: int | None = field(default=None, compare=False)
 
 
 def _home(install: Installation) -> Path:
@@ -52,7 +54,15 @@ def transactions(install: Installation) -> tuple[Transaction, ...]:
                 doc = decode(read_small(record, MAX_MANIFEST))
                 if doc.get("status") not in _STATES:
                     raise ValueError("Invalid restore journal status")
-                found.append(Transaction(child.name, doc["status"]))
+                changes = doc.get("changes")
+                found.append(
+                    Transaction(
+                        child.name,
+                        doc["status"],
+                        int(record.stat().st_mtime),
+                        len(changes) if isinstance(changes, list) else None,
+                    )
+                )
     return tuple(found)
 
 

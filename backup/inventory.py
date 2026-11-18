@@ -94,6 +94,7 @@ class Source:
     name: str
     size: int
     content: bytes | None = None
+    modified_at: int | None = None
 
     def open(self, install: Installation) -> BinaryIO:
         if self.content is not None:
@@ -103,7 +104,9 @@ class Source:
             raise ValueError(f"Source is no longer a regular file: {self.name}")
         return path.open("rb")
 
-    def copy_to(self, install: Installation, output: BinaryIO | None, cancel: Cancel) -> str:
+    def copy_to(
+        self, install: Installation, output: BinaryIO | None, cancel: Cancel
+    ) -> tuple[str, int | None]:
         with self.open(install) as stream:
             initial = os.fstat(stream.fileno()) if self.content is None else None
             size, digest = transfer(stream, output, self.size, cancel)
@@ -117,7 +120,7 @@ class Source:
                     or not os.path.samestat(initial, current)
                 ):
                     raise ValueError(f"File changed during read: {self.name}")
-            return digest
+            return digest, int(initial.st_mtime) if initial is not None else self.modified_at
 
 
 @dataclass(frozen=True)
@@ -210,17 +213,18 @@ def sources(
     if "preferences" in selected:
         path = install.target(CONF)
         if path.exists():
+            modified_at = int(path.stat().st_mtime)
             for key, value in preferences.values(read_small(path, preferences.LIMIT)).items():
-                result.append(Source("preferences/" + key, len(value), value))
+                result.append(Source("preferences/" + key, len(value), value, modified_at))
     if len(result) > MAX_FILES:
         raise ValueError("Too many personal files")
     return sorted(result, key=lambda f: f.name)
 
 
-def inventory(install: Installation) -> dict[str, Total]:
+def inventory(install: Installation, *, cancel: Cancel = None) -> dict[str, Total]:
     counts = dict.fromkeys(CATEGORIES, 0)
     sizes = counts.copy()
-    for file in sources(install, CATEGORIES):
+    for file in sources(install, CATEGORIES, cancel):
         cat = category(file.name)
         counts[cat] += 1
         sizes[cat] += file.size
@@ -229,6 +233,6 @@ def inventory(install: Installation) -> dict[str, Total]:
 
 def hashes(install: Installation, categories: Iterable[str], cancel: Cancel) -> dict[str, str]:
     return {
-        file.name: file.copy_to(install, None, cancel)
+        file.name: file.copy_to(install, None, cancel)[0]
         for file in sources(install, categories, cancel)
     }
