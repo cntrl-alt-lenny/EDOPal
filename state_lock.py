@@ -1,8 +1,35 @@
 """OS-owned locks for local game and library updates."""
 
 import contextlib
+import functools
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Concatenate, ParamSpec, TypeVar
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+@contextlib.contextmanager
+def appearance_lock(game: Path) -> Iterator[None]:
+    root = game.resolve()
+    lock = root / ".edopro-appearance.lock"
+    if lock.resolve() != lock or lock.is_symlink():
+        raise OSError("Invalid installation lock file.")
+    with locked(root, lock.name):
+        yield
+
+
+def appearance_writer(
+    func: Callable[Concatenate[str, _P], _T],
+) -> Callable[Concatenate[str, _P], _T]:
+    @functools.wraps(func)
+    def wrapper(edopro_path: str, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        with appearance_lock(Path(edopro_path)):
+            return func(edopro_path, *args, **kwargs)
+
+    return wrapper
 
 
 @contextlib.contextmanager

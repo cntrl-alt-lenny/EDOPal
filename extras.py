@@ -10,6 +10,8 @@ from tempfile import NamedTemporaryFile
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
+from state_lock import appearance_writer
+
 ASSETS = Path(__file__).resolve().parent / "assets" / "extras"
 PACKS = ASSETS.parent / "appearance"
 SKINS = ("Abyss", "Moon", "Nebula", "Ristretto")
@@ -62,8 +64,13 @@ def _publish(root: Path, backups: Path, relative: str | Path, content: bytes) ->
     _atomic_write(destination, content)
 
 
+@appearance_writer
 def install(edopro_path: str, config_path: str, group: str) -> None:
     """Install the original Midnight Circuit and synth extras."""
+    _install(edopro_path, config_path, group)
+
+
+def _install(edopro_path: str, config_path: str, group: str) -> None:
     root = Path(edopro_path).resolve()
     backups = _backup_dir(root, config_path)
     files = sorted(p for p in (ASSETS / group).rglob("*") if p.is_file())
@@ -180,10 +187,17 @@ def _update_settings(content: bytes, values: dict[str, str | None]) -> bytes:
     newline = b"\r\n" if b"\r\n" in body else b"\n"
     remaining = dict(values)
     lines = []
-    for line in body.splitlines(keepends=True):
+    # EDOPro uses the last occurrence. Leave shadowed settings and their spacing alone.
+    original_lines = body.splitlines(keepends=True)
+    last = {
+        match[2].decode(): i
+        for i, line in enumerate(original_lines)
+        if (match := SETTING.match(line))
+    }
+    for i, line in enumerate(original_lines):
         match = SETTING.match(line)
         key = match[2].decode() if match else ""
-        if key not in values:
+        if key not in values or (values[key] is not None and i != last[key]):
             lines.append(line)
             continue
         remaining.pop(key, None)
@@ -192,15 +206,17 @@ def _update_settings(content: bytes, values: dict[str, str | None]) -> bytes:
             lines.append(
                 line[: match.start(4)]
                 + value.encode("utf-8", "surrogateescape")
+                + match[4][len(match[4].rstrip(b" \t")) :]
                 + line[match.end(4) :]
             )
     body = b"".join(lines)
+    added = []
     for key, value in remaining.items():
         if value is not None:
-            if body and not body.endswith((b"\n", b"\r")):
-                body += newline
-            body += f"{key} = {value}".encode("utf-8", "surrogateescape") + newline
-    return bom + body
+            added.append(f"{key} = {value}".encode("utf-8", "surrogateescape") + newline)
+    # Leave an unterminated final line byte-identical when an added key is removed.
+    insert = len(body) if not body or body.endswith((b"\r", b"\n")) else body.rfind(b"\n") + 1
+    return bom + body[:insert] + b"".join(added) + body[insert:]
 
 
 def can_restore(edopro_path: str, config_path: str) -> bool:
@@ -400,6 +416,7 @@ def _change_group(root: Path, config_path: str, group: str, files: dict[str, byt
             raise
 
 
+@appearance_writer
 def apply_appearance(
     edopro_path: str,
     config_path: str,
@@ -467,7 +484,7 @@ def apply_appearance(
     if audio == "Thonk":
         _install_pack(root, backups, "shared", "sound/")
     elif audio == "Synth":
-        install(edopro_path, config_path, "sound")
+        _install(edopro_path, config_path, "sound")
     if player_sleeve or opponent_sleeve:
         active = f"Monokai {skin}" if skin else current_skin(str(root))
         files = {}

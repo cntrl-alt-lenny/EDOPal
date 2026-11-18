@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config import user_data_dir
-from state_lock import locked
+from state_lock import appearance_lock, locked
 
 ART = Path(__file__).resolve().parent / "assets" / "music"
 FORMATS = frozenset({".flac", ".ogg", ".mp3", ".wav"})
@@ -498,7 +498,7 @@ def set_music_enabled(game: Path, enabled: bool) -> None:
         raise OSError("The EDOPro settings file points outside the selected installation.")
     if _game_running(root):
         raise OSError("Close this EDOPro installation before changing its music setting.")
-    with locked(_sound_path(game, ".edopro-hd-sync"), ".audio-settings.lock"):
+    with appearance_lock(root):
         original = conf.read_bytes()
         matches = list(_ENABLE_MUSIC.finditer(original))
         if not matches:
