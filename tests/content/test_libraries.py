@@ -8,7 +8,6 @@ from threading import Event
 from zipfile import ZipFile
 
 import pytest
-from conftest import FakeHTTP, pack_entry, send
 from PySide6.QtGui import QColor, QImage
 
 from content.cache import PackCache
@@ -24,6 +23,8 @@ from music_library import store_track, tracks, use_track
 from sleeves import Library, ensure_gui, png_bytes
 from themes import PRESETS, ThemeLibrary
 from tools.build_content_release import build_release
+
+from .conftest import FakeHTTP, pack_entry, send
 
 VERSION = "5.5.0"
 
