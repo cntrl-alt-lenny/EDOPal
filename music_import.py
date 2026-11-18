@@ -9,7 +9,19 @@ from pathlib import Path, PurePosixPath
 from typing import BinaryIO
 from zipfile import BadZipFile, ZipFile
 
+from music.catalogue import library_root, personal_games, save_personal_game
+from music.importing import ImportItem, ImportResult, execute_import, plan_import
 from music_library import FORMATS, SCENES, catalog, store_track
+
+__all__ = [
+    "ImportItem",
+    "ImportResult",
+    "execute_import",
+    "plan_import",
+    "import_library",
+    "export_library",
+    "import_power_of_chaos",
+]
 
 Progress = Callable[[int, int], None]
 
@@ -50,7 +62,13 @@ def import_library(
     """Import a local game/scene collection; skip hidden, unsupported and unrelated files."""
     folder = folder.resolve(strict=True)
     files = []
-    for key in catalog():
+    destination = root or library_root()
+    custom = personal_games(folder)
+    for game in custom.values():
+        current = destination / game.id / "game.json"
+        if not current.exists():
+            save_personal_game(game, destination)
+    for key in catalog(root=destination):
         for scene in SCENES:
             base = folder / key / scene
             if not base.is_dir():
@@ -64,29 +82,48 @@ def import_library(
                     if not audio.resolve().is_relative_to(folder):
                         raise ValueError(f"{audio.name} is a link outside the selected collection.")
                     files.append((audio, key, scene))
+    if not files and custom:
+        return 0, 0
     if not files:
         raise ValueError(
-            "Choose a soundtracks folder copied from another installation. It contains game folders with deck or duel audio inside."
+            "Choose a soundtracks folder copied from another installation. Each recording belongs in a game-id/scene folder."
         )
     return _store(files, root, progress)
 
 
-def _store(files: list[tuple[Path, str, str]], root: Path | None, progress: Progress | None):
-    added = 0
-    for i, (path, key, scene) in enumerate(files):
+def export_library(
+    destination: Path, *, root: Path | None = None, progress: Progress | None = None
+) -> tuple[int, int]:
+    """Copy the portable game manifests and recordings into a transfer folder."""
+    source = (root or library_root()).resolve()
+    if destination.resolve().is_relative_to(source):
+        raise ValueError("Choose an export folder outside the source library.")
+    return import_library(source, root=destination, progress=progress)
+
+
+def _store(
+    files: list[tuple[Path, str, str]], root: Path | None, progress: Progress | None
+) -> tuple[int, int]:
+    added = duplicates = 0
+    failures = []
+    for i, (path, key, scene) in enumerate(files, 1):
         try:
             _, new = store_track(path, key, scene, root=root)
-        except (ValueError, OSError) as exc:
-            raise ValueError(
-                f"Imported {i} of {len(files)} recordings. {exc} You can retry safely."
-            ) from exc
-        added += int(new)
+            added += int(new)
+            duplicates += int(not new)
+        except Exception as exc:
+            failures.append(f"{path.name} ({exc})")
         if progress:
-            progress(i + 1, len(files))
-    return added, len(files) - added
+            progress(i, len(files))
+    if failures:
+        detail = ", ".join(failures)
+        raise ValueError(
+            f"Imported {added}, already present {duplicates}, failed {len(failures)}. {detail}"
+        )
+    return added, duplicates
 
 
-def _read_game(stream: BinaryIO, length: int, temporary: Path):
+def _read_game(stream: BinaryIO, length: int, temporary: Path) -> list[tuple[Path, str, str]]:
     header = stream.read(12)
     if len(header) != 12 or header[:8] != b"KCEJYUGI":
         return []
@@ -119,8 +156,9 @@ def _read_game(stream: BinaryIO, length: int, temporary: Path):
     result = []
     for start, size, key, scene, title in sorted(recordings):
         destination = temporary / key / scene / (title + ".wav")
+        # Separate temporary directories let the content-aware store compare alternate takes.
         if destination.exists():
-            continue
+            destination = Path(tempfile.mkdtemp(dir=temporary)) / destination.name
         stream.seek(start)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with destination.open("xb") as out:

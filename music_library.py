@@ -3,226 +3,86 @@
 from __future__ import annotations
 
 import contextlib
-import hashlib
-import json
 import os
 import re
 import shutil
-import subprocess
-import sys
 import tempfile
-from dataclasses import dataclass
+from collections.abc import Iterable
+from contextlib import AbstractContextManager
 from pathlib import Path
 
-from config import user_data_dir
+from music.audio import (
+    FORMATS,
+    _audio,
+    _copy_new,
+    _digest,
+    _valid_audio,
+    import_track,
+    store_track,
+)
+from music.catalogue import (
+    ART,
+    LOCAL,
+    SCENES,
+    Game,
+    atomic_json,
+    catalog,
+    create_game,
+    library_root,
+)
+from music.catalogue import (
+    identify as _identify,
+)
+from music.discovery import (
+    Track,
+    _folders,
+    _sound_path,
+    _state,
+    active_tracks,
+    backup_folder,
+    describe,
+    read_json,
+    records,
+    scan_scene,
+    tracks,
+    validate_records,
+)
+from music.settings import _game_running, music_disabled, music_enabled, write_music_enabled
 from state_lock import locked
 
-ART = Path(__file__).resolve().parent / "assets" / "music"
-FORMATS = frozenset({".flac", ".ogg", ".mp3", ".wav"})
-SCENES = {"deck": "Deck editor", "duel": "Duels"}
-LOCAL = "local"
+__all__ = [
+    "ART",
+    "FORMATS",
+    "LOCAL",
+    "SCENES",
+    "Game",
+    "Track",
+    "_identify",
+    "catalog",
+    "create_game",
+    "library_root",
+    "import_track",
+    "store_track",
+    "tracks",
+    "set_playlist",
+    "playlist",
+    "use_track",
+    "add_to_playlist",
+    "remove_from_playlist",
+    "use_game",
+    "can_restore",
+    "can_undo",
+    "restore_playlist",
+    "undo_playlist",
+    "music_enabled",
+    "music_disabled",
+    "set_music_enabled",
+    "original_duel_track_path",
+    "playlist_lock",
+]
 
 
-@dataclass(frozen=True)
-class Game:
-    id: str
-    title: str
-    platform: str
-    year: int
-    aliases: tuple[str, ...]
-    cover_page: str
-    fan_cover: bool = False
-    region: str = ""
-
-
-@dataclass(frozen=True)
-class Track:
-    game: str
-    title: str
-    path: Path
-    scene: str
-    in_playlist: bool = False
-
-
-def catalog() -> dict[str, Game]:
-    games = {LOCAL: Game(LOCAL, "EDOPro playlist", "On this installation", 0, (), "")}
-    for row in json.loads((ART / "catalog.json").read_text(encoding="utf-8")):
-        item = Game(
-            row["id"],
-            row["title"],
-            row["platform"],
-            row["year"],
-            tuple(row["aliases"]),
-            row["cover_page"],
-            "fanart" in row["cover_description"].casefold(),
-            row.get("cover_region", ""),
-        )
-        games[item.id] = item
-    return games
-
-
-def library_root() -> Path:
-    return Path(user_data_dir()) / "soundtracks"
-
-
-def _scene(scene: str) -> str:
-    if scene not in SCENES:
-        raise ValueError("Choose Deck editor or Duels.")
-    return scene
-
-
-def _sound_path(game: Path, *parts: str) -> Path:
-    root = game.resolve(strict=True)
-    result = root.joinpath("sound", *parts)
-    if not result.resolve().is_relative_to(root):
-        raise OSError("The selected soundtrack folder points outside this EDOPro installation.")
-    return result
-
-
-def _folders(game: Path, scene: str):
-    yield _sound_path(game, "BGM", _scene(scene))
-    if scene == "duel":
-        # EDOPro includes loose BGM files in the regular duel playlist.
-        yield _sound_path(game, "BGM")
-
-
-def _state(game: Path, scene: str) -> Path:
-    return _sound_path(game, ".edopro-hd-sync", _scene(scene))
-
-
-def _audio(folder: Path):
-    if folder.is_dir():
-        for item in sorted(folder.iterdir(), key=lambda p: p.name.casefold()):
-            if item.is_file() and item.suffix.lower() in FORMATS:
-                yield item
-
-
-def _title(path: Path) -> str:
-    return path.stem.replace("_", " ")
-
-
-def _identify(name: str, games: dict[str, Game]) -> str:
-    plain = re.sub(r"[^a-z0-9]", "", name.casefold())
-    matches = [
-        (len(alias), game.id)
-        for game in games.values()
-        for alias in (*game.aliases, game.title)
-        if re.sub(r"[^a-z0-9]", "", alias.casefold()) in plain
-    ]
-    return max(matches, default=(0, LOCAL))[1]
-
-
-def _record(state: Path, filename: str = "selection.json") -> dict:
-    try:
-        value = json.loads((state / filename).read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    if not isinstance(value, dict) or not all(
-        isinstance(value.get(key), str) for key in ("name", "game", "title", "digest")
-    ):
-        raise ValueError(
-            "The saved soundtrack selection is unreadable. Your original playlist is in the saved folder."
-        )
-    ext = Path(value["name"]).suffix
-    expected = f"HD Sync - {value['game']} - {value['digest'][:16]}{ext}"
-    if (
-        not re.fullmatch(r"[a-z0-9]+", value["game"])
-        or not re.fullmatch(r"[a-f0-9]{64}", value["digest"])
-        or ext not in FORMATS
-        or value["name"] != expected
-    ):
-        raise ValueError("Cannot read the saved soundtrack selection.")
-    return value
-
-
-def tracks(game: Path, scene: str, *, root: Path | None = None) -> list[Track]:
-    """List the selected installation's tracks and the user's per-game music library."""
-    lookup = catalog()
-    root = root or library_root()
-    scene = _scene(scene)
-    output = []
-    state = _state(game, scene)
-    selected = _record(state)
-    for base in _folders(game, scene):
-        for active, directory in ((True, base), (False, state / "saved" / base.name)):
-            if not directory.resolve().is_relative_to(game.resolve()):
-                raise OSError("The saved playlist points outside this EDOPro installation.")
-            for path in _audio(directory):
-                if active and selected.get("name") == path.name and base.name == scene:
-                    output.append(Track(selected["game"], selected["title"], path, scene, True))
-                else:
-                    key = _identify(path.name, lookup)
-                    output.append(Track(key, _title(path), path, scene, active))
-    for key in lookup:
-        for path in _audio(root / key / scene):
-            output.append(Track(key, _title(path), path, scene))
-    if scene == "duel":
-        for path in _audio(ART.parent / "extras" / "sound" / "BGM" / "duel"):
-            output.append(Track(LOCAL, _title(path), path, scene))
-    # One row for the selected recording even when both the game and library hold a copy.
-    unique = {}
-    for entry in output:
-        identity = (
-            entry.game,
-            entry.title.casefold(),
-            entry.path.suffix.lower(),
-            entry.path.stat().st_size,
-        )
-        unique.setdefault(identity, entry)
-    return list(unique.values())
-
-
-def _digest(path: Path) -> str:
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-def _valid_audio(path: Path) -> None:
-    if not path.is_file() or path.suffix.lower() not in FORMATS:
-        raise ValueError("Choose a FLAC, Ogg Vorbis, MP3 or WAV audio file.")
-    with path.open("rb") as source:
-        header = source.read(12)
-    extension = path.suffix.lower()
-    headers = {".flac": b"fLaC", ".ogg": b"OggS", ".wav": (b"RIFF", b"RF64")}
-    if extension in headers and not header.startswith(headers[extension]):
-        raise ValueError(f"{path.name} does not contain {extension[1:].upper()} audio.")
-    if extension == ".mp3" and not (
-        header.startswith(b"ID3")
-        or (len(header) > 1 and header[0] == 255 and header[1] & 224 == 224)
-    ):
-        raise ValueError(f"{path.name} does not appear to contain MP3 audio.")
-    try:
-        import miniaudio
-    except ImportError:
-        return
-    try:
-        info = miniaudio.get_file_info(str(path))
-    except miniaudio.MiniaudioError as exc:
-        raise ValueError(
-            f"Cannot decode {path.name}. Choose FLAC, Ogg Vorbis, MP3 or WAV audio."
-        ) from exc
-    if not info.num_frames or not info.sample_rate:
-        raise ValueError(f"{path.name} has no playable audio.")
-
-
-def _copy_new(source: Path, destination: Path) -> None:
-    """Publish a complete file without replacing an existing one."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        dir=destination.parent, prefix=".import-", delete=False
-    ) as staged:
-        temp = Path(staged.name)
-    try:
-        shutil.copyfile(source, temp)
-        if destination.exists():
-            raise FileExistsError(destination)
-        # Both paths are in the locked library/installation on the same volume.
-        os.rename(temp, destination)
-    finally:
-        temp.unlink(missing_ok=True)
-
-
-def playlist_lock(game: Path, scene: str):
+def playlist_lock(game: Path, scene: str) -> AbstractContextManager[None]:
     return locked(_state(game, scene))
 
 
@@ -237,11 +97,11 @@ def original_duel_track_path(game: Path, filename: str) -> Path:
     state = _state(game, "duel")
     live = _sound_path(game, "BGM", "duel", filename)
     saved = _sound_path(game, ".edopro-hd-sync", "duel", "saved", "duel", filename)
-    if (state / "pending.json").exists():
+    if (state / "pending.json").exists() or (state / "restoring.json").exists():
         raise OSError(
             "An earlier soundtrack change was interrupted. Restore the duel playlist first."
         )
-    if _record(state):
+    if (state / "selection.json").exists():
         if live.exists():
             raise OSError(
                 f"{filename} was added to the active duel playlist. Restore the playlist before editing the original."
@@ -254,55 +114,14 @@ def original_duel_track_path(game: Path, filename: str) -> Path:
     return live
 
 
-def import_track(source: Path, key: str, scene: str, *, root: Path | None = None) -> Path:
-    return store_track(source, key, scene, root=root)[0]
-
-
-def store_track(
-    source: Path, key: str, scene: str, *, root: Path | None = None
-) -> tuple[Path, bool]:
-    """Store one recording and report whether a new file was added."""
-    if key not in catalog():
-        raise ValueError("Choose a game from the library.")
-    _valid_audio(source)
-    storage = (root or library_root()).resolve()
-    base = storage / key / _scene(scene)
-    if not base.resolve().is_relative_to(storage):
-        raise OSError("The target folder points outside your soundtrack library.")
-    stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", source.stem).strip().rstrip(".")[:160] or "Track"
-    if re.fullmatch(r"(?:AUX|PRN|CON|NUL|COM[1-9]|LPT[1-9])", stem, re.I):
-        stem = "_" + stem
-    with locked(base):
-        out = base / (stem + source.suffix.lower())
-        index = 2
-        while out.exists():
-            if source.samefile(out) or _digest(source) == _digest(out):
-                return out, False
-            out = base / f"{stem} ({index}){source.suffix.lower()}"
-            index += 1
-        _copy_new(source, out)
-        return out, True
-
-
 def can_restore(game: Path, scene: str) -> bool:
     state = _state(game, scene)
     return (
-        (state / "pending.json").is_file()
+        (state / "restoring.json").is_file()
+        or (state / "pending.json").is_file()
         or (state / "selection.json").is_file()
         or any(any(_audio(state / "saved" / folder.name)) for folder in _folders(game, scene))
     )
-
-
-def _write_pending(state: Path, value: dict) -> None:
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=state, prefix=".select-", delete=False
-    ) as tmp:
-        temp = Path(tmp.name)
-    try:
-        temp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-        temp.replace(state / "pending.json")
-    finally:
-        temp.unlink(missing_ok=True)
 
 
 def _move(source: Path, destination: Path, changes: list[tuple[Path, Path]]) -> None:
@@ -334,190 +153,311 @@ def _retire_current(folder: Path, state: Path, record: dict, changes: list) -> N
         _move(active, retired, changes)
 
 
-def _clear_retired(changes: list[tuple[Path, Path]], state: Path) -> None:
-    for _, moved in changes:
-        if moved.parent == state and moved.name.startswith(".retiring-"):
+def _clear_staging(state: Path) -> None:
+    """After commit, reclaim transient copies including those from an interrupted change."""
+    for path in state.iterdir():
+        if not re.fullmatch(r"\.(?:prepared|retiring)-[a-z0-9_]{8}", path.name):
+            continue
+        with contextlib.suppress(OSError):
+            if path.is_file():
+                path.unlink()
+            elif path.resolve() == path:
+                for staged in path.iterdir():
+                    if (
+                        re.fullmatch(r"HD Sync - [a-z0-9]+ - [a-f0-9]{16}", staged.stem)
+                        and staged.suffix in FORMATS
+                    ):
+                        staged.unlink()
+                path.rmdir()
+
+
+def set_music_enabled(game: Path, enabled: bool) -> None:
+    if _game_running(game):
+        raise OSError("Close this EDOPro installation before changing its music setting.")
+    write_music_enabled(game, enabled)
+
+
+def _write_pending(state: Path, value: dict) -> None:
+    atomic_json(state / "pending.json", value)
+
+
+def _history(game: Path, scene: str) -> Path:
+    return _sound_path(game, ".edopro-hd-sync", scene, "undo")
+
+
+def _remember(game: Path, scene: str, rows: Iterable[Track]) -> list[dict]:
+    history = _history(game, scene)
+    result = []
+    for row in rows:
+        digest = _digest(row.path)
+        record = describe(row, digest)
+        copy = history / record["name"]
+        if not copy.exists():
+            _copy_new(row.path, copy, digest)
+        if _digest(copy) != digest:
+            raise OSError("The previous playlist changed during copying.")
+        result.append(record)
+    return result
+
+
+def _prune_history(game: Path, scene: str, previous: list[dict]) -> None:
+    keep = {row["name"] for row in previous}
+    for path in _audio(_history(game, scene)):
+        if path.name not in keep:
             with contextlib.suppress(OSError):
-                moved.unlink()
+                path.unlink()
 
 
-def use_track(game: Path, track: Track) -> None:
-    """Make one track the scene's playlist. Park every pre-existing track for Restore."""
-    scene = _scene(track.scene)
-    if track.game not in catalog():
-        raise ValueError("Unknown soundtrack.")
-    _valid_audio(track.path)
+def _publish(
+    game: Path, scene: str, chosen: Iterable[Track], games: dict[str, Game], *, undo: bool = False
+) -> None:
     state = _state(game, scene)
     main = _sound_path(game, "BGM", scene)
-    state_saved = state / "saved"
-    if not state_saved.resolve().is_relative_to(game.resolve()):
-        raise OSError("The backup folder points outside this installation.")
-    with playlist_lock(game, scene):
-        pending = state / "pending.json"
-        if pending.exists():
-            raise OSError(
-                "The last soundtrack change was interrupted. Choose Restore playlist, then try again."
-            )
-        main.mkdir(parents=True, exist_ok=True)
-        digest = _digest(track.path)
-        old = _record(state)
-        name = f"HD Sync - {track.game} - {digest[:16]}{track.path.suffix.lower()}"
-        active = main / name
-        if (
-            old.get("digest") == digest
-            and active.is_file()
-            and _digest(active) == digest
-            and sum(1 for folder in _folders(game, scene) for _ in _audio(folder)) == 1
-        ):
-            return
-        fd, tmpname = tempfile.mkstemp(dir=state, prefix=".prepared-")
-        os.close(fd)
-        temp = Path(tmpname)
-        changes = []
-        try:
-            # Stage first, since the source itself might be the track about to be moved.
-            shutil.copyfile(track.path, temp)
-            if _digest(temp) != digest:
+    pending = state / "pending.json"
+    if pending.exists() or (state / "restoring.json").exists():
+        raise OSError("The last soundtrack change was interrupted. Choose Restore playlist first.")
+    try:
+        old = records(state)
+    except ValueError as exc:
+        raise ValueError("The saved selection is unreadable. Restore the playlist first.") from exc
+    current = active_tracks(game, scene, games)
+    desired: list[dict] = []
+    seen = set()
+    changes: list[tuple[Path, Path]] = []
+    with tempfile.TemporaryDirectory(dir=state, prefix=".prepared-") as temporary:
+        for track in chosen:
+            if track.game not in games:
+                raise ValueError("Choose a game from the library.")
+            _valid_audio(track.path)
+            digest = _digest(track.path)
+            if digest in seen:
+                continue
+            seen.add(digest)
+            row = describe(track, digest)
+            staged = Path(temporary) / row["name"]
+            shutil.copyfile(track.path, staged)
+            if _digest(staged) != digest:
                 raise OSError("The source changed during copying. Please try again.")
-            # Until this journal becomes the committed selection, Restore can identify
-            # both possible managed tracks after a process exit or power interruption.
-            _write_pending(
-                state, {"name": name, "digest": digest, "game": track.game, "title": track.title}
-            )
-            _retire_current(main, state, old, changes)
+            desired.append(row)
+        if not desired:
+            raise ValueError("Keep at least one track or restore the original playlist.")
+        if old == desired and [row["digest"] for row in old] == [t.digest for t in current]:
+            return
+        previous = _remember(game, scene, current) if old and not undo else []
+        old_files = {(row["name"], row["digest"]) for row in old}
+        # Recovery must distinguish a pre-existing identically named file from a published copy.
+        originals = [
+            t.path.name
+            for t in current
+            if t.path.parent == main and (t.path.name, t.digest) not in old_files
+        ]
+        selection = {"tracks": desired, "original_names": originals}
+        if not undo:
+            selection["previous"] = previous  # Empty denotes the original EDOPro folders.
+        _write_pending(state, selection)
+        try:
+            for record in old:
+                _retire_current(main, state, record, changes)
             for folder in _folders(game, scene):
-                backup = state_saved / folder.name
-                if not backup.resolve().is_relative_to(game.resolve()):
-                    raise OSError("The backup folder points outside this installation.")
+                backup = backup_folder(game, scene, folder)
                 for path in list(_audio(folder)):
                     if path.is_symlink():
                         raise OSError(f"Cannot move linked track {path.name}.")
                     _move(path, backup / path.name, changes)
-            _move(temp, active, changes)
+            for record in desired:
+                _move(Path(temporary) / record["name"], main / record["name"], changes)
             pending.replace(state / "selection.json")
         except BaseException:
             _rollback(changes)
             pending.unlink(missing_ok=True)
             raise
-        finally:
-            temp.unlink(missing_ok=True)
-        _clear_retired(changes, state)
+    _clear_staging(state)
+    (state / "restored.json").unlink(missing_ok=True)
+    _prune_history(game, scene, previous)
+
+
+def set_playlist(
+    game: Path, scene: str, chosen: Iterable[Track], *, root: Path | None = None
+) -> None:
+    """Replace this scene with an ordered set. Tracks can come from any scene."""
+    with playlist_lock(game, scene):
+        _publish(game, scene, chosen, catalog(root=root))
+
+
+def playlist(game: Path, scene: str, *, root: Path | None = None) -> list[Track]:
+    """The scene's ordered active rows, including EDOPro's native playlist before any edit."""
+    return active_tracks(game, scene, catalog(root=root))
+
+
+def use_track(game: Path, track: Track, *, root: Path | None = None) -> None:
+    set_playlist(game, track.scene, [track], root=root)
+
+
+def add_to_playlist(game: Path, track: Track, *, root: Path | None = None) -> None:
+    with playlist_lock(game, track.scene):
+        games = catalog(root=root)
+        current = active_tracks(game, track.scene, games)
+        digest = track.digest or _digest(track.path)
+        if any(row.digest == digest for row in current):
+            return
+        _publish(game, track.scene, [*current, track], games)
+
+
+def remove_from_playlist(game: Path, track: Track, *, root: Path | None = None) -> None:
+    with playlist_lock(game, track.scene):
+        games = catalog(root=root)
+        current = active_tracks(game, track.scene, games)
+        digest = track.digest or _digest(track.path)
+        kept = [row for row in current if row.digest != digest]
+        if len(kept) != len(current):
+            _publish(game, track.scene, kept, games)
+
+
+def use_game(
+    game: Path, scene: str, key: str, *, root: Path | None = None, all_scenes: bool = False
+) -> None:
+    """Select the game's cues for this scene, or its complete album across scenes."""
+    with playlist_lock(game, scene):
+        games = catalog(root=root)
+        source_scenes = SCENES if all_scenes else (scene,)
+        chosen = []
+        for source in source_scenes:
+            rows = scan_scene(game, source, root or library_root(), games)
+            chosen.extend(
+                sorted(
+                    (row for row in rows if row.game == key), key=lambda row: row.title.casefold()
+                )
+            )
+        _publish(game, scene, chosen, games)
+
+
+def _restore(game: Path, scene: str, *, remember: bool) -> None:
+    state = _state(game, scene)
+    if not can_restore(game, scene):
+        return
+    changes = []
+    restoring = state / "restoring.json"
+    resumed = restoring.exists()
+    saved = []
+    try:
+        if resumed:
+            # All managed tracks have been retired. Some originals may already be live.
+            try:
+                saved = validate_records(read_json(restoring).get("previous", []))
+            except (OSError, ValueError):
+                saved = []
+        else:
+            saved = _retire_selection(game, scene, changes, remember=remember)
+            atomic_json(restoring, {"previous": saved})
+        for folder in _folders(game, scene):
+            for path in list(_audio(backup_folder(game, scene, folder))):
+                _move(path, folder / path.name, changes)
+    except BaseException:
+        _rollback(changes)
+        if not resumed:
+            restoring.unlink(missing_ok=True)
+        raise
+    # From here on a retry only finishes metadata cleanup, never retires a restored original.
+    if saved:
+        atomic_json(state / "restored.json", {"previous": saved})
+    else:
+        (state / "restored.json").unlink(missing_ok=True)
+    (state / "pending.json").unlink(missing_ok=True)
+    (state / "selection.json").unlink(missing_ok=True)
+    restoring.unlink()
+    _clear_staging(state)
+    _prune_history(game, scene, saved)
+
+
+def _retire_selection(
+    game: Path, scene: str, changes: list[tuple[Path, Path]], *, remember: bool
+) -> list[dict]:
+    state = _state(game, scene)
+    main = _sound_path(game, "BGM", scene)
+    damaged = False
+    managed = []
+    for filename in ("selection.json", "pending.json"):
+        try:
+            candidates = records(state, filename)
+            if filename == "pending.json" and candidates:
+                originals = read_json(state / filename).get("original_names", [])
+                if not isinstance(originals, list):
+                    raise ValueError("Invalid pending soundtrack selection.")
+                candidates = [
+                    r
+                    for r in candidates
+                    if r["name"] not in originals
+                    or (backup_folder(game, scene, main) / r["name"]).exists()
+                ]
+            managed.extend(candidates)
+        except (ValueError, OSError):
+            damaged = True
+    previous = []
+    if remember and not damaged and not (state / "pending.json").exists():
+        for row in managed:
+            path = main / row["name"]
+            if path.is_file() and _digest(path) == row["digest"]:
+                previous.append(Track(row["game"], row["title"], path, scene))
+    saved = _remember(game, scene, previous)
+    for record in managed:
+        _retire_current(main, state, record, changes)
+    if damaged:
+        # A damaged journal cannot prove ownership. Preserve plausible managed files in recovery.
+        for path in list(_audio(main)):
+            match = re.fullmatch(r"HD Sync - [a-z0-9]+ - ([a-f0-9]{16})", path.stem)
+            if match and _digest(path).startswith(match[1]):
+                recovery = _sound_path(game, ".edopro-hd-sync", scene, "recovered")
+                recovery.mkdir(exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    dir=recovery, suffix=path.suffix, prefix=path.stem + "-", delete=False
+                ) as f:
+                    destination = Path(f.name)
+                destination.unlink()
+                _move(path, destination, changes)
+    return saved
 
 
 def restore_playlist(game: Path, scene: str) -> None:
-    scene = _scene(scene)
-    state = _state(game, scene)
     with playlist_lock(game, scene):
-        changes = []
-        try:
-            _retire_current(_sound_path(game, "BGM", scene), state, _record(state), changes)
-            _retire_current(
-                _sound_path(game, "BGM", scene), state, _record(state, "pending.json"), changes
-            )
-            for folder in _folders(game, scene):
-                backup = state / "saved" / folder.name
-                if not backup.resolve().is_relative_to(game.resolve()):
-                    raise OSError("The backup folder points outside this installation.")
-                for old in list(_audio(backup)):
-                    _move(old, folder / old.name, changes)
-            (state / "selection.json").unlink(missing_ok=True)
-            (state / "pending.json").unlink(missing_ok=True)
-        except BaseException:
-            _rollback(changes)
-            raise
-        _clear_retired(changes, state)
+        _restore(game, scene, remember=True)
 
 
-_ENABLE_MUSIC = re.compile(
-    rb"(?m)^(?:\xef\xbb\xbf)?[ \t]*enable_music[ \t]*=[ \t]*([01])(?=[ \t]*(?:[#;][^\r\n]*)?\r?$)"
-)
-
-
-def music_enabled(game: Path) -> bool | None:
-    try:
-        conf = (game / "config" / "system.conf").read_bytes()
-    except OSError:
+def _previous(state: Path) -> list[dict] | None:
+    if (state / "pending.json").exists() or (state / "restoring.json").exists():
         return None
-    matches = list(_ENABLE_MUSIC.finditer(conf))
-    return matches[-1][1] == b"1" if matches else None
+    path = state / "selection.json"
+    if not path.exists():
+        path = state / "restored.json"
+    data = read_json(path)
+    if "previous" in data:
+        return validate_records(data["previous"])
+    if "name" in data:
+        validate_records([data])
+        return []
+    return None
 
 
-def music_disabled(game: Path) -> bool:
-    return music_enabled(game) is False
+def can_undo(game: Path, scene: str) -> bool:
+    try:
+        return _previous(_state(game, scene)) is not None
+    except (ValueError, OSError):
+        return False
 
 
-def _game_running(game: Path) -> bool:
-    """Match the executable path so an unrelated portable installation can remain open."""
-    root = game.resolve()
-    if sys.platform.startswith("linux"):
-        executables = []
-        for proc in Path("/proc").iterdir():
-            if proc.name.isdigit():
-                with contextlib.suppress(OSError):
-                    executables.append((proc / "exe").readlink())
-    else:
-        if sys.platform == "win32":
-            command = [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); "
-                "Get-Process -Name EDOPro,ygopro -ErrorAction SilentlyContinue | "
-                "ForEach-Object {if ($_.Path) {$_.Path} else {$_.ProcessName}}; exit 0",
-            ]
-        else:
-            command = ["ps", "-axo", "comm="]
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=8,
-                check=True,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise OSError(
-                "Could not check whether EDOPro is open. Change Music in EDOPro’s audio settings instead."
-            ) from exc
-        executables = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
-    return any(
-        exe.stem.casefold() in {"edopro", "ygopro"}
-        and (not exe.is_absolute() or exe.resolve().is_relative_to(root))
-        for exe in executables
-    )
-
-
-def set_music_enabled(game: Path, enabled: bool) -> None:
-    """Change only the existing enable_music bit, preserving EDOPro's volume and file bytes."""
-    root = game.resolve(strict=True)
-    conf = root / "config" / "system.conf"
-    if not conf.resolve().is_relative_to(root) or conf.is_symlink():
-        raise OSError("The EDOPro settings file points outside the selected installation.")
-    if _game_running(root):
-        raise OSError("Close this EDOPro installation before changing its music setting.")
-    with locked(_sound_path(game, ".edopro-hd-sync"), ".audio-settings.lock"):
-        original = conf.read_bytes()
-        matches = list(_ENABLE_MUSIC.finditer(original))
-        if not matches:
-            raise ValueError(
-                "Set Music in EDOPro’s audio settings. This configuration has no recognized enable_music setting."
-            )
-        match = matches[-1]
-        value = b"1" if enabled else b"0"
-        if match[1] == value:
+def undo_playlist(game: Path, scene: str, *, root: Path | None = None) -> None:
+    """Revert the most recent edit or restore in this scene."""
+    with playlist_lock(game, scene):
+        previous = _previous(_state(game, scene))
+        if previous is None:
+            raise ValueError("There is no previous playlist to undo.")
+        if not previous:
+            _restore(game, scene, remember=False)
             return
-        with tempfile.NamedTemporaryFile(
-            dir=conf.parent, prefix=".audio-setting-", delete=False
-        ) as temp:
-            staged = Path(temp.name)
-        try:
-            staged.write_bytes(original[: match.start(1)] + value + original[match.end(1) :])
-            shutil.copymode(conf, staged)
-            if conf.read_bytes() != original:
-                raise OSError("EDOPro settings changed during the update. Please try again.")
-            staged.replace(conf)
-        finally:
-            staged.unlink(missing_ok=True)
+        history = _history(game, scene)
+        chosen = []
+        for row in previous:
+            path = history / row["name"]
+            if _digest(path) != row["digest"]:
+                raise OSError("The undo copy has changed. Restore the original playlist instead.")
+            chosen.append(Track(row["game"], row["title"], path, scene))
+        _publish(game, scene, chosen, catalog(root=root), undo=True)
