@@ -139,7 +139,7 @@ class StudioWindow(QMainWindow):
         brand = QHBoxLayout()
         brand.setContentsMargins(t.SM, 0, 0, t.MD)
         brand.setSpacing(t.MD)
-        brand.addWidget(glyph("brand", t.BRAND_ICON))
+        brand.addWidget(glyph("mark", t.BRAND_ICON + t.XS))
         wordmark = QVBoxLayout()
         wordmark.setSpacing(0)
         wordmark.addWidget(label(config.APP_NAME, "brand"))
