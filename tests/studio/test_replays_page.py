@@ -1,0 +1,194 @@
+import json
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
+from threading import Event, current_thread, main_thread
+from zipfile import ZipFile
+
+import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFileDialog, QLabel
+from pytestqt.qtbot import QtBot
+
+from replays import AnnotationStore, ReplayNotes, index_replays
+from studio.context import Installation
+from studio.pages import replays as page_module
+from studio.pages.replays_library import format_tags, last_to_save, notes_from_fields, rules
+from studio.shell import StudioWindow
+from studio.widgets import Button
+from tools.studio_health_replays_shots import seed_replays
+
+
+def button(window: StudioWindow, name: str) -> Button:
+    return next(b for b in window.current.scroll.widget().findChildren(Button) if b.text() == name)
+
+
+def library(make_window: Callable, qtbot: QtBot) -> StudioWindow:
+    window = make_window()
+    seed_replays(Path(window.ctx.installation.path), Path(window.ctx.cfg.config_path).parent)
+    window.nav["replays"].click()
+    qtbot.waitUntil(lambda: window.current.state == "library")
+    return window
+
+
+def test_search_sort_edit_undo_export_and_reveal(
+    make_window: Callable, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = library(make_window, qtbot)
+    page = window.current
+    page.sort.setCurrentText("Most turns")
+    page.search.setText("tournament")
+    assert [e.details.turns for e in page.list.records.entries] == [12, 8]
+    page.search.setText("absent tag")
+    assert page.no_matches.isVisible()
+    button(window, "Clear search").click()
+    qtbot.keyClick(page.list, Qt.Key.Key_Return)
+    entry = page.selected
+    assert page.state == "detail"
+    page.form.name.setText("Final round")
+    page.form.tags.setText('practice, "round, one", practice')
+    page.form.notes.setPlainText("Remember turn seven.")
+    assert page.form.save.isEnabled() and not page.form.export.isEnabled()
+    monkeypatch.setattr(window.ctx, "confirm", lambda *_: False)
+    assert not window.navigate("cards")
+    qtbot.keyClick(page.form.name, Qt.Key.Key_Escape)
+    assert page.state == "detail"
+    page.form.save.click()
+    qtbot.waitUntil(lambda: page.state == "detail" and page.form.undo.isVisible())
+    store = AnnotationStore(tmp_path)
+    assert store.get(entry.replay_id) == ReplayNotes(
+        "Final round", "Remember turn seven.", ("practice", "round, one")
+    )
+    dest = tmp_path / "duel.zip"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_: (str(dest), ""))
+    page.form.export.click()
+    qtbot.waitUntil(lambda: page.state == "detail")
+    with ZipFile(dest) as archive:
+        assert archive.read("replay.yrpX") == entry.path.read_bytes()
+        assert json.loads(archive.read("notes.json"))["tags"] == ["practice", "round, one"]
+    page.form.export.click()
+    qtbot.waitUntil(lambda: page.state == "write_error")
+    assert any("another name" in line.text() for line in page.findChildren(QLabel))
+    page.escape()
+    seen = []
+
+    def reveal(path: Path) -> bool:
+        assert current_thread() is not main_thread()
+        seen.append(path)
+        return True
+
+    monkeypatch.setattr(page_module, "reveal_file", reveal)
+    page.form.reveal.click()
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+    assert seen == [entry.path]
+    page.form.undo.click()
+    qtbot.waitUntil(lambda: page.state == "detail" and not page.form.undo.isVisible())
+    assert store.get(entry.replay_id) == entry.annotation
+    page.escape()
+    assert page.state == "library"
+
+
+def test_game_open_retry_busy_and_preserve(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = library(make_window, qtbot)
+    page = window.current
+    rolling = page.last
+    monkeypatch.setattr(page_module, "_game_running", lambda _: True)
+    page.preserve.click()
+    qtbot.waitUntil(lambda: page.state == "write_error")
+    assert not window.ctx.busy and rolling.path.exists()
+    started, release = Event(), Event()
+
+    def settle(_: float) -> None:
+        assert current_thread() is not main_thread()
+        started.set()
+        assert release.wait(4)
+
+    monkeypatch.setattr("replays.shelf.sleep", settle)
+    monkeypatch.setattr(page_module, "_game_running", lambda _: False)
+    button(window, "Retry").click()
+    try:
+        qtbot.waitUntil(started.is_set)
+        assert page.state == "busy" and window.ctx.busy
+        assert not page.request_close() and not window.change.isEnabled()
+        assert not window.navigate("cards")
+        assert page.escape()
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: page.state == "library")
+    assert page.last is None and page.saved.read_bytes() == rolling.path.read_bytes()
+    assert window.change.isEnabled()
+    page.saved.rename(rolling.path.with_name("A duel worth keeping.yrpX"))
+    button(window, "Refresh").click()
+    qtbot.waitUntil(lambda: page.state == "library")
+    assert page.last is None
+    rolling.path.write_bytes((rolling.path.parent / "Rush rematch.yrpX").read_bytes())
+    # This different duel is already saved under its own name.
+    page._watch_folder()
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
+    assert page.last is None
+
+
+def test_previous_index_cannot_save_a_different_duel(
+    make_window: Callable, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = library(make_window, qtbot)
+    page = window.current
+    old = page.last
+    source = old.path.parent / "Side deck practice.yrpX"
+    old.path.write_bytes(source.read_bytes())
+    monkeypatch.setattr(page_module, "_game_running", lambda _: False)
+    monkeypatch.setattr("replays.shelf.sleep", lambda _: None)
+    page.preserve.click()
+    qtbot.waitUntil(lambda: page.state == "write_error")
+    assert not list(old.path.parent.glob("Replay-*"))
+    page.escape()
+    qtbot.waitUntil(lambda: page.state == "library")
+    assert page.last is None
+
+
+def test_empty_new_duel_unreadable_and_folder_change(
+    make_window: Callable, qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = make_window()
+    ctx = window.ctx
+    current = ctx.installation
+    ctx.set_installation(Installation())
+    window.nav["replays"].click()
+    page = window.current
+    assert page.state == "no_game"
+    ctx.set_installation(Installation(current.path, False))
+    qtbot.waitUntil(lambda: page.state == "empty")
+    assert any("waiting for card data" in line.text() for line in page.findChildren(QLabel))
+    page.watch.setInterval(50)
+    seed_replays(Path(current.path), tmp_path)
+    qtbot.waitUntil(lambda: page.state == "library")
+    page.search.setText("Interrupted")
+    index = page.list.records.index(0)
+    qtbot.mouseClick(
+        page.list.viewport(), Qt.MouseButton.LeftButton, pos=page.list.visualRect(index).center()
+    )
+    assert page.state == "detail" and page.selected.error
+    assert any("incomplete" in line.text() for line in page.findChildren(QLabel))
+    ctx.set_installation(Installation(str(tmp_path / "unmounted"), False))
+    qtbot.waitUntil(lambda: page.state == "error")
+    (tmp_path / "unmounted").mkdir()
+    button(window, "Retry").click()
+    qtbot.waitUntil(lambda: page.state == "empty")
+    ctx.set_installation(Installation())
+    assert page.state == "no_game"
+
+
+def test_tags_presets_and_two_rolling_formats(tmp_path: Path) -> None:
+    seed_replays(tmp_path, tmp_path)
+    entries = index_replays(tmp_path)
+    last = last_to_save(entries)
+    assert last and rules(last) == "Master Rule 5"
+    other = replace(next(e for e in entries if e.path.stem == "Rush rematch"), is_last=True)
+    assert rules(other) == "Rush Duel"
+    assert last_to_save((last, other)) == last
+    assert last_to_save((last, replace(last, is_last=False), other)) == other
+    tags = ("round, one", 'say "go"', "practice")
+    assert notes_from_fields("Duel", "", format_tags(tags)).tags == tags
+    assert notes_from_fields("Duel", "", "a\r\nb\nc").tags == ("a", "b", "c")

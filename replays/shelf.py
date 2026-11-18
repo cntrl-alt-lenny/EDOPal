@@ -166,11 +166,13 @@ def preserve_last_replay(
     *,
     source: Path | None = None,
     settle_seconds: float = 1.0,
+    expected_id: str | None = None,
 ) -> Path | None:
     """Archive a rolling replay after two matching snapshots. Call from a worker.
 
     Without an explicit source this selects the most recently modified rolling file.
-    Returns None if no replay is ready. Existing identical archives are reused.
+    With expected_id, the file must still match the recording shown to the player.
+    Returns None if no matching replay is ready. Existing identical archives are reused.
     """
     if not math.isfinite(settle_seconds) or settle_seconds <= 0:
         raise ValueError("The settling interval must be positive.")
@@ -206,6 +208,8 @@ def preserve_last_replay(
         return None
     data = after[1]
     digest = hashlib.sha256(data).hexdigest()
+    if expected_id is not None and expected_id != digest:
+        return None
     date = details.header.date
     stamp = date.strftime("%Y%m%d-%H%M%S") if date else "undated"
     suffix = ".yrpX" if details.header.format == "yrpX" else ".yrp"

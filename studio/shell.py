@@ -26,7 +26,9 @@ from studio.installations import InstallationPicker
 from studio.pages.base import Page
 from studio.pages.cards import CardsPage
 from studio.pages.decks import DecksPage
+from studio.pages.health import HealthPage
 from studio.pages.music import MusicPage
+from studio.pages.replays import ReplaysPage
 from studio.pages.settings import SettingsPage
 from studio.pages.skins import SkinsPage
 from studio.pages.sleeves import SleevesPage
@@ -34,7 +36,7 @@ from studio.pages.sounds import SoundsPage
 from studio.tasks import WorkerContext
 from studio.widgets import Button, ElidedLabel, Notice, glyph, label, margins
 
-PAGES = (CardsPage, SkinsPage, SleevesPage, SoundsPage, MusicPage, DecksPage, SettingsPage)
+PAGES = (CardsPage, SkinsPage, SleevesPage, SoundsPage, MusicPage, DecksPage, ReplaysPage, HealthPage, SettingsPage)
 RELEASES = "https://github.com/cntrl-alt-lenny/edopro-hd-cards/releases/latest"
 
 
