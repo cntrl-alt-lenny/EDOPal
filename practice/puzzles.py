@@ -12,6 +12,8 @@ from threading import Event
 from decks.sources import bounded_text
 from doctor.game_data import local_path
 
+from .positions import setup_summary, written_goal
+
 
 @dataclass(frozen=True)
 class Puzzle:
@@ -23,6 +25,7 @@ class Puzzle:
     hints: tuple[str, ...] = ()
     solution: str = ""
     error: str = ""
+    setup: str = ""
 
     @property
     def title(self) -> str:
@@ -94,6 +97,9 @@ def _literals(text: str) -> tuple[str, list[str], list[str]]:
 
 def parse_puzzle(path: str, text: str) -> Puzzle:
     code, comments, hints = _literals(text)
+    # A prompt inside a branch or a callback may describe a later outcome.
+    scripted = re.search(r"\b(?:function|if|for|while|repeat|goto)\b", code)
+    message_goal = written_goal(comments, [] if scripted else hints)
     fields: dict[str, str] = {}
     solutions: list[str] = []
     for comment in comments:
@@ -136,11 +142,12 @@ def parse_puzzle(path: str, text: str) -> Puzzle:
     return Puzzle(
         path,
         hashlib.sha256(text.replace("\r\n", "\n").encode()).hexdigest(),
-        fields.get("objective") or fields.get("goal", ""),
+        fields.get("objective") or fields.get("goal") or message_goal,
         difficulty if "?" not in difficulty else "",
         (life[0], life[1]),
         tuple(dict.fromkeys(hints)),
         "\n".join(solutions),
+        setup=setup_summary(code),
     )
 
 

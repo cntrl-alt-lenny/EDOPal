@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QComboBox, QHBoxLayout, QStackedWidget, QVBoxLayou
 
 from practice.bots import FIT, Bot, filter_bots, random_opponent, rule_name
 from practice.library import Library
+from practice.matchups import Matchups
 from practice.progress import STATES, Progress, filter_puzzles, next_unsolved
 from practice.puzzles import Puzzle
 from studio import theme as t
@@ -37,6 +38,8 @@ def options(box: QComboBox, values: list[tuple[str, object]], index: int = 0) ->
 class Browser(QWidget):
     open_requested = Signal()
     refresh_requested = Signal()
+    lists_requested = Signal()
+    formats_requested = Signal()
 
     def __init__(
         self,
@@ -51,6 +54,10 @@ class Browser(QWidget):
         self.game, self.library, self.progress, self.runner = game, library, progress, runner
         self.progress_available = progress_available
         self.puzzle_mode = False
+        self.matches: Matchups | None = None
+        self.list_index = 0 if library.opponents.lists else -1
+        self.list_name = next(iter(library.opponents.lists), "")
+        self.format_id: int | None = None
         self.last_pick: Bot | None = None
         self.rows: list[Bot] | list[Puzzle] = []
         self.sections: dict[str, tuple[PreviewSection, ...]] = {}
@@ -82,7 +89,10 @@ class Browser(QWidget):
         row.addWidget(self.refresh)
         body.addLayout(row)
         self.search = SearchField()
-        self.list_choice = choice("Forbidden / Limited list", [])
+        self.list_choice = Button("", symbol="library")
+        self.list_choice.clicked.connect(self.lists_requested)
+        self.open_formats = Button("Open Formats", "quiet", "arrow")
+        self.open_formats.clicked.connect(self.formats_requested)
         self.rule = choice("Master Rule", [])
         self.level = choice("Difficulty", [])
         self.fit = choice("List fit", [])
@@ -90,10 +100,6 @@ class Browser(QWidget):
         self.progress_filter = choice("Progress filter", [])
         self.progress_filter.setEnabled(progress_available)
         bots = library.opponents.bots
-        options(
-            self.list_choice,
-            [(s, i) for i, s in enumerate(library.opponents.lists)] or [("No installed lists", -1)],
-        )
         options(
             self.rule,
             [("All rules", None)]
@@ -107,13 +113,21 @@ class Browser(QWidget):
         options(self.fit, [("Any list fit", "")] + [(s, s) for s in FIT.values()])
         options(self.progress_filter, [("Any progress", "")] + [(s, s) for s in STATES])
         self.update_counts()
-        body.addLayout(across(self.search, self.list_choice, self.collection))
+        body.addLayout(
+            across(
+                self.search,
+                self.list_choice,
+                self.open_formats,
+                self.collection,
+                self.progress_filter,
+            )
+        )
         self.filters = QWidget()
-        filters = across(self.rule, self.level, self.fit, self.progress_filter)
+        filters = across(self.rule, self.level, self.fit)
         margins(filters, 0)
         self.filters.setLayout(filters)
         body.addWidget(self.filters)
-        self.warning = label("", "muted", True)
+        self.warning = label("", "body", True)
         body.addWidget(self.warning)
         self.results = PracticeList()
         self.results.selectionModel().currentChanged.connect(self.select)
@@ -168,19 +182,17 @@ class Browser(QWidget):
         split.addWidget(self.preview, 6)
         body.addWidget(self.content, 1)
         self.empty = Panel(t.XL)
-        self.empty.body.addStretch()
         self.empty_title = label("", "heading", True)
         self.empty_copy = label("", "body", True)
         self.empty.body.addWidget(self.empty_title)
         self.empty.body.addWidget(self.empty_copy)
-        self.clear = Button("Clear filters")
-        self.clear.clicked.connect(self.reset_filters)
+        self.clear = Button("Clear filters", "primary")
+        self.clear.clicked.connect(self._recover)
         self.empty.body.addWidget(self.clear, 0, Qt.AlignmentFlag.AlignLeft)
         self.empty.body.addStretch()
         body.addWidget(self.empty, 1)
         self.search.textChanged.connect(self.apply)
         for box in (
-            self.list_choice,
             self.rule,
             self.level,
             self.fit,
@@ -192,8 +204,20 @@ class Browser(QWidget):
 
     def _size_filters(self) -> None:
         compact = self.window().height() <= t.MIN_SIZE[1] + t.HUGE
-        self.show_filters.setVisible(compact)
-        self.filters.setVisible(not compact or self.show_filters.isChecked())
+        has_bots = bool(self.library.opponents.bots)
+        self.show_filters.setVisible(has_bots and compact and not self.puzzle_mode)
+        self.filters.setVisible(
+            has_bots and not self.puzzle_mode and (not compact or self.show_filters.isChecked())
+        )
+        prefix = "Format" if self.matches else "List or format"
+        title = f"{prefix} · {self.list_name}" if self.list_name else "Choose list or format"
+        self.list_choice.setToolTip(f"Choose list or format · {title}")
+        self.list_choice.setAccessibleName(self.list_choice.toolTip())
+        self.list_choice.setText(
+            self.fontMetrics().elidedText(
+                title, Qt.TextElideMode.ElideRight, max(t.TILE_H, self.width() // 3)
+            )
+        )
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -223,18 +247,25 @@ class Browser(QWidget):
         options(self.collection, entries, max(0, self.collection.currentIndex()))
 
     def mode(self, puzzles: bool) -> None:
+        changed = self.puzzle_mode != puzzles
         self.puzzle_mode = puzzles
+        has_entries = bool(self.library.puzzles if puzzles else self.library.opponents.bots)
+        self.search.setVisible(has_entries)
+        self.pick.setVisible(has_entries)
         self.bots.setChecked(not puzzles)
         self.puzzles.setChecked(puzzles)
         for box in (self.list_choice, self.rule, self.level, self.fit):
-            box.setVisible(not puzzles)
-        self.collection.setVisible(puzzles)
-        self.progress_filter.setVisible(puzzles)
+            box.setVisible(not puzzles and has_entries)
+        self.collection.setVisible(puzzles and has_entries)
+        self.progress_filter.setVisible(puzzles and has_entries)
+        self.open_formats.setVisible(not puzzles and self.matches is not None)
+        self._size_filters()
         self.search.setPlaceholderText(
             "Search title or objective" if puzzles else "Search opponent or card"
         )
         self.search.setAccessibleName(self.search.placeholderText())
-        self.search.clear()
+        if changed:
+            self.search.clear()
         self.pick.setText("Next unsolved" if puzzles else "Random opponent")
         self.open.setText("Open puzzle" if puzzles else "Matchup guide")
         self.apply()
@@ -243,6 +274,20 @@ class Browser(QWidget):
         self.search.clear()
         for box in (self.rule, self.level, self.fit, self.progress_filter, self.collection):
             box.setCurrentIndex(0)
+
+    def _recover(self) -> None:
+        entries = self.library.puzzles if self.puzzle_mode else self.library.opponents.bots
+        if entries:
+            self.reset_filters()
+        else:
+            self.refresh_requested.emit()
+
+    def use_list(
+        self, index: int, name: str, fid: int | None = None, matches: Matchups | None = None
+    ) -> None:
+        self.list_index, self.list_name, self.format_id, self.matches = index, name, fid, matches
+        self.current = None
+        self.mode(False)
 
     def apply(self) -> None:
         self.last_pick = None
@@ -279,39 +324,56 @@ class Browser(QWidget):
             noun = "puzzles"
         else:
             self.rows = filter_bots(
-                lib.opponents.bots,
+                self.matches.bots if self.matches else lib.opponents.bots,
                 self.search.text(),
                 self.rule.currentData(),
                 self.level.currentData(),
                 self.fit.currentData(),
-                self.list_choice.currentData(),
+                self.list_index,
             )
             values = []
             for b in self.rows:
-                fit = b.fit(self.list_choice.currentData())
+                fit = b.fit(self.list_index)
+                subtitle = f"{fit}    ·    Level {b.difficulty}    ·    {rules(b)}"
+                if self.matches:
+                    subtitle = (
+                        f"{b.distance.outside} outside · {b.distance.excess} over limit"
+                        if b.distance and fit == "Does not fit"
+                        else fit
+                    )
                 values.append(
                     (
                         b.name,
-                        f"{fit}    ·    Level {b.difficulty}    ·    {rules(b)}",
+                        subtitle,
                         COLOURS.get(fit, t.MUTED),
                     )
                 )
             self.pick.setEnabled(bool(values))
             self.total.setText(f"{len(values)} {'OPPONENT' if len(values) == 1 else 'OPPONENTS'}")
-            warning = " ".join(filter(None, (lib.opponents.warning, lib.opponents.runtime)))
+            warning = " ".join(
+                filter(
+                    None,
+                    (
+                        self.matches.summary if self.matches else "",
+                        lib.opponents.warning,
+                        lib.opponents.runtime,
+                    ),
+                )
+            )
             has_library = bool(lib.opponents.bots)
             noun = "opponents"
         self.warning.setText(warning)
-        self.warning.setVisible(bool(warning))
+        self.warning.setVisible(bool(warning) and has_library)
         self.content.setVisible(bool(values))
         self.empty.setVisible(not values)
         self.empty_title.setText(f"No matching {noun}" if has_library else f"No {noun} to browse")
         self.empty_copy.setText(
             "Try a different search or clear the filters."
             if has_library
-            else "Choose another game folder or rescan after EDOPro finishes updating."
+            else warning or f"The selected game folder contains no {noun}."
         )
-        self.clear.setVisible(has_library)
+        self.clear.setText("Clear filters" if has_library else "Rescan")
+        self.refresh.setVisible(has_library)
         self.results.rows.replace(values)
         if values:
             row = self.rows.index(old) if old in self.rows else 0
@@ -331,7 +393,7 @@ class Browser(QWidget):
             self.preview_job = None
         if isinstance(entry, Bot):
             self.name.set_value(entry.name)
-            self.kicker.setText(entry.fit(self.list_choice.currentData()).upper())
+            self.kicker.setText(entry.fit(self.list_index).upper())
             self.description.setText(
                 f"Deck · {entry.deck or 'Not stated'}    ·    Level {entry.difficulty}    ·    {rules(entry)}"
             )
@@ -356,6 +418,7 @@ class Browser(QWidget):
             self.fact_detail.setText(f"Listed deck · {entry.deck or 'Not stated'}")
         else:
             self.inner.setCurrentIndex(1)
+            self.open.setText("Open journal" if entry.error else "Open puzzle")
             self.kicker.setText(
                 self.progress.get(entry.path, Progress()).status.upper()
                 if self.progress_available
@@ -363,8 +426,10 @@ class Browser(QWidget):
             )
             self.name.set_value(entry.title)
             self.description.setText(entry.collection.replace("/", " › "))
-            self.fact_title.setText("OBJECTIVE")
-            self.fact_copy.setText(entry.error or entry.objective or "Not stated")
+            self.fact_title.setText(
+                "FROM THE STARTING SETUP" if entry.setup and not entry.objective else "OBJECTIVE"
+            )
+            self.fact_copy.setText(entry.error or entry.objective or entry.setup or "Not stated")
             self.fact_detail.setText(f"Difficulty   ·   {entry.difficulty or 'Not stated'}")
             for field, value in zip(self.life_numbers, entry.life, strict=True):
                 field.setText(value or "Not stated")
