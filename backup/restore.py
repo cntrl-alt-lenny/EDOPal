@@ -7,7 +7,6 @@ import os
 import shutil
 import uuid
 from collections import defaultdict
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
@@ -46,6 +45,7 @@ from .journal import (
     transactions,
 )
 from .plan import Plan, plan_restore, puzzle_target
+from .restore_files import clean_temp, destination_stat
 
 
 def _space(path: Path, size: int) -> None:
@@ -67,7 +67,7 @@ def _budget(plan: Plan) -> None:
         seen.add(item.target)
         path = plan.install.target(item.target)
         after = preferences.LIMIT + 2048 if item.action == "merge" else sizes[item.source]
-        before = path.stat().st_size if item.before else 0
+        before = destination_stat(path).st_size if item.before else 0
         staging += before + after + 8192
         # Include directory allocation and one temporary publication per target.
         parent = path.parent
@@ -217,11 +217,17 @@ def _preflight(
     fresh: bool,
     require_closed: bool,
 ) -> None:
+    checked_folders: set[Path] = set()
     for change in changes:
         old, new = (change.after, change.before) if reverse else (change.before, change.after)
-        _, current = _current(install, change, cancel)
+        target, current = _current(install, change, cancel)
         if current != old and (fresh or current != new):
             raise _Blocked("Destination changed since preview", change.target)
+        if current is not None and current != new:
+            destination_stat(target)
+        if not fresh and target.parent not in checked_folders:
+            clean_temp(safe(target.parent, f".edopro-restore-{tx.name}.tmp"), check_only=True)
+            checked_folders.add(target.parent)
         for digest in {old, new} - {None}:
             if signature(safe(tx, digest), cancel) != digest:
                 raise _Blocked("Restore journal checksum mismatch", change.target)
@@ -248,14 +254,12 @@ def _apply(
     cancel: Cancel,
     *,
     fresh: bool = False,
-    begin: Callable[[], None] | None = None,
     require_closed: bool = False,
 ) -> None:
     desired = [
         (c, c.after if reverse else c.before, c.before if reverse else c.after)
         for c in (reversed(changes) if reverse else changes)
     ]
-    _preflight(install, tx, changes, reverse, cancel, fresh, require_closed)
     next_game_check = 0.0
 
     def check_game(target: str) -> None:
@@ -266,15 +270,13 @@ def _apply(
                 raise GameRunning("Close EDOPro before changing files")
             next_game_check = monotonic() + 1
 
-    if begin:
-        begin()
     for i, (change, old, new) in enumerate(desired, 1):
         check(cancel)
         target, current = _current(install, change, cancel)
         temp = safe(target.parent, f".edopro-restore-{tx.name}.tmp")
         if not fresh:
             # A killed process can leave this transaction's unpublished sibling behind.
-            temp.unlink(missing_ok=True)
+            clean_temp(temp)
         if current != new:
             if current != old:
                 raise ValueError(f"Destination changed during restore: {target}")
@@ -282,12 +284,15 @@ def _apply(
             if new is None:
                 # Only undo a file this transaction added, whose bytes still match.
                 # Its complete content is retained in the transaction.
+                destination_stat(target)
                 target.unlink()
             else:
                 blob = safe(tx, new)
                 _space(target.parent, blob.stat().st_size)
                 target.parent.mkdir(exist_ok=True, parents=True)
-                out = temp.open("xb")
+                # Replacement bytes stay private until the original permissions are applied.
+                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+                out = os.fdopen(os.open(temp, flags, 0o600 if old else 0o666), "wb")
                 try:
                     with out, blob.open("rb") as stream:
                         if transfer(stream, out, MAX_FILE, cancel)[1] != new:
@@ -298,10 +303,11 @@ def _apply(
                     if old is None:
                         publish_new(temp, target)
                     else:
-                        temp.chmod(target.stat().st_mode)
+                        mode = destination_stat(target).st_mode
                         temp.replace(target)
+                        target.chmod(mode)
                 finally:
-                    temp.unlink(missing_ok=True)
+                    clean_temp(temp)
         if progress:
             progress(i, len(desired), change.target)
 
@@ -334,10 +340,7 @@ def execute(
         try:
             changes = _stage(plan, staging, progress, cancel)
             check(cancel)
-            if require_closed and _game_running(plan.install.game):
-                raise GameRunning("Close EDOPro before changing files")
-            if any(c.target == CONF for c in changes) and _game_running(plan.install.game):
-                raise GameRunning("Close EDOPro before restoring preferences")
+            _preflight(plan.install, staging, changes, False, cancel, True, require_closed)
             _record(staging, "pending", changes)
             staging.rename(txdir)
         finally:
@@ -387,11 +390,10 @@ def recover(
             if other.id != token and other.status in {"pending", "rolling_back"}:
                 raise ValueError(f"Recover interrupted restore {other.id} first")
 
-        def begin() -> None:
+        with _writer_locks(install, (change.target for change in changes)):
+            _preflight(install, txdir, changes, reverse, cancel, False, require_closed)
             if reverse and state != "rolling_back":
                 _record(txdir, "rolling_back", changes)
-
-        with _writer_locks(install, (change.target for change in changes)):
             _apply(
                 install,
                 txdir,
@@ -399,7 +401,6 @@ def recover(
                 reverse,
                 progress,
                 cancel,
-                begin=begin,
                 require_closed=require_closed,
             )
             _record(txdir, expected, changes)
