@@ -165,9 +165,11 @@ def test_damage_isolated_restore_preserves_unproven_files(tmp_path: Path, bad: b
     (state / "selection.json").write_bytes(bad)
     assert music.can_restore(game, "deck")
     assert {row.source for row in music.tracks(game, "deck", root=root)} >= {"personal", "parked"}
-    music.restore_playlist(game, "deck")
-    assert list(orig.parent.glob("*.wav")) == [orig]
-    assert next((state / "recovered").glob("*.wav")).read_bytes() == song.read_bytes()
+    with pytest.raises(ValueError, match="Cannot verify selection.json"):
+        music.restore_playlist(game, "deck")
+    assert (state / "selection.json").read_bytes() == bad
+    assert (state / "saved/deck/Stock.wav").is_file() and not orig.exists()
+    assert next(orig.parent.glob("*.wav")).read_bytes() == song.read_bytes()
 
 
 def test_same_name_same_size_and_different_name_duplicate(tmp_path: Path) -> None:
@@ -297,13 +299,16 @@ def test_legacy_record_edit_order_and_interrupted_restore(tmp_path: Path) -> Non
     record = json.loads(selection.read_bytes())["tracks"][0]
     selection.write_text(json.dumps(record))
     other = music.Track("tf2", "Next", wav(lib / "tf2/duel/Next.wav", 5), "duel")
-    music.add_to_playlist(game, other, root=lib)
-    assert active(game, "duel", lib) == ["Former", "Next"]
-    music.undo_playlist(game, "duel", root=lib)
     assert active(game, "duel", lib) == ["Former"]
-    # After the retirement checkpoint an identical file can be a returned original.
-    (state / "restoring.json").write_text('{"previous": []}')
-    music.restore_playlist(game, "duel")
+    with pytest.raises(ValueError, match="inventory"):
+        music.add_to_playlist(game, other, root=lib)
+    assert json.loads(selection.read_bytes()) == record
+    # An older restore checkpoint does not identify which originals have returned.
+    restoring = state / "restoring.json"
+    restoring.write_text('{"previous": []}')
+    with pytest.raises(ValueError, match="inventory"):
+        music.restore_playlist(game, "duel")
+    assert restoring.read_text() == '{"previous": []}'
     assert (game / "sound/BGM/duel" / record["name"]).is_file()
 
 
@@ -343,29 +348,22 @@ def test_alternate_bank_takes(tmp_path: Path) -> None:
 
 
 def test_player_preview_and_seek_with_null_output() -> None:
-    from functools import partial
-
     import miniaudio
 
     from music_player import PreviewPlayer
 
     path = music.ART.parent / "extras/sound/BGM/menu/Glass Archive.flac"
-    player = PreviewPlayer()
-    with patch.object(
-        miniaudio,
-        "PlaybackDevice",
-        partial(miniaudio.PlaybackDevice, backends=[miniaudio.Backend.NULL]),
-    ):
-        try:
-            player.play(path)
-            assert player.playing and player.seekable
-            player.seek(3)
-            player.pause()
-            assert not player.playing and 3 <= player.resume_position(path) < player.duration
-            player.seek(player.duration)
-            assert player.resume_position(path) == 0
-        finally:
-            player.stop()
+    player = PreviewPlayer(backends=[miniaudio.Backend.NULL])
+    try:
+        player.play(path)
+        assert player.playing and player.seekable
+        player.seek(3)
+        player.pause()
+        assert not player.playing and 3 <= player.resume_position(path) < player.duration
+        player.seek(player.duration)
+        assert player.resume_position(path) == 0
+    finally:
+        player.stop()
     assert player.path is None and not player.seekable
 
 

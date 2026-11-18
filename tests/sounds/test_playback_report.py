@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 from threading import Event
 
 import miniaudio
@@ -8,6 +9,31 @@ import pytest
 from music_player import PreviewPlayer
 from sounds import AuditionPlayer, SoundSet, bundled_sets, set_sound_enabled, sound_settings
 from sounds.audio import decode_clip
+
+
+def test_automatic_null_device_reports_no_audio(
+    wav, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    device = miniaudio.PlaybackDevice
+
+    def null_device(**kwargs):
+        return device(**{**kwargs, "backends": [miniaudio.Backend.NULL]})
+
+    monkeypatch.setattr(miniaudio, "PlaybackDevice", null_device)
+    clip = decode_clip(wav(), "wav")
+    path = tmp_path / "preview.wav"
+    path.write_bytes(clip.data)
+    file_player = PreviewPlayer()
+    with pytest.raises(OSError, match="No audio device"):
+        file_player.play(path)
+    assert not file_player.playing and file_player.path is None
+    player = AuditionPlayer()
+    try:
+        with pytest.raises(OSError, match="No audio device"):
+            player.preview(SoundSet("Preview", {"draw": clip}), "draw").result(timeout=5)
+        assert not player.playing
+    finally:
+        player.close()
 
 
 def test_preview_sampler_and_clean_stop_through_null_device(wav, monkeypatch):

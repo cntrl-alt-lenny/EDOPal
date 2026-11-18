@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
 import unicodedata
@@ -12,6 +13,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from config import user_data_dir
+from music.storage import sync_directory
 
 ART = Path(__file__).resolve().parents[1] / "assets" / "music"
 LOCAL = "local"
@@ -51,8 +53,12 @@ def atomic_json(path: Path, data: object) -> None:
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as staged:
         temporary = Path(staged.name)
     try:
-        temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        with temporary.open("w", encoding="utf-8") as writer:
+            json.dump(data, writer, ensure_ascii=False)
+            writer.flush()
+            os.fsync(writer.fileno())
         temporary.replace(path)
+        sync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
 

@@ -12,6 +12,9 @@ from time import sleep
 from typing import Literal
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from backup.core import publish_new
+from music.processes import GameProcessUnknown
+
 from .annotations import AnnotationStore, ReplayNotes
 from .format import (
     MAX_FILE_BYTES,
@@ -153,14 +156,6 @@ def search_replays(
     return tuple(entry for _, entry in ranked) + tuple(unknown)
 
 
-def _publish(staged: Path, destination: Path) -> None:
-    # Unix rename can replace a target. Linking publishes a complete file exclusively.
-    if os.name == "nt":
-        staged.rename(destination)
-    else:
-        os.link(staged, destination)
-
-
 def preserve_last_replay(
     installation: str | Path,
     *,
@@ -204,6 +199,8 @@ def preserve_last_replay(
                 return None
         if _signature(source.lstat()) != after[0]:
             return None
+    except GameProcessUnknown:
+        raise
     except (OSError, ReplayFormatError):
         return None
     data = after[1]
@@ -222,7 +219,7 @@ def preserve_last_replay(
                 ending = f"-{number}" if number else ""
                 destination = source.with_name(f"Replay-{stamp}-{digest[:16]}{ending}{suffix}")
                 try:
-                    _publish(staged, destination)
+                    publish_new(staged, destination)
                     return destination
                 except FileExistsError:
                     if not destination.is_symlink() and destination.is_file():
@@ -253,7 +250,7 @@ def export_replay(entry: ReplayEntry, destination: str | Path) -> Path:
             archive.writestr(
                 "notes.json", json.dumps(asdict(entry.annotation), ensure_ascii=False, indent=2)
             )
-        _publish(staged, destination)
+        publish_new(staged, destination)
     finally:
         staged.unlink(missing_ok=True)
     return destination

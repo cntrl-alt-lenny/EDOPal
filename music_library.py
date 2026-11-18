@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import contextlib
-import os
 import re
-import shutil
 import tempfile
-from collections.abc import Callable, Iterable, Sequence
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 from music.audio import (
     FORMATS,
     _audio,
-    _copy_new,
     _digest,
     import_track,
     store_track,
@@ -27,7 +23,6 @@ from music.catalogue import (
     LOCAL,
     SCENES,
     Game,
-    atomic_json,
     catalog,
     create_game,
     library_root,
@@ -41,22 +36,33 @@ from music.discovery import (
     _sound_path,
     _state,
     active_tracks,
-    backup_folder,
     describe,
     read_json,
     record_track,
-    records,
     scan_scene,
     tracks,
     validate_records,
 )
+from music.originals import Originals, read_journal, read_selection, write_journal
+from music.playlist_files import (
+    _clear_staging,
+    _history,
+    _move,
+    _prune_history,
+    _remember,
+    _retire_current,
+    _rollback,
+)
 from music.settings import (
     _ENABLE_MUSIC,
     _game_running,
+    game_process_status,
+    is_game_running,
     music_disabled,
     music_enabled,
     write_audio_enabled,
 )
+from music.storage import copy_synced, ensure_directory, sync_directory
 from state_lock import locked
 
 __all__ = [
@@ -84,6 +90,8 @@ __all__ = [
     "restore_playlist",
     "undo_playlist",
     "music_enabled",
+    "is_game_running",
+    "game_process_status",
     "music_disabled",
     "set_music_enabled",
     "original_duel_track_path",
@@ -91,8 +99,12 @@ __all__ = [
 ]
 
 
-def playlist_lock(game: Path, scene: str) -> AbstractContextManager[None]:
-    return locked(_state(game, scene))
+@contextmanager
+def playlist_lock(game: Path, scene: str) -> Iterator[None]:
+    state = _state(game, scene)
+    ensure_directory(state)
+    with locked(state):
+        yield
 
 
 def original_duel_track_path(game: Path, filename: str) -> Path:
@@ -133,53 +145,6 @@ def can_restore(game: Path, scene: str) -> bool:
     )
 
 
-def _move(source: Path, destination: Path, changes: list[tuple[Path, Path]]) -> None:
-    if destination.exists():
-        raise FileExistsError(
-            f"Two tracks share the name {destination.name}. Rename one before changing this playlist."
-        )
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    source.rename(destination)
-    changes.append((source, destination))
-
-
-def _rollback(changes: list[tuple[Path, Path]]) -> None:
-    for original, moved in reversed(changes):
-        if moved.exists() and not original.exists():
-            moved.rename(original)
-
-
-def _retire_current(folder: Path, state: Path, record: dict, changes: list) -> None:
-    # Only move the exact unchanged file that this tool installed. A replaced file is user data.
-    if not record or Path(record["name"]).name != record["name"]:
-        return
-    active = folder / record["name"]
-    if active.is_file() and _digest(active) == record["digest"]:
-        fd, name = tempfile.mkstemp(dir=state, prefix=".retiring-")
-        os.close(fd)
-        retired = Path(name)
-        retired.unlink()
-        _move(active, retired, changes)
-
-
-def _clear_staging(state: Path) -> None:
-    """After commit, reclaim transient copies including those from an interrupted change."""
-    for path in state.iterdir():
-        if not re.fullmatch(r"\.(?:prepared|retiring)-[a-z0-9_]{8}", path.name):
-            continue
-        with contextlib.suppress(OSError):
-            if path.is_file():
-                path.unlink()
-            elif path.resolve() == path:
-                for staged in path.iterdir():
-                    if (
-                        re.fullmatch(r"HD Sync - [a-z0-9]+ - [a-f0-9]{16}", staged.stem)
-                        and staged.suffix in FORMATS
-                    ):
-                        staged.unlink()
-                path.rmdir()
-
-
 def set_music_enabled(game: Path, enabled: bool) -> None:
     _set_audio_enabled(game, enabled, _ENABLE_MUSIC, "music", "enable_music")
 
@@ -194,38 +159,7 @@ def _set_audio_enabled(
 
 
 def _write_pending(state: Path, value: dict) -> None:
-    atomic_json(state / "pending.json", value)
-
-
-def _history(game: Path, scene: str) -> Path:
-    return _sound_path(game, ".edopro-hd-sync", scene, "undo")
-
-
-def _remember(
-    game: Path, scene: str, rows: Iterable[Track], checkpoint: Callable[[], None] | None = None
-) -> list[dict]:
-    history = _history(game, scene)
-    result = []
-    for row in rows:
-        if checkpoint:
-            checkpoint()
-        digest = _digest(row.path)
-        record = describe(row, digest)
-        copy = history / record["name"]
-        if not copy.exists():
-            _copy_new(row.path, copy, digest)
-        if _digest(copy) != digest:
-            raise OSError("The previous playlist changed during copying.")
-        result.append(record)
-    return result
-
-
-def _prune_history(game: Path, scene: str, previous: list[dict]) -> None:
-    keep = {row["name"] for row in previous}
-    for path in _audio(_history(game, scene)):
-        if path.name not in keep:
-            with contextlib.suppress(OSError):
-                path.unlink()
+    write_journal(state / "pending.json", value)
 
 
 def _publish(
@@ -244,10 +178,15 @@ def _publish(
     pending = state / "pending.json"
     if pending.exists() or (state / "restoring.json").exists():
         raise OSError("The last soundtrack change was interrupted. Choose Restore playlist first.")
-    try:
-        old = records(state)
-    except ValueError as exc:
-        raise ValueError("The saved selection is unreadable. Restore the playlist first.") from exc
+    originals = Originals(game, scene)
+    old = []
+    managed = (state / "selection.json").exists()
+    if managed:
+        _, old = read_selection(state, "selection.json", originals)
+    elif can_restore(game, scene):
+        raise OSError(f"The saved playlist has no selection record. Recovery files are in {state}.")
+    originals.collect_parked()
+    originals.verify_parked()
     current = active_tracks(game, scene, games)
     if expected is not None and list(expected) != [row.digest for row in current]:
         raise ValueError(
@@ -274,7 +213,7 @@ def _publish(
             seen.add(digest)
             row = describe(track, digest)
             staged = Path(temporary) / row["name"]
-            shutil.copyfile(track.path, staged)
+            copy_synced(track.path, staged)
             if _digest(staged) != digest:
                 raise OSError("The source changed during copying. Please try again.")
             desired.append(row)
@@ -286,16 +225,14 @@ def _publish(
             and [row["digest"] for row in old] == [t.digest for t in current]
         ):
             return
-        managed = (state / "selection.json").exists()
         previous = _remember(game, scene, current) if managed and not undo else []
-        old_files = {(row["name"], row["digest"]) for row in old}
-        # Recovery must distinguish a pre-existing identically named file from a published copy.
-        originals = [
-            t.path.name
-            for t in current
-            if t.path.parent == main and (t.path.name, t.digest) not in old_files
-        ]
-        selection = {"tracks": desired, "original_names": originals}
+        old_files = {(main / row["name"], row["digest"]) for row in old}
+        for track in current:
+            if (track.path, track.digest) not in old_files:
+                originals.add_live(track.path, track.digest)
+        selection = {"tracks": desired, "originals": originals.journal()}
+        if managed:
+            selection["prior_selection"] = _digest(state / "selection.json")
         if clear and not desired:
             selection["cleared"] = True
         if not undo:
@@ -308,19 +245,19 @@ def _publish(
         try:
             for record in old:
                 _retire_current(main, state, record, changes)
-            for folder in _folders(game, scene):
-                backup = backup_folder(game, scene, folder)
-                for path in list(_audio(folder)):
-                    if path.is_symlink():
-                        raise OSError(f"Cannot move linked track {path.name}.")
-                    _move(path, backup / path.name, changes)
+            for track in current:
+                if (track.path, track.digest) not in old_files:
+                    _move(track.path, originals.parked(track.path), changes)
+            originals.verify_parked()
             for record in desired:
                 _move(Path(temporary) / record["name"], main / record["name"], changes)
             pending.replace(state / "selection.json")
         except BaseException:
             _rollback(changes)
             pending.unlink(missing_ok=True)
+            sync_directory(state)
             raise
+        sync_directory(state)
     _clear_staging(state)
     (state / "restored.json").unlink(missing_ok=True)
     _prune_history(game, scene, previous)
@@ -402,103 +339,100 @@ def _restore(
     state = _state(game, scene)
     if not can_restore(game, scene):
         return
-    changes = []
+    originals = Originals(game, scene)
     restoring = state / "restoring.json"
-    resumed = restoring.exists()
-    saved = []
-    cleared = False
+    main = _sound_path(game, "BGM", scene)
+    if restoring.exists():
+        journal = read_journal(restoring)
+        originals.load(journal)
+        managed = validate_records(journal.get("managed"))
+        saved = validate_records(journal.get("previous"))
+        if type(journal.get("previous_cleared")) is not bool:
+            raise ValueError("Incomplete soundtrack restore record.")
+        cleared = journal["previous_cleared"]
+        for name in ("pending.json", "selection.json"):
+            expected = journal["sources"].get(name)
+            path = state / name
+            if path.exists():
+                if _digest(path) != expected:
+                    raise OSError(f"The playlist recovery record {name} has changed.")
+            elif expected and not journal.get("verified"):
+                raise OSError(f"The playlist recovery record {name} is missing.")
+    else:
+        managed = []
+        selection = {}
+        sources = {}
+        for filename in ("selection.json", "pending.json"):
+            if (state / filename).exists():
+                selection, rows = read_selection(state, filename, originals)
+                managed.extend(rows)
+                if filename == "pending.json" and selection.get("prior_selection") != sources.get(
+                    "selection.json"
+                ):
+                    raise OSError(
+                        "The selection record for the interrupted playlist is missing or changed."
+                    )
+                sources[filename] = _digest(state / filename)
+        if not sources:
+            raise OSError(f"The playlist recovery record is missing. Saved files are in {state}.")
+        originals.collect_parked()
+        moves = originals.restore_sources(main, managed)
+        parked = {live for _, live in moves}
+        previous = []
+        remember = remember and not (state / "pending.json").exists()
+        if remember:
+            for row in managed:
+                path = main / row["name"]
+                if path in originals.expected and path not in parked:
+                    continue
+                if path.is_file() and _digest(path) == row["digest"]:
+                    previous.append(record_track(row, path, scene))
+        saved = _remember(game, scene, previous, checkpoint)
+        cleared = remember and selection.get("cleared") is True
+        journal = {
+            "originals": originals.journal(),
+            "managed": managed,
+            "previous": saved,
+            "previous_cleared": cleared,
+            "sources": sources,
+        }
+        if checkpoint:
+            checkpoint()
+        write_journal(restoring, journal)
+
+    for row in saved:
+        path = _history(game, scene) / row["name"]
+        if not path.is_file() or _digest(path) != row["digest"]:
+            raise OSError(f"The undo copy {path.name} is missing or changed.")
+    moves = originals.restore_sources(main, managed)
+    parked = {live for _, live in moves}
+    changes = []
     try:
-        if resumed:
-            # All managed tracks have been retired. Some originals may already be live.
-            try:
-                journal = read_json(restoring)
-                saved = validate_records(journal.get("previous", []))
-                cleared = journal.get("previous_cleared") is True
-            except (OSError, ValueError):
-                saved = []
-        else:
-            if remember and not (state / "pending.json").exists():
-                with contextlib.suppress(OSError, ValueError):
-                    cleared = read_json(state / "selection.json").get("cleared") is True
-            saved = _retire_selection(
-                game, scene, changes, remember=remember, checkpoint=checkpoint
-            )
-            atomic_json(restoring, {"previous": saved, "previous_cleared": cleared})
-        for folder in _folders(game, scene):
-            for path in list(_audio(backup_folder(game, scene, folder))):
-                _move(path, folder / path.name, changes)
+        for row in managed:
+            path = main / row["name"]
+            if path not in originals.expected or path in parked:
+                _retire_current(main, state, row, changes)
+        for source, destination in moves:
+            _move(source, destination, changes)
+        for live, original in originals.expected.items():
+            original.verify(live)
     except BaseException:
         _rollback(changes)
-        if not resumed:
-            restoring.unlink(missing_ok=True)
         raise
-    # From here on a retry only finishes metadata cleanup, never retires a restored original.
+    if not journal.get("verified"):
+        journal["verified"] = True
+        write_journal(restoring, journal)
     if saved or cleared:
-        atomic_json(state / "restored.json", {"previous": saved, "previous_cleared": cleared})
+        write_journal(state / "restored.json", {"previous": saved, "previous_cleared": cleared})
     else:
         (state / "restored.json").unlink(missing_ok=True)
     (state / "pending.json").unlink(missing_ok=True)
     (state / "selection.json").unlink(missing_ok=True)
+    sync_directory(state)
     restoring.unlink()
+    sync_directory(state)
     _clear_staging(state)
     _prune_history(game, scene, saved)
-
-
-def _retire_selection(
-    game: Path,
-    scene: str,
-    changes: list[tuple[Path, Path]],
-    *,
-    remember: bool,
-    checkpoint: Callable[[], None] | None = None,
-) -> list[dict]:
-    state = _state(game, scene)
-    main = _sound_path(game, "BGM", scene)
-    damaged = False
-    managed = []
-    for filename in ("selection.json", "pending.json"):
-        try:
-            candidates = records(state, filename)
-            if filename == "pending.json" and candidates:
-                originals = read_json(state / filename).get("original_names", [])
-                if not isinstance(originals, list):
-                    raise ValueError("Invalid pending soundtrack selection.")
-                candidates = [
-                    r
-                    for r in candidates
-                    if r["name"] not in originals
-                    or (backup_folder(game, scene, main) / r["name"]).exists()
-                ]
-            managed.extend(candidates)
-        except (ValueError, OSError):
-            damaged = True
-    previous = []
-    if remember and not damaged and not (state / "pending.json").exists():
-        for row in managed:
-            if checkpoint:
-                checkpoint()
-            path = main / row["name"]
-            if path.is_file() and _digest(path) == row["digest"]:
-                previous.append(record_track(row, path, scene))
-    saved = _remember(game, scene, previous, checkpoint)
-    if checkpoint:
-        checkpoint()
-    for record in managed:
-        _retire_current(main, state, record, changes)
-    if damaged:
-        # A damaged journal cannot prove ownership. Preserve plausible managed files in recovery.
-        for path in list(_audio(main)):
-            match = re.fullmatch(r"HD Sync - [a-z0-9]+ - ([a-f0-9]{16})", path.stem)
-            if match and _digest(path).startswith(match[1]):
-                recovery = _sound_path(game, ".edopro-hd-sync", scene, "recovered")
-                recovery.mkdir(exist_ok=True)
-                with tempfile.NamedTemporaryFile(
-                    dir=recovery, suffix=path.suffix, prefix=path.stem + "-", delete=False
-                ) as f:
-                    destination = Path(f.name)
-                destination.unlink()
-                _move(path, destination, changes)
-    return saved
 
 
 def restore_playlist(
@@ -515,6 +449,8 @@ def _previous(state: Path) -> list[dict] | None:
     if not path.exists():
         path = state / "restored.json"
     data = read_json(path)
+    if "checksum" in data:
+        data = read_journal(path)
     if "previous" in data:
         return validate_records(data["previous"])
     if "name" in data:

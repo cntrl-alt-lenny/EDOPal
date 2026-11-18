@@ -182,7 +182,18 @@ class Soundtracks(unittest.TestCase):
         name = f"HD Sync - spirit - {digest[:16]}.wav"
         (directory / name).write_bytes(new.read_bytes())
         music._write_pending(
-            state, {"game": "spirit", "digest": digest, "name": name, "title": "New"}
+            state,
+            {
+                "tracks": [{"game": "spirit", "digest": digest, "name": name, "title": "New"}],
+                "originals": [
+                    {
+                        "folder": "deck",
+                        "name": source.name,
+                        "size": len(before),
+                        "digest": hashlib.sha256(before).hexdigest(),
+                    }
+                ],
+            },
         )
         self.assertTrue(music.can_restore(self.game, "deck"))
         with self.assertRaisesRegex(OSError, "interrupted"):

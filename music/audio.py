@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import tempfile
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 
 from music.catalogue import SCENES, catalog, library_root
+from music.storage import copy_synced, ensure_directory, sync_directory
 from state_lock import locked
 
 FORMATS = frozenset({".flac", ".ogg", ".mp3", ".wav"})
@@ -65,19 +65,20 @@ def validate_audio(path: Path) -> None:
 
 def _copy_new(source: Path, destination: Path, digest: str) -> None:
     """Publish a complete file without replacing an existing one."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    ensure_directory(destination.parent)
     with tempfile.NamedTemporaryFile(
         dir=destination.parent, prefix=".import-", delete=False
     ) as staged:
         temp = Path(staged.name)
     try:
-        shutil.copyfile(source, temp)
+        copy_synced(source, temp)
         if _digest(temp) != digest:
             raise OSError("The source changed during copying. Please try again.")
         if destination.exists():
             raise FileExistsError(destination)
         # Both paths are in the locked library/installation on the same volume.
         os.rename(temp, destination)
+        sync_directory(destination.parent)
     finally:
         temp.unlink(missing_ok=True)
 
