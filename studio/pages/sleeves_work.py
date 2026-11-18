@@ -1,6 +1,8 @@
 """Blocking sleeve services. All callers dispatch these operations to the Studio pool."""
 
 import colorsys
+import re
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,11 +11,13 @@ from PySide6.QtGui import QImage
 
 import extras
 import sleeves
+import themes
 from config import folder_has_card_databases
 from music import settings
 from sleeves import Library, SlotStatus
 from studio.tasks import WorkerContext
 
+from .skins_model import preset_id
 from .sleeves_collection import Choice, collection, saved
 
 PRINTS = {item.key: item for item in collection()}
@@ -38,7 +42,9 @@ class Thumbnails:
             image = QImage(str(path))
             if image.isNull():
                 image = small(sleeves.render(item.recipe))
-                extras._atomic_write(path, sleeves.png_bytes(image))
+                # A thumbnail cache write is optional, including while another reader has it open.
+                with suppress(OSError):
+                    extras._atomic_write(path, sleeves.png_bytes(image))
             return image
         return QImage(str(self.library.thumbnail(key.name)))
 
@@ -92,6 +98,7 @@ class Snapshot:
     removed: list[Choice]
     slots: dict[str, Slot]
     can_undo: bool
+    active_name: str
 
 
 def inspect(library: Library, game: Path | None, config: Path) -> Snapshot:
@@ -115,8 +122,24 @@ def inspect(library: Library, game: Path | None, config: Path) -> Snapshot:
                 except (OSError, ValueError):
                     pass  # An unreadable installed cover can still be replaced or restored.
             slots[key] = Slot(status, choice, image)
+    active = extras.current_skin(str(game)) if game else ""
+    if match := re.fullmatch(r"Studio-([a-f0-9]{32})(?:-[1-9][0-9]*)?", active):
+        lib = themes.ThemeLibrary(library.root.parent / "themes")
+        key = match[1]
+        theme = next((p for p in themes.PRESETS if preset_id(p) == key), None)
+        if not theme:
+            try:
+                theme = lib.load(key)
+            except (ValueError, OSError):
+                # A deleted library copy can still be installed and have usable sleeves.
+                theme = None
+        active = theme.name if theme else "Installed theme"
     return Snapshot(
-        items, removed, slots, bool(game and extras.can_undo(str(game), str(config), "sleeves"))
+        items,
+        removed,
+        slots,
+        bool(game and extras.can_undo(str(game), str(config), "sleeves")),
+        active.removeprefix("Monokai "),
     )
 
 

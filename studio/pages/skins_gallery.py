@@ -143,6 +143,7 @@ class Gallery(QWidget):
         self.game: Path | None = None
         self.scale = True
         self.looks: list[Look] = []
+        self.data: Collection | None = None
         layout = QVBoxLayout(self)
         margins(layout, 0)
         layout.setSpacing(t.MD)
@@ -159,6 +160,8 @@ class Gallery(QWidget):
         heading.addStretch()
         self.import_file = Button("Import", "quiet", "download")
         self.create = Button("Create your own", "primary", "spark")
+        self.more = Button("Get more wallpapers", "quiet", "download")
+        heading.addWidget(self.more)
         heading.addWidget(self.import_file)
         heading.addWidget(self.create)
         layout.addLayout(heading)
@@ -206,6 +209,7 @@ class Gallery(QWidget):
         self.filter()
 
     def set_collection(self, data: Collection, game: Path | None) -> None:
+        self.data = data
         self.looks, self.game, self.scale = data.looks, game, data.scale
         self.restore.setVisible(data.restore_pack)
         self.filter()
@@ -216,6 +220,16 @@ class Gallery(QWidget):
 
     def filter(self) -> None:
         group = self.filters.value
+        if self.data:
+            parts = [f"Current look · {self.data.active_name}"] if self.game else []
+            if self.data.sleeve_summary:
+                parts.append(self.data.sleeve_summary)
+            if self.data.catalogue.detail:
+                parts.append("Showing the offline catalogue. " + self.data.catalogue.detail)
+            elif group == "Downloadable":
+                count = sum(bool(look.pack) for look in self.looks)
+                parts.append(f"{count} downloadable skin{'s' if count != 1 else ''}")
+            self.info.setText("    ·    ".join(parts))
         visible = filter_looks(self.looks, group, self.search.text())
         self.delegate.looks = visible
         self.count.setText(f"{len(visible)} look" + ("" if len(visible) == 1 else "s"))

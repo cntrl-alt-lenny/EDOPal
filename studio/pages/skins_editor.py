@@ -3,15 +3,17 @@
 from dataclasses import replace
 from functools import partial
 
-from PySide6.QtCore import QSignalBlocker, QSize, Qt, Signal
+from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLineEdit, QSlider, QVBoxLayout, QWidget
 
 import themes
+from content.media import Media
 from studio import theme as t
 from studio.widgets import Button, Panel, ToggleSwitch, label, margins
 
 from .skins_model import BASE, EXTRA, surprise
+from .sleeves_widgets import Menu
 
 
 def colour_slider(name: str) -> QSlider:
@@ -169,6 +171,14 @@ class Maker(QWidget):
         self.photo = Button("Use my own image…", "secondary", "folder")
         self.photo.clicked.connect(self.choose_image)
         adv.addWidget(self.photo)
+        self.wallpapers = Menu("Downloaded wallpapers")
+        self.wallpapers.activated.connect(self.pick_wallpaper)
+        adv.addWidget(self.wallpapers)
+        self.wallpapers.hide()
+        self.credit = label("", "muted", True)
+        self.credit.setTextFormat(Qt.TextFormat.PlainText)
+        adv.addWidget(self.credit)
+        self.credit.hide()
         self.font = ToggleSwitch("Use Inter font", "Off keeps the game’s fonts.", False)
         self.font.toggled.connect(lambda on: self.update_theme(font="inter" if on else "inherit"))
         adv.addWidget(self.font)
@@ -182,10 +192,50 @@ class Maker(QWidget):
         self.copy_btn = Button("Save as…")
         self.save_btn.clicked.connect(self.save)
         self.copy_btn.clicked.connect(self.save_as)
-        foot.addWidget(self.save_btn, 1)
         foot.addWidget(self.copy_btn)
+        foot.addWidget(self.save_btn, 1)
         body.addLayout(foot)
+        self.samples = QTimer(self)
+        self.samples.setSingleShot(True)
+        self.samples.timeout.connect(self.update_samples)
+        self.fine.toggled.connect(lambda on: self.update_samples() if on else None)
         self.reset(self.theme)
+
+    def set_wallpapers(self, rows: tuple[Media, ...]) -> None:
+        self.wallpapers.clear()
+        self.wallpapers.addItem("Downloaded wallpapers…")
+        for row in rows:
+            self.wallpapers.addItem(row.item.title, row.digest)
+            origin = row.origin
+            self.wallpapers.setItemData(
+                self.wallpapers.count() - 1,
+                f"{origin.author} · {origin.license}\n{origin.attribution}\n{origin.source_url}",
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        self.wallpapers.setVisible(bool(rows))
+        self._select_wallpaper()
+
+    def _select_wallpaper(self) -> None:
+        index = max(0, self.wallpapers.findData(self.theme.image))
+        self.wallpapers.setCurrentIndex(index)
+        self.credit.setVisible(index > 0)
+        if index:
+            self.credit.setText(self.wallpapers.itemData(index, Qt.ItemDataRole.ToolTipRole))
+        self.photo.setText(
+            "Change my image…" if self.theme.image and not index else "Use my own image…"
+        )
+
+    def pick_wallpaper(self, index: int) -> None:
+        if digest := self.wallpapers.itemData(index):
+            self.update_theme(wallpaper="image", image=digest)
+
+    def update_samples(self) -> None:
+        if self.fine.isChecked():
+            for style, button in self.styles.items():
+                sample = themes.wallpaper(
+                    replace(self.theme, wallpaper=style, image=None), (96, 60)
+                )
+                button.setIcon(QIcon(QPixmap.fromImage(sample)))
 
     def _swatch(self, key: str, name: str) -> Button:
         button = Button(name)
@@ -194,14 +244,15 @@ class Maker(QWidget):
         self.swatches[key] = button
         return button
 
-    def _colour(self, key: str) -> str:
+    def _colour(self, key: str, palette: themes.Palette | None = None) -> str:
         if value := getattr(self.theme, key):
             return value
         if key == "your_lp":
             return self.theme.accent
+        palette = palette or themes.derive(self.theme)
         if key == "opponent_lp":
-            return themes.derive(self.theme).bars[1].top
-        return getattr(themes.derive(self.theme), key)
+            return palette.bars[1].top
+        return getattr(palette, key)
 
     def _edit(self, key: str) -> None:
         self.field = key
@@ -238,8 +289,9 @@ class Maker(QWidget):
 
     def set_theme(self, theme: themes.Theme) -> None:
         self.theme = theme
+        palette = themes.derive(theme)
         for key, button in self.swatches.items():
-            value = self._colour(key)
+            value = self._colour(key, palette)
             pix = QPixmap(t.ICON, t.ICON)
             pix.fill(QColor(value))
             button.setIcon(QIcon(pix))
@@ -258,11 +310,10 @@ class Maker(QWidget):
             with QSignalBlocker(control):
                 control.setChecked(on)
         for style, button in self.styles.items():
-            sample = themes.wallpaper(replace(theme, wallpaper=style, image=None), (96, 60))
-            button.setIcon(QIcon(QPixmap.fromImage(sample)))
             button.setText(style.title() + (" ✓" if style == theme.wallpaper else ""))
+        self.samples.start(t.MOTION_MS)
+        self._select_wallpaper()
         self.inherit.setText(
             "Use game backgrounds" + (" ✓" if theme.wallpaper == "inherit" else "")
         )
-        self.photo.setText("Change my image…" if theme.image else "Use my own image…")
         self.changed.emit()

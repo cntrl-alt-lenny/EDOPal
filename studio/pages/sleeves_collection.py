@@ -36,6 +36,15 @@ class Choice:
     entry: Entry | None = None
 
     @property
+    def tooltip(self) -> str:
+        if self.entry and (origin := self.entry.origin):
+            return (
+                f"{self.name} · {self.detail}\n{origin.author} · {origin.license}\n"
+                f"{origin.attribution}\n{origin.source_url}"
+            )
+        return f"{self.full_name} · {self.detail}"
+
+    @property
     def full_name(self) -> str:
         return f"{self.name} · {self.palette}" if self.recipe and not self.entry else self.name
 
@@ -73,7 +82,7 @@ def saved(entry: Entry) -> Choice:
     return Choice(
         Path("saved") / entry.id,
         entry.name,
-        SOURCES[entry.source],
+        "Pack sleeve" if entry.origin else SOURCES[entry.source],
         family_of(palette),
         palette,
         entry.recipe,
@@ -94,7 +103,7 @@ def filtered(
             continue
         if source == "Recently used" and not (entry and entry.last_used):
             continue
-        if source in SOURCES.values() and item.detail != source:
+        if (source == "Pack sleeve" or source in SOURCES.values()) and item.detail != source:
             continue
         if colour != "All colours" and (item.family or measured.get(item.key)) != colour:
             continue

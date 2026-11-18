@@ -10,6 +10,7 @@ from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QSignalBloc
 from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 from shiboken6 import isValid
 
+import extras
 import themes
 from content.download import DownloadError, DownloadFailure, Progress
 from studio import theme as t
@@ -22,6 +23,7 @@ from .skins_detail import Workspace
 from .skins_gallery import Gallery
 from .skins_library import LibraryActions
 from .skins_model import Look, download_message
+from .skins_packs import PackBrowser
 from .skins_service import Collection, SkinStore
 
 
@@ -71,9 +73,13 @@ class SkinsPage(Page):
         body.addWidget(self.stack, 1)
         self.gallery = Gallery(context, self.store)
         self.view = Workspace(context, self.store)
+        self.packs = PackBrowser(context, "wallpaper")
+        self.packs.back.clicked.connect(self.escape)
+        self.gallery.more.clicked.connect(self.open_packs)
         self.maker = self.view.maker
         self.stack.addWidget(self.gallery)
         self.stack.addWidget(self.view)
+        self.stack.addWidget(self.packs)
         self.gallery.selected.connect(self.open_look)
         self.gallery.create.clicked.connect(self.create)
         self.gallery.refresh.clicked.connect(lambda: self.reload(online=True))
@@ -117,6 +123,7 @@ class SkinsPage(Page):
     def installation_changed(self, installation: Installation) -> None:
         self.generation += 1
         self.data = None
+        self.gallery.data = None
         self.gallery.looks = []
         self.gallery.filter()
         self.gallery.restore.hide()
@@ -128,22 +135,32 @@ class SkinsPage(Page):
             else "Open EDOPro once to finish setting up this folder, then select it again."
         )
         self.choose.setText("Change folder" if installation.path else "Choose folder")
-        self.to_gallery()
+        if self.mode == "packs":
+            return  # Library transfers are independent of the selected game.
+        if self.entered and not self._discard():
+            # Asynchronous installation detection can finish after editing has begun.
+            self._preview()
+        else:
+            self.to_gallery()
         if self.entered:
             self.reload()
 
     def shown(self) -> None:
         self.entered = True
         self.tried_recovery = False
-        self.reload()
-        self.gallery.search.setFocus()
+        if self.mode == "packs":
+            self.packs.setFocus()
+        else:
+            self.reload()
+            self.gallery.search.setFocus()
 
     def hidden(self) -> bool:
         if self.job or not self._discard():
             return False
         self.entered = False
         self.generation += 1
-        self.to_gallery()
+        if self.mode != "packs":
+            self.to_gallery()
         return True
 
     def _discard(self) -> bool:
@@ -152,9 +169,12 @@ class SkinsPage(Page):
         )
 
     def escape(self) -> bool:
-        if self.job:
+        if self.job or self.packs.job:
             return True
-        if self.naming:
+        if self.mode == "packs":
+            self.to_gallery()
+            self.reload()
+        elif self.naming:
             self.files.cancel_name()
         elif self.mode == "maker":
             if self._discard():
@@ -167,6 +187,13 @@ class SkinsPage(Page):
         else:
             return False
         return True
+
+    def open_packs(self) -> None:
+        self.note()
+        self.mode = "packs"
+        self._show(self.packs)
+        self.packs.load(online=True)
+        self.packs.back.setFocus()
 
     def to_gallery(self) -> None:
         self.look = self.origin = self.base = None
@@ -208,18 +235,9 @@ class SkinsPage(Page):
                 return
             self.data = data
             self.gallery.set_collection(data, self.game)
+            self.maker.set_wallpapers(data.wallpapers)
             self.gallery.restore.setEnabled(installation.ready)
             self.gallery.refresh.setEnabled(True)
-            count = sum(bool(v.pack) for v in data.looks)
-            pack_status = (
-                ("Showing the offline catalogue. " + data.catalogue.detail)
-                if data.catalogue.detail
-                else f"{count} downloadable skin{'s' if count != 1 else ''} available."
-                if count
-                else "No downloadable packs in this catalogue."
-            )
-            current = f"Current look · {data.active_name}     " if installation.path else ""
-            self.gallery.info.setText(current + pack_status)
             key = (
                 select
                 if self.mode == "gallery"
@@ -373,7 +391,10 @@ class SkinsPage(Page):
                 self.note(download_message(exc), retry)
                 self.message.setToolTip(str(exc))
             else:
-                self.note(str(exc), retry)
+                self.note(
+                    str(exc),
+                    self.retry_sleeves if isinstance(exc, extras.SleeveReapplyError) else retry,
+                )
             if writing:
                 self.reload()
 
@@ -423,6 +444,22 @@ class SkinsPage(Page):
             writing=True,
             retry=partial(self.change_game, action, chosen_highlight=highlight),
         )
+
+    def retry_sleeves(self) -> None:
+        game = self.game
+        if game:
+
+            def restored(message: str) -> None:
+                self.note(message)
+                self.reload()
+
+            self._run(
+                lambda _: self.store.change(game, "sleeves", None, None, False),
+                restored,
+                "Restoring sleeves…",
+                writing=True,
+                retry=self.retry_sleeves,
+            )
 
     def download(self) -> None:
         pack = self.look.pack.pack

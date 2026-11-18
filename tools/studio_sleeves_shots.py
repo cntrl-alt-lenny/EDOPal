@@ -18,6 +18,7 @@ from studio.context import AppContext, Installation
 from studio.shell import StudioWindow
 from tools.sleeve_contact_sheet import stand_in
 from tools.studio_screenshots import DemoSync, create_demo, settle
+from tools.studio_skins_screenshots import capture_library
 
 
 def prepare_overview(window: StudioWindow) -> None:
@@ -31,7 +32,7 @@ def prepare_overview(window: StudioWindow) -> None:
         grid.viewport().repaint()
         area = grid.viewport().rect()
         return all(
-            item.key in grid.tiles.cache
+            item.key in grid.tiles.cache and not grid.tiles.cache[item.key].isNull()
             for row, item in enumerate(page.gallery.visible)
             if grid.visualRect(grid.model().index(row, 0)).intersects(area)
         )
@@ -93,6 +94,13 @@ def render(out: Path, size: tuple[int, int], root: Path) -> list[Path]:
     try:
         loaded()
         shot("01-collection")
+        capture_library(page, shot, settle)
+        loaded()
+        gallery.source.setCurrentText("Pack sleeve")
+        loaded()
+        shot("sleeves-downloaded-print")
+        gallery.source.setCurrentIndex(0)
+        loaded()
         pick(2)
         page.same.click()
         loaded()

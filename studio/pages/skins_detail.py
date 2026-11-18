@@ -60,8 +60,8 @@ class Inspector(Panel):
             self.source,
             self.highlight,
             self.hint,
-            self.apply,
             self.edit,
+            self.apply,
         ):
             self.body.addWidget(item)
         self.history = label("Game changes", "subheading")
@@ -171,11 +171,11 @@ class Workspace(QWidget):
         top.addWidget(self.back)
         top.addStretch()
         top.addWidget(self.kicker)
-        body.addLayout(top)
         self.title = ElidedLabel()
         self.title.setProperty("role", "display")
         self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        body.addWidget(self.title)
+        top.insertWidget(1, self.title, 1)
+        body.addLayout(top)
         split = QHBoxLayout()
         split.setSpacing(t.LG)
         self.preview = Preview(store, ctx.tasks)
@@ -183,9 +183,9 @@ class Workspace(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setMinimumWidth(t.TILE_SIZE[0] * 2 - t.XL)
-        self.scroll.setMaximumWidth(t.TILE_SIZE[0] * 3)
-        split.addWidget(self.scroll, 2)
+        self.scroll.setMinimumWidth(t.TILE_SIZE[0] * 2 + t.HUGE)
+        self.scroll.setMaximumWidth(t.TILE_SIZE[0] * 2 + 2 * t.HUGE)
+        split.addWidget(self.scroll, 1)
         body.addLayout(split, 1)
         side = QWidget()
         stack = QVBoxLayout(side)
