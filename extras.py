@@ -4,7 +4,9 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Callable
 from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from xml.etree import ElementTree
@@ -295,7 +297,9 @@ def _read_changes(journal: Path, allowed: set[str]) -> dict[str, list]:
     return changes
 
 
-def _reverse_group(root: Path, backups: Path, group: str, changes: dict, *, begin=None) -> None:
+def _reverse_group(
+    root: Path, backups: Path, group: str, changes: dict, *, begin=None
+) -> tuple[str, ...]:
     # Validate the whole group before modifying any member. Matching an original is
     # also valid: this makes recovery idempotent after an interrupted install/undo.
     pending = []
@@ -324,9 +328,17 @@ def _reverse_group(root: Path, backups: Path, group: str, changes: dict, *, begi
             target.unlink()
         else:
             _atomic_write(target, previous)
+    return tuple(item[0] for item in pending)
 
 
-def _change_group(root: Path, config_path: str, group: str, files: dict[str, bytes] | None):
+def _change_group(
+    root: Path,
+    config_path: str,
+    group: str,
+    files: dict[str, bytes] | None,
+    *,
+    prepare: Callable[[dict], None] | None = None,
+) -> tuple[str, ...]:
     """Install a scope transactionally, or undo its last change with files=None."""
     from state_lock import locked
 
@@ -353,18 +365,33 @@ def _change_group(root: Path, config_path: str, group: str, files: dict[str, byt
         restoring = _regular_path(state, "restoring.json")
         for incomplete in (restoring, installing):
             if incomplete.exists():
-                _reverse_group(root, backups, group, _read_changes(incomplete, allowed))
+                changes = _read_changes(incomplete, allowed)
+                written = _reverse_group(
+                    root,
+                    backups,
+                    group,
+                    changes,
+                    begin=partial(prepare, changes)
+                    if files is None and prepare is not None
+                    else None,
+                )
                 incomplete.unlink()
                 if files is None:
-                    return
+                    return written
         if files is None:
             if not last.exists():
                 raise ValueError("There is no previous change to undo for this category.")
             changes = _read_changes(last, allowed)
+
             # A failed or interrupted restore can be resumed from this journal.
-            _reverse_group(root, backups, group, changes, begin=lambda: last.replace(restoring))
+            def begin_restore() -> None:
+                if prepare is not None:
+                    prepare(changes)
+                last.replace(restoring)
+
+            written = _reverse_group(root, backups, group, changes, begin=begin_restore)
             restoring.unlink()
-            return
+            return written
 
         changes = {}
         for name, content in files.items():
@@ -383,8 +410,10 @@ def _change_group(root: Path, config_path: str, group: str, files: dict[str, byt
                 if _signature(backup) != before:
                     raise OSError(f"Could not validate the backup for {name}.")
             changes[name] = [before, after]
+        if prepare is not None:
+            prepare(changes)
         if not changes:
-            return
+            return ()
         _atomic_write(installing, json.dumps(changes).encode("utf-8"))
         try:
             for name, (before, _after) in changes.items():
@@ -398,6 +427,31 @@ def _change_group(root: Path, config_path: str, group: str, files: dict[str, byt
             _reverse_group(root, backups, group, changes)
             installing.unlink()
             raise
+        return tuple(changes)
+
+
+def apply_sleeve_pngs(
+    root: Path,
+    config_path: str,
+    *,
+    mine: bytes | None = None,
+    opponent: bytes | None = None,
+    skin: str | None = None,
+    prepare: Callable[[dict], None] | None = None,
+) -> tuple[str, ...]:
+    """Apply PNG bytes in one sleeves transaction. Return changed root-relative paths."""
+    root = root.resolve()
+    active = current_skin(str(root)) if skin is None else skin
+    files = {}
+    for base, data in (("cover", mine), ("cover2", opponent)):
+        if data is None:
+            continue
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("Choose a valid PNG sleeve.")
+        source = installed_sleeve(root, base, active)
+        target = source.with_suffix(".png") if source else root / "textures" / (base + ".png")
+        files[target.relative_to(root).as_posix()] = data
+    return _change_group(root, config_path, "sleeves", files, prepare=prepare) if files else ()
 
 
 def apply_appearance(
@@ -470,18 +524,14 @@ def apply_appearance(
         install(edopro_path, config_path, "sound")
     if player_sleeve or opponent_sleeve:
         active = f"Monokai {skin}" if skin else current_skin(str(root))
-        files = {}
         with ZipFile(PACKS / "shared.zip") as archive:
-            for base, sleeve in (("cover", player_sleeve), ("cover2", opponent_sleeve)):
-                if sleeve:
-                    source = installed_sleeve(root, base, active)
-                    target = (
-                        source.with_suffix(".png")
-                        if source
-                        else root / "textures" / (base + ".png")
-                    )
-                    files[target.relative_to(root).as_posix()] = archive.read(SLEEVES[sleeve])
-        _change_group(root, config_path, "sleeves", files)
+            apply_sleeve_pngs(
+                root,
+                config_path,
+                skin=active,
+                mine=archive.read(SLEEVES[player_sleeve]) if player_sleeve else None,
+                opponent=archive.read(SLEEVES[opponent_sleeve]) if opponent_sleeve else None,
+            )
     if effects:
         if effects == "Thonk":
             with ZipFile(PACKS / "shared.zip") as archive:
