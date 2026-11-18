@@ -4,14 +4,15 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from extras import _atomic_write
-from state_lock import locked
+from state_lock import appearance_lock, locked
 
+from . import collection
 from .archive import decode
 from .core import MAX_FILES, MAX_MANIFEST, Digest, Installation, folded, portable, read_small, safe
 from .inventory import CONF, category
@@ -77,6 +78,33 @@ def _locks(install: Installation) -> Iterator[None]:
         yield
 
 
+@contextmanager
+def _writer_locks(install: Installation, targets: Iterable[str]) -> Iterator[None]:
+    paths = tuple(targets)
+    with ExitStack() as stack:
+        # Sleeve application already nests its collection lock inside the game lock.
+        # All recording import and receipt writers take the soundtrack root lock first.
+        if any(path.startswith("game/") for path in paths):
+            safe(install.game, ".edopro-appearance.lock")
+            stack.enter_context(appearance_lock(install.game))
+        for root, name in (
+            ("studio/sleeves", ".library.lock"),
+            ("studio/soundtracks", ".import.lock"),
+            # Format 1 archives made by older versions can contain managed cache files.
+            ("studio/sleeves/card-art", ".fetch.lock"),
+            ("studio/themes/images/packs", ".media.lock"),
+        ):
+            directories = {
+                "/".join(path.split("/")[: root.count("/") + 1])
+                for path in paths
+                if folded(path).startswith(root + "/")
+            }
+            for actual in sorted(directories):
+                lock = install.target(actual + "/" + name)
+                stack.enter_context(locked(lock.parent, lock.name))
+        yield
+
+
 def _record(tx: Path, status: str, changes: list[Change]) -> None:
     data = json.dumps(
         {"version": 1, "status": status, "changes": [asdict(c) for c in changes]}
@@ -121,6 +149,12 @@ def _changes(tx: Path) -> tuple[str, list[Change]]:
                 and folded(src[1]) == folded(dst[1])
                 and all(_same_or_alternate(s, d) for s, d in zip(src[2:], dst[2:], strict=True))
             )
+            if not valid and collection.recipe(change.source):
+                canonical = collection.restored_name(folded(change.source))
+                valid = canonical == folded(change.target) or (
+                    change.before is None
+                    and collection.is_theme_copy(canonical, folded(change.target))
+                )
         if not valid or folded(change.target) in names:
             raise ValueError("Invalid restore target")
         names.add(folded(change.target))

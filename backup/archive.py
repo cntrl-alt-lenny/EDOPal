@@ -17,6 +17,7 @@ from zipfile import ZIP_STORED, BadZipFile, ZipFile
 
 from config import app_version
 
+from . import collection
 from .core import (
     DEFAULTS,
     MAX_FILE,
@@ -32,7 +33,7 @@ from .core import (
     read_small,
     transfer,
 )
-from .inventory import INDEX, category, selection, sources
+from .inventory import bounded_files, category, file_limit, selection
 from .preferences import LIMIT
 
 MANIFEST = "manifest.json"
@@ -102,9 +103,7 @@ def create(
 ) -> Manifest:
     """Publish at a new path only after the entire archive has been written."""
     selected = selection(categories)
-    files = sources(install, selected, cancel)
-    if sum(f.size for f in files) > MAX_TOTAL or any(f.size > MAX_FILE for f in files):
-        raise ValueError("Selection exceeds the archive size limit")
+    files = bounded_files(install, selected, cancel)
     destination = Path(destination)
     if destination.exists():
         raise FileExistsError(destination)
@@ -119,7 +118,7 @@ def create(
                 with archive.open(file.name, "w") as member:
                     digest, modified_at = file.copy_to(install, member, cancel)
                 entries.append(
-                    Entry(file.name, category(file.name), file.size, digest, modified_at)
+                    Entry(file.name, category(file.name, selected), file.size, digest, modified_at)
                 )
                 if progress:
                     progress(i, 2 * len(files), file.name)
@@ -219,7 +218,7 @@ def parse(archive: ZipFile) -> Manifest:
         if not isinstance(row, dict):
             raise ValueError("Invalid manifest entry")
         name = row.get("path")
-        cat = category(name)
+        cat = category(name, selected)
         size, digest = row.get("size"), row.get("sha256")
         if (
             cat != row.get("category")
@@ -230,7 +229,8 @@ def parse(archive: ZipFile) -> Manifest:
             or not isinstance(digest, str)
             or not Digest.fullmatch(digest)
             or (cat == "preferences" and size > 256)
-            or (name == INDEX and size > LIMIT)
+            or size > file_limit(name)
+            or collection.asset_digest(name) not in {None, digest}
         ):
             raise ValueError(f"Invalid manifest entry: {name}")
         names.remove(name)
