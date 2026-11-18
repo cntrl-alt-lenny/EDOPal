@@ -30,7 +30,7 @@ import extras
 import gui
 from card_databases import get_db_files
 from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, find_edopro_folder
-from network_tls import create_ssl_context
+from network_tls import create_http_session as _create_http_session
 
 try:
     import tkinter as tk
@@ -189,19 +189,6 @@ def _truncate(text: str, max_len: int) -> str:
 LATEST_RELEASE_API = "https://api.github.com/repos/cntrl-alt-lenny/edopro-hd-cards/releases/latest"
 TEXTURES_RELEASES_API = "https://api.github.com/repos/cntrl-alt-lenny/edopro-hd-cards/releases"
 TEXTURES_RELEASE_API = f"{TEXTURES_RELEASES_API}/tags/textures"
-
-
-def _create_http_session(
-    *, limit: int | None = None, limit_per_host: int | None = None
-) -> aiohttp.ClientSession:
-    """Create an HTTPS session that honors standard proxy and CA-bundle settings."""
-    connector_kwargs: dict[str, object] = {"ssl": create_ssl_context()}
-    if limit is not None:
-        connector_kwargs["limit"] = limit
-    if limit_per_host is not None:
-        connector_kwargs["limit_per_host"] = limit_per_host
-    connector = aiohttp.TCPConnector(**connector_kwargs)
-    return aiohttp.ClientSession(connector=connector, trust_env=True)
 
 
 def _parse_version(text: str) -> tuple[int, ...]:
@@ -1654,6 +1641,7 @@ def run_health_check(cfg: Config) -> bool:
         )
     )
 
+    from content.catalogue import bundled_manifest
     from music_library import ART, LOCAL, catalog
 
     try:
@@ -1666,6 +1654,13 @@ def run_health_check(cfg: Config) -> bool:
     except (OSError, KeyError, ValueError):
         music_present = False
     checks.append((music_present, "Soundtrack catalogue and game covers"))
+    try:
+        bundled_manifest()
+    except ValueError:
+        content_present = False
+    else:
+        content_present = True
+    checks.append((content_present, "Bundled content catalogue"))
     gallery = extras.PACKS.parent / "window" / "gallery"
     if getattr(sys, "frozen", False):
         try:
@@ -1681,16 +1676,12 @@ def run_health_check(cfg: Config) -> bool:
     checks.append(
         (
             all(
-                (extras.PACKS / f"{skin.lower()}.zip").is_file()
-                and all(
-                    (gallery / size / f"{skin.lower()}-{view}.png").is_file()
-                    for view in ("menu", "deck", "duel", "turn")
-                    for size in ("", "large")
-                )
+                (gallery / size / f"{skin.lower()}-{view}.png").is_file()
                 for skin in extras.SKINS
-            )
-            and (extras.PACKS / "shared.zip").is_file(),
-            "Skin packs, sleeves and in-game previews",
+                for view in ("menu", "deck", "duel", "turn")
+                for size in ("", "large")
+            ),
+            "In-game appearance previews",
         )
     )
 

@@ -1,0 +1,72 @@
+[
+  {
+    "id": "abyss",
+    "kind": "skin",
+    "title": "Abyss",
+    "description": "Monokai skin in the Abyss colourway.",
+    "author": "OLED Deck EDOPro project and original artwork holders",
+    "license": "Redistribution permissions unverified",
+    "attribution": "Captured from the OLED Deck EDOPro 41.0.2 installation. The included wallpaper and card artwork retain their original ownership.",
+    "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+    "version": "1.0.0",
+    "min_app_version": "5.5.0",
+    "withheld": true,
+    "preview_files": ["abyss-menu.png"]
+  },
+  {
+    "id": "moon",
+    "kind": "skin",
+    "title": "Moon",
+    "description": "Monokai skin in the Moon colourway.",
+    "author": "OLED Deck EDOPro project and original artwork holders",
+    "license": "Redistribution permissions unverified",
+    "attribution": "Captured from the OLED Deck EDOPro 41.0.2 installation. The included wallpaper and card artwork retain their original ownership.",
+    "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+    "version": "1.0.0",
+    "min_app_version": "5.5.0",
+    "withheld": true,
+    "preview_files": ["moon-menu.png"]
+  },
+  {
+    "id": "nebula",
+    "kind": "skin",
+    "title": "Nebula",
+    "description": "Monokai skin in the Nebula colourway.",
+    "author": "OLED Deck EDOPro project and original artwork holders",
+    "license": "Redistribution permissions unverified",
+    "attribution": "Captured from the OLED Deck EDOPro 41.0.2 installation. The included wallpaper and card artwork retain their original ownership.",
+    "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+    "version": "1.0.0",
+    "min_app_version": "5.5.0",
+    "withheld": true,
+    "preview_files": ["nebula-menu.png"]
+  },
+  {
+    "id": "ristretto",
+    "kind": "skin",
+    "title": "Ristretto",
+    "description": "Monokai skin in the Ristretto colourway.",
+    "author": "OLED Deck EDOPro project and original artwork holders",
+    "license": "Redistribution permissions unverified",
+    "attribution": "Captured from the OLED Deck EDOPro 41.0.2 installation. The included wallpaper and card artwork retain their original ownership.",
+    "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+    "version": "1.0.0",
+    "min_app_version": "5.5.0",
+    "withheld": true,
+    "preview_files": ["ristretto-menu.png"]
+  },
+  {
+    "id": "shared",
+    "kind": "sound-effects",
+    "title": "Shared appearance assets",
+    "description": "Inter fonts, Thonk sound effects and the original sleeve images.",
+    "author": "Inter project, Kenney, and original sleeve artwork holders",
+    "license": "SIL Open Font License 1.1 (fonts), CC0 (Kenney audio); sleeve redistribution permissions unverified",
+    "attribution": "Inter and the InterEDO variant accompany Thonk effects derived from Kenney's Casino Audio, Interface Sounds and UI Audio. The Vortex and 1998 OCG sleeve artwork retains its original ownership.",
+    "source_url": "https://github.com/cntrl-alt-lenny/edopro-hd-cards/blob/main/assets/appearance/README.md",
+    "version": "1.0.0",
+    "min_app_version": "5.5.0",
+    "withheld": true,
+    "preview_files": ["thonk-wave.png"]
+  }
+]
