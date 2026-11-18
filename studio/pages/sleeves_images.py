@@ -31,7 +31,7 @@ from .sleeves_widgets import Menu, Slider
 
 class ImageEditor(Editor):
     def __init__(self, tasks: TaskRunner, library: Library, game: Path | None = None) -> None:
-        super().__init__(tasks, "From a card" if game else "From an image")
+        super().__init__(tasks, "From a card" if game else "From an image", scroll_form=False)
         self.library, self.game = library, game
         self.preview.caption = (
             "Choose a card to preview its sleeve"
@@ -47,18 +47,20 @@ class ImageEditor(Editor):
         self.loading = False
         self.retry_action: Callable[[], None] | None = None
         self.generation = 0
+        # The results list owns scrolling. The surrounding image form fits above Save.
+        self.form.setAlignment(Qt.AlignmentFlag.AlignTop if not game else Qt.AlignmentFlag(0))
         if game:
             self.search = SearchField("Search card names or numbers")
             self.form.addWidget(self.search)
             self.results = QListWidget()
             self.results.setAccessibleName("Choose a card to load its artwork")
             self.results.setObjectName("installList")
-            self.results.setFixedHeight(t.TILE_H + t.LG)
-            self.form.addWidget(self.results)
+            self.results.setMinimumHeight(t.BUTTON_H)
+            self.form.addWidget(self.results, 1)
             self.search.textChanged.connect(self.find_cards)
             self.results.itemClicked.connect(self.pick_card)
             self.results.itemActivated.connect(self.pick_card)
-            self.form.addWidget(label("Choose a card to load its artwork.", "muted"))
+
         else:
             self.pick = Button("Choose image…", "secondary", "folder")
             self.pick.clicked.connect(self.pick_file)
@@ -140,11 +142,14 @@ class ImageEditor(Editor):
             item.setData(Qt.ItemDataRole.UserRole, card)
             self.results.addItem(item)
         if not self.loading and not self.original and not self.retry.isVisible():
-            self.hint.setText(
-                ""
+            self.preview.caption = (
+                "Choose a card to load its artwork."
                 if self.results.count()
-                else "No matching cards. Try another name or card number."
+                else "No matching cards. Try another name or number."
             )
+            self.preview.setAccessibleDescription(self.preview.caption)
+            self.preview.update()
+            self.hint.clear()
 
     def pick_card(self, item: QListWidgetItem) -> None:
         card = item.data(Qt.ItemDataRole.UserRole)

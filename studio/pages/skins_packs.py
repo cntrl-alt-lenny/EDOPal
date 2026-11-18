@@ -3,19 +3,23 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtGui import QHideEvent, QImage, QPixmap, QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidget,
     QListWidgetItem,
     QProgressBar,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from content import catalogue, libraries
+import config
+from content import catalogue, download, libraries
 from content.cache import CacheBusyError, PackCache
 from content.catalogue import Catalogue, PackState, PackStatus
 from content.download import DownloadError, DownloadFailure, Progress
@@ -23,12 +27,14 @@ from content.media import Changes, Origin
 from sleeves import Library
 from studio import theme as t
 from studio.context import AppContext
+from studio.icons import icon
 from studio.tasks import Job, WorkerContext
-from studio.widgets import Button, ElidedLabel, Hero, Panel, glyph, label, margins
+from studio.widgets import Button, ElidedLabel, Hero, Panel, label, margins
 from themes import ThemeLibrary
 
 from .settings_storage import byte_size
 from .skins_model import download_message
+from .skins_service import has_partial, read_image
 
 
 @dataclass(frozen=True)
@@ -38,6 +44,8 @@ class Listing:
     state: str
     status: PackStatus | None
     removable: bool
+    local_preview: Path | None = None
+    partial: bool = False
 
 
 def listings(cache: PackCache, source: Catalogue, kind: str, version: str) -> list[Listing]:
@@ -45,8 +53,13 @@ def listings(cache: PackCache, source: Catalogue, kind: str, version: str) -> li
     if kind == "wallpaper":
         entries = ThemeLibrary(root / "themes").wallpapers()
     else:
-        entries = Library(root / "sleeves").entries()
+        library = Library(root / "sleeves")
+        entries = library.entries()
     installed = {e.origin.id: e.origin for e in entries if e.origin and not e.retained}
+    previews: dict[str, Path] = {}
+    for e in entries:
+        if e.origin and not e.retained and e.origin.id not in previews:
+            previews[e.origin.id] = e.path if kind == "wallpaper" else library.image_path(e.id)
     rows = []
     for status in source.list_packs(cache, app_version=version, kind=kind):
         pack = status.pack
@@ -66,14 +79,25 @@ def listings(cache: PackCache, source: Catalogue, kind: str, version: str) -> li
             )
         rows.append(
             Listing(
-                pack.title, Origin.from_pack(pack), state, status, bool(current or status.cached)
+                pack.title,
+                Origin.from_pack(pack),
+                state,
+                status,
+                bool(current or status.cached),
+                previews.get(pack.id),
+                has_partial(cache, pack),
             )
         )
-    rows.extend(Listing(o.id, o, "Available in library", None, True) for o in installed.values())
+    rows.extend(
+        Listing(o.id, o, "Available in library", None, True, previews.get(o.id))
+        for o in installed.values()
+    )
     return rows
 
 
 class PackBrowser(QWidget):
+    view_requested = Signal(str)
+
     def __init__(self, ctx: AppContext, kind: str, confirm: Callable[[str, str], bool]) -> None:
         super().__init__()
         self.ctx, self.kind = ctx, kind
@@ -82,6 +106,9 @@ class PackBrowser(QWidget):
         self.source: Catalogue | None = None
         self.job: Job | None = None
         self.loading = False
+        self.preview_job: Job | None = None
+        self.preview_key: Listing | None = None
+        self.paused: set[str] = set()
         self.rows: list[Listing] = []
         noun = "wallpapers" if kind == "wallpaper" else "sleeves"
         outer = QHBoxLayout(self)
@@ -110,6 +137,8 @@ class PackBrowser(QWidget):
         self.menu.setObjectName("installList")
         self.menu.setAccessibleName("Catalog packs")
         self.menu.setWordWrap(True)
+        self.menu.setMinimumWidth(0)
+        self.menu.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.menu.currentRowChanged.connect(self.display)
         columns.addWidget(self.menu, 2)
         scroll = QScrollArea()
@@ -130,26 +159,34 @@ class PackBrowser(QWidget):
         )
         self.empty.setFixedHeight(t.HERO_MIN)
         layout.addWidget(self.empty)
+        self.browse = Button("Browse collection", "secondary", "back")
+        self.browse.clicked.connect(self.back.click)
+        layout.addWidget(self.browse, 0, Qt.AlignmentFlag.AlignLeft)
         self.card = Panel(t.XL)
         layout.addWidget(self.card)
         layout.addStretch()
-        self.card.body.addWidget(glyph("skins" if kind == "wallpaper" else "sleeves", t.ICON_BIG))
+        self.art = label("")
+        self.art.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.art.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.art.setFixedSize(t.TILE_LARGE, t.TILE_H + t.LG)
+        intro = QHBoxLayout()
+        intro.addWidget(self.art)
+        copy = QVBoxLayout()
+        intro.addLayout(copy, 1)
+        self.card.body.addLayout(intro)
         self.title = label("", "heading", True)
         self.description = label("", "body", True)
+        copy.addStretch()
+        copy.addWidget(self.title)
+        copy.addWidget(self.description)
+        copy.addStretch()
         self.credits = label("", "muted", True)
         self.link = ElidedLabel()
         self.feedback = label("", "body", True)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(t.SM)
-        for widget in (
-            self.title,
-            self.description,
-            self.credits,
-            self.link,
-            self.feedback,
-            self.progress,
-        ):
+        for widget in (self.credits, self.link):
             self.card.body.addWidget(widget)
         for field in (self.title, self.description, self.credits, self.feedback, self.source_hint):
             field.setTextFormat(Qt.TextFormat.PlainText)
@@ -160,11 +197,22 @@ class PackBrowser(QWidget):
         self.cancel = Button("Pause download")
         self.cancel.clicked.connect(self.stop)
         self.action = Button("Download", "primary", "download")
-        self.action.clicked.connect(lambda: self.run(False))
+        self.action.clicked.connect(self.primary)
         for widget in (self.remove, self.cancel, self.action):
             actions.addWidget(widget)
-        self.card.body.addLayout(actions)
+        self.actions = QWidget()
+        footer = QVBoxLayout(self.actions)
+        margins(footer, 0)
+        footer.addWidget(self.feedback)
+        footer.addWidget(self.progress)
+        footer.addLayout(actions)
+        body.addWidget(self.actions)
         self.display()
+
+    def is_paused(self, row: Listing) -> bool:
+        return row.state in ("Not downloaded", "Update available") and (
+            row.partial or row.origin.id in self.paused
+        )
 
     def load(self, *, online: bool = False, message: str = "", retry: str = "") -> None:
         if self.job or self.loading:
@@ -175,6 +223,10 @@ class PackBrowser(QWidget):
         self.remove.setEnabled(False)
         self.source_hint.setText("Checking the pack catalog…")
         self.empty.hide()
+        self.browse.hide()
+        self.preview_key = None
+        if self.preview_job:
+            self.preview_job.cancel()
         source, url = self.source, self.ctx.cfg.content_manifest_url
         key = self.rows[self.menu.currentRow()].origin.id if self.menu.currentRow() >= 0 else ""
 
@@ -215,7 +267,8 @@ class PackBrowser(QWidget):
                 self.menu.clear()
                 selected = 0
                 for index, row in enumerate(self.rows):
-                    item = QListWidgetItem(f"{row.title}\n{row.state}")
+                    status = "Paused" if self.is_paused(row) else row.state
+                    item = QListWidgetItem(f"{row.title}\n{status}")
                     item.setToolTip(item.text())
                     self.menu.addItem(item)
                     if row.origin.id == key:
@@ -225,6 +278,7 @@ class PackBrowser(QWidget):
             if message:
                 self.feedback.setText(message)
                 if not self.rows:
+                    self.source_hint.show()
                     self.source_hint.setText(f"{message}  ·  {self.source_hint.text()}")
             if (
                 retry
@@ -241,6 +295,7 @@ class PackBrowser(QWidget):
             self.source_hint.setText(
                 "Could not read the pack catalog. Check the downloads folder, then refresh."
             )
+            self.source_hint.show()
             self.source_hint.setToolTip(f"Technical details\n{exc}")
 
         job = self.ctx.tasks.start(read)
@@ -253,11 +308,18 @@ class PackBrowser(QWidget):
         self.progress.hide()
         self.cancel.hide()
         self.menu.setVisible(bool(row))
-        self.empty.setVisible(not row)
+        self.empty.setVisible(not row and not self.loading)
+        self.browse.setVisible(not row and not self.loading)
+        self.actions.setVisible(bool(row))
+        offline = bool(self.source and self.source.detail)
+        self.empty.headline.setText("Catalog offline" if offline else "No packs yet")
+        self.source_hint.setVisible(bool(row or self.loading))
+        self.display_art(row)
         self.card.setVisible(bool(row))
-        self.menu.setEnabled(True)
+        self.menu.setEnabled(not self.loading)
         self.back.setEnabled(True)
-        self.action.setVisible(bool(row and row.status and row.state != "Available in library"))
+        self.back.setVisible(bool(row or self.loading))
+        self.action.setVisible(bool(row and row.state != "Incompatible"))
         self.remove.setVisible(bool(row and row.removable))
         self.remove.setEnabled(not self.loading and bool(row and row.state != "Downloading"))
         self.credits.setVisible(bool(row))
@@ -269,21 +331,102 @@ class PackBrowser(QWidget):
             self.description.setText(pack.description if pack else "Saved in your library.")
             self.credits.setText(f"By {o.author}  ·  License · {o.license}\n{o.attribution}")
             self.link.set_value(o.source_url)
-            self.feedback.setText(f"{row.state}  ·  Version {o.version}")
+            self.feedback.setText(
+                f"Requires {config.APP_NAME} {pack.min_app_version}"
+                if row.state == "Incompatible"
+                else f"Version {o.version}"
+                if self.is_paused(row)
+                else f"{row.state}  ·  Version {o.version}"
+            )
             self.action.setText(
-                {"Downloaded": "Add to library", "Update available": "Download update"}.get(
-                    row.state, "Download"
-                )
+                "Resume download"
+                if self.is_paused(row)
+                else {
+                    "Available in library": "View in collection",
+                    "Downloaded": "Add to library",
+                    "Update available": "Download update",
+                }.get(row.state, "Download")
+            )
+            self.action.setIcon(
+                icon("library" if row.state == "Available in library" else "download", t.ON_GOLD)
             )
             self.action.setEnabled(
                 not self.loading and row.state not in ("Incompatible", "Downloading")
             )
 
+    def primary(self) -> None:
+        row = self.rows[self.menu.currentRow()]
+        if row.state == "Available in library":
+            self.view_requested.emit(row.origin.id)
+        else:
+            self.run(False)
+
+    def display_art(self, row: Listing | None) -> None:
+        if self.preview_key == row:
+            return
+        self.preview_key = row
+        self.art.clear()
+        self.art.setVisible(bool(row))
+        if self.preview_job:
+            self.preview_job.cancel()
+        else:
+            self.start_preview()
+
+    def start_preview(self) -> None:
+        row = self.preview_key
+        if not row or not self.isVisible():
+            return
+        pack = row.status.pack if row.status else None
+        if not row.local_preview and not (pack and pack.previews):
+            self.art.setText("No preview provided")
+            return
+        self.art.setText("Loading preview…")
+
+        def read(worker: WorkerContext) -> QImage:
+            path = row.local_preview or asyncio.run(
+                download.fetch_preview(self.cache, pack, pack.previews[0], cancel=worker.cancel)
+            )
+            return read_image(path, 560)
+
+        def ready(img: QImage) -> None:
+            if self.preview_key == row and not img.isNull():
+                self.art.setPixmap(
+                    QPixmap.fromImage(img).scaled(
+                        self.art.width(),
+                        self.art.height(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+
+        def finished() -> None:
+            canceled = self.preview_job.cancel_event.is_set()
+            self.preview_job = None
+            if self.preview_key != row or canceled:
+                self.start_preview()
+            elif self.art.pixmap().isNull():
+                self.art.setText("Preview unavailable")
+
+        self.preview_job = self.ctx.tasks.start(read, owner=self)
+        self.preview_job.result.connect(ready)
+        self.preview_job.finished.connect(finished)
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        self.preview_key = None
+        if self.preview_job:
+            self.preview_job.cancel()
+        super().hideEvent(event)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self.rows and not self.loading:
+            self.display_art(self.rows[self.menu.currentRow()])
+
     def stop(self) -> None:
         if self.job:
             self.job.cancel()
             self.cancel.setEnabled(False)
-            self.feedback.setText("Canceling download…")
+            self.feedback.setText("Pausing download…")
 
     def confirm_remove(self) -> None:
         row = self.rows[self.menu.currentRow()]
@@ -297,6 +440,7 @@ class PackBrowser(QWidget):
         if self.job or self.loading:
             return
         row = self.rows[self.menu.currentRow()]
+        self.paused.discard(row.origin.id)
         self.feedback.setToolTip("")
         self.menu.setEnabled(False)
         self.refresh.setEnabled(False)
@@ -337,9 +481,11 @@ class PackBrowser(QWidget):
             self.job = None
             self.feedback.setToolTip(f"Technical details\n{exc}")
             cancelled = isinstance(exc, DownloadError) and exc.reason == DownloadFailure.CANCELLED
+            if cancelled:
+                self.paused.add(row.origin.id)
             self.load(
                 message=(
-                    "Download canceled."
+                    ""
                     if cancelled
                     else "The pack cache is busy. Try again when the other operation finishes."
                     if isinstance(exc, CacheBusyError)
@@ -349,7 +495,7 @@ class PackBrowser(QWidget):
                     if isinstance(exc, ValueError)
                     else "Could not update the pack. Check free space and folder permissions, then retry."
                 ),
-                retry="Resume" if cancelled else "Retry",
+                retry="" if removing else "Resume download" if cancelled else "Retry",
             )
 
         self.job = self.ctx.tasks.start(work)

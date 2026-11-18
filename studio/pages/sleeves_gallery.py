@@ -229,7 +229,7 @@ class Gallery(QWidget):
             if not self.measuring or generation != self.measure_generation:
                 return
             self.measuring = None
-            current = {item.key: item for item in self.items if item.entry}
+            current = {item.key: item for item in self.items}
             self.measured.update(
                 {
                     item.key: colours.get(item.key, "")

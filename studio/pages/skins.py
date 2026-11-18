@@ -18,6 +18,7 @@ from studio.context import AppContext, GameOpenError, Installation
 from studio.tasks import Job, Work
 from studio.widgets import Button, label, margins
 
+from .settings_storage import byte_size
 from .skins_detail import Workspace
 from .skins_feedback import AppearancePage
 from .skins_gallery import Gallery
@@ -41,6 +42,7 @@ class SkinsPage(AppearancePage):
         self.look: Look | None = None
         self.origin: Look | None = None
         self.base: themes.Theme | None = None
+        self.paused: set[str] = set()
         self.mode = "gallery"
         self.naming = ""
         self.entered = self.tried_recovery = self.online = False
@@ -59,10 +61,6 @@ class SkinsPage(AppearancePage):
         row.addWidget(self.message, 1)
         self.setup_feedback()
         row.addWidget(self.details)
-        self.dismiss = Button("Back", "quiet")
-        self.dismiss.clicked.connect(lambda: self.note())
-        self.dismiss.hide()
-        row.addWidget(self.dismiss)
         row.addWidget(self.retry_button)
         body.addWidget(self.message_bar)
         self.message_bar.hide()
@@ -87,11 +85,13 @@ class SkinsPage(AppearancePage):
             context, "wallpaper", lambda title, message: self.confirm(title, message)
         )
         self.packs.back.clicked.connect(self.escape)
+        self.packs.view_requested.connect(self.view_wallpapers)
         self.gallery.more.clicked.connect(self.open_packs)
         self.maker = self.view.maker
         self.stack.addWidget(self.gallery)
         self.stack.addWidget(self.view)
         self.stack.addWidget(self.packs)
+        self.setup_block()
         self.gallery.selected.connect(self.open_look)
         self.gallery.create.clicked.connect(self.create)
         self.gallery.refresh.clicked.connect(lambda: self.reload(online=True))
@@ -128,7 +128,6 @@ class SkinsPage(AppearancePage):
     def note(self, text: str = "", action: Callable | None = None, button: str = "Retry") -> None:
         self.retry = action
         self.technical_error(None)
-        self.dismiss.hide()
         self.message.setText(text)
         self.message.setToolTip("")
         self.message_bar.setVisible(bool(text))
@@ -138,6 +137,7 @@ class SkinsPage(AppearancePage):
     def installation_changed(self, installation: Installation) -> None:
         if not self.built:
             return
+        self.leave_block()
         self.generation += 1
         self.data = None
         self.gallery.data = None
@@ -185,6 +185,7 @@ class SkinsPage(AppearancePage):
             return True
         if self.job or not self._discard():
             return False
+        self.leave_block()
         self.entered = False
         self.motion.stop()
         self.gallery.grid.suspend()
@@ -200,7 +201,7 @@ class SkinsPage(AppearancePage):
         )
 
     def escape(self) -> bool:
-        if self.job or self.packs.job:
+        if self.leave_block() or self.job or self.packs.job:
             return True
         if self.mode == "packs":
             self.to_gallery()
@@ -229,6 +230,10 @@ class SkinsPage(AppearancePage):
         self.packs.load(online=True)
         self.packs.back.setFocus()
 
+    def view_wallpapers(self, pack_id: str) -> None:
+        self.to_gallery()
+        self.reload(wallpaper_pack=pack_id)
+
     def to_gallery(self) -> None:
         self.look = self.origin = self.base = None
         self.mode, self.naming = "gallery", ""
@@ -242,7 +247,7 @@ class SkinsPage(AppearancePage):
             return
         self.motion.stop()
         self.stack.setCurrentWidget(widget)
-        if self.entered:
+        if self.entered and widget is not self.packs:
             self.motion.setTargetObject(widget)
             self.motion.setStartValue(QPoint(-t.XL if widget is self.gallery else t.XL, 0))
             self.motion.setEndValue(QPoint())
@@ -252,7 +257,7 @@ class SkinsPage(AppearancePage):
         if group == "Downloadable" and not self.online:
             self.reload(online=True)
 
-    def reload(self, *, online: bool = False, select: str = "") -> None:
+    def reload(self, *, online: bool = False, select: str = "", wallpaper_pack: str = "") -> None:
         self.generation += 1
         generation = self.generation
         installation = self.ctx.installation
@@ -273,6 +278,15 @@ class SkinsPage(AppearancePage):
             self.gallery.set_collection(data, self.game)
             self.maker.set_wallpapers(data.wallpapers)
             self.gallery.restore.setEnabled(installation.ready)
+            if wallpaper_pack and self.mode == "gallery":
+                row = next((w for w in data.wallpapers if w.origin.id == wallpaper_pack), None)
+                if row:
+                    self.create()
+                    self.maker.fine.setChecked(True)
+                    self.maker.pick_wallpaper(self.maker.wallpapers.findData(row.digest))
+                    self.view.scroll.ensureWidgetVisible(self.maker.wallpapers)
+                else:
+                    self.note("This pack is no longer in your wallpaper collection.")
             self.gallery.refresh.setEnabled(True)
             key = (
                 select
@@ -340,7 +354,13 @@ class SkinsPage(AppearancePage):
         self.view.show_panel(self.view.inspector)
         self.view.title.set_value(look.name)
         self.view.kicker.setText(
-            "APPLIED IN EDOPRO" if look.active else "SKIN PREVIEW" if look.pack else "THEME PREVIEW"
+            "SAVED CHANGES"
+            if look.needs_update
+            else "APPLIED IN EDOPRO"
+            if look.active
+            else "SKIN PREVIEW"
+            if look.pack
+            else "THEME PREVIEW"
         )
         self.view.inspector.display(
             look, self.ctx.installation.ready, bool(self.data and self.data.restore_pack)
@@ -350,12 +370,21 @@ class SkinsPage(AppearancePage):
                 self.view.inspector.highlight.setChecked(
                     bool(self.data and self.data.highlights.get(look.name))
                 )
+        if self.data:
+            self.view.inspector.restore.setText(f"Restore original · {self.data.original_skin}")
         self._preview()
         if clear:
             self.view.back.setFocus()
 
     def _preview(self) -> None:
         if self.look:
+            if self.mode == "detail" and self.data:
+                self.view.inspector.update_action(
+                    self.look,
+                    self.ctx.installation.ready,
+                    self.look.partial or self.look.key in self.paused,
+                    self.data.highlights.get(self.look.name, False),
+                )
             self.view.preview.set_look(
                 self.look,
                 self.maker.theme if self.mode == "maker" else self.look.theme,
@@ -421,8 +450,11 @@ class SkinsPage(AppearancePage):
         self.generation += 1
         self.note(message)
         apply_enabled = self.view.inspector.apply.isEnabled()
+        self.view.game_actions.setEnabled(False)
         self.view.inspector.apply.setEnabled(False)
         self.view.back.setEnabled(False)
+        self.maker.save_btn.setEnabled(False)
+        self.maker.copy_btn.setEnabled(False)
         self.gallery.setEnabled(False)
         for panel in self.view.panels:
             panel.setEnabled(panel is self.view.progress)
@@ -432,8 +464,11 @@ class SkinsPage(AppearancePage):
 
         def release() -> None:
             self.job = None
+            self.view.game_actions.setEnabled(True)
             self.view.inspector.apply.setEnabled(apply_enabled)
             self.view.back.setEnabled(True)
+            self.maker.save_btn.setEnabled(True)
+            self.maker.copy_btn.setEnabled(True)
             self.gallery.setEnabled(True)
             self.gallery.refresh.setEnabled(True)
             for panel in self.view.panels:
@@ -447,25 +482,28 @@ class SkinsPage(AppearancePage):
 
         def fail(exc: Exception) -> None:
             release()
+            if isinstance(exc, GameOpenError) and retry:
+                self.note()
+                self.show_block(exc, retry, self.message_bar, self.install)
+                return
             if transfer:
                 self.view.show_panel(self.view.inspector)
                 self.reload()
             if isinstance(exc, DownloadError) and exc.reason == DownloadFailure.CANCELLED:
-                self.note("Download canceled. You can resume it here.", retry, "Resume")
+                self.note()
+                self.paused.add(self.look.key)
             elif isinstance(exc, DownloadError):
-                self.note(download_message(exc), retry)
+                self.note(download_message(exc), None if transfer else retry)
                 self.message.setToolTip(str(exc))
             else:
                 self.note(
-                    self.game_warning(exc)
-                    if isinstance(exc, GameOpenError)
-                    else "Could not finish the change. Check folder permissions and free space, then retry."
+                    "Could not finish the change. Check folder permissions and free space, then retry."
                     if isinstance(exc, OSError) and not isinstance(exc, extras.SleeveReapplyError)
                     else str(exc),
                     self.retry_sleeves if isinstance(exc, extras.SleeveReapplyError) else retry,
                 )
-            self.technical_error(exc)
-            self.dismiss.setVisible(isinstance(exc, GameOpenError))
+            if not (isinstance(exc, DownloadError) and exc.reason == DownloadFailure.CANCELLED):
+                self.technical_error(exc)
             if writing:
                 self.reload()
 
@@ -537,6 +575,7 @@ class SkinsPage(AppearancePage):
         shared = self.data.shared
         if not shared:
             return
+        self.paused.discard(self.look.key)
         self.view.show_panel(self.view.progress)
         self.view.progress.begin(f"Downloading {pack.title}")
 
@@ -561,9 +600,9 @@ class SkinsPage(AppearancePage):
             progress.advance_to(min(100, 100 * p.bytes_done // p.total_bytes), 100)
             if p.bytes_done >= p.total_bytes:
                 progress.phase.setText(f"Verifying {name}")
-        total = f" of {p.total_bytes / 1048576:.1f}" if p.total_bytes else ""
+        total = f" of {byte_size(p.total_bytes)}" if p.total_bytes else ""
         progress.counts.setText(
-            f"{p.bytes_done / 1048576:.1f}{total} MB · {p.bytes_per_second / 1024:.0f} KB/s"
+            f"{byte_size(p.bytes_done)}{total} · {byte_size(int(p.bytes_per_second))}/s"
         )
 
     def _cancel(self) -> None:

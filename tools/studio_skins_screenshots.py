@@ -16,7 +16,6 @@ from zipfile import ZipFile
 
 from PySide6.QtWidgets import QApplication, QFileDialog
 
-import config
 import extras
 import sleeves
 import themes
@@ -73,9 +72,10 @@ def library_archive(kind: str) -> tuple[Pack, bytes]:
         if kind == "wallpaper"
         else {"file": member, "name": "Evening lake", "tags": ["landscape", "lake"]}
     )
+    artwork = sleeves.png_bytes(stand_in())
     with ZipFile(data, "w") as archive:
         archive.writestr("pack.json", json.dumps({"items": [item]}))
-        archive.writestr(member, sleeves.png_bytes(stand_in()))
+        archive.writestr(member, artwork)
     raw = data.getvalue()
     pack = replace(
         sample_pack("Moon"),
@@ -83,10 +83,17 @@ def library_archive(kind: str) -> tuple[Pack, bytes]:
         kind=kind,
         title="Lakeside",
         description="A mountain lake at sunset.",
-        author=f"{config.APP_NAME} demo",
+        author="Sample illustration team",
         license="Demo artwork",
-        attribution=f"Evening lake, from the {config.APP_NAME} illustration collection.",
-        source_url="https://example.invalid/lakeside",
+        attribution="Evening lake · original illustration for this sample pack.",
+        source_url="https://github.com/cntrl-alt-lenny/edopro-hd-cards",
+        previews=(
+            Preview(
+                "https://example.invalid/evening-lake.png",
+                hashlib.sha256(artwork).hexdigest(),
+                len(artwork),
+            ),
+        ),
         sha256=hashlib.sha256(raw).hexdigest(),
         size_bytes=len(raw),
     )
@@ -100,6 +107,11 @@ def capture_library(
 ) -> None:
     browser = page.packs
     prefix = browser.kind + "-catalogue-"
+
+    def pack_shot(state: str) -> None:
+        settle(lambda: browser.preview_job is None and not browser.art.pixmap().isNull())
+        shot(prefix + state)
+
     empty = catalogue.Catalogue(Manifest(1, ()), catalogue.CatalogueSource.LIVE)
     with patch("content.catalogue.fetch_catalogue", return_value=empty):
         page.gallery.more.click()
@@ -116,14 +128,20 @@ def capture_library(
         shot(prefix + "offline")
     pack, body = library_archive(browser.kind)
     newer = replace(pack, id="new-edition", title="Lakeside II", min_app_version="99.0.0")
+    for edition in (pack, newer):
+        folder = browser.cache.root / ("preview-" + edition.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / (edition.previews[0].sha256 + ".image")).write_bytes(
+            sleeves.png_bytes(stand_in())
+        )
     cat = catalogue.Catalogue(Manifest(1, (pack, newer)), catalogue.CatalogueSource.LIVE)
     with patch("content.catalogue.fetch_catalogue", return_value=cat):
         browser.refresh.click()
         settle(lambda: not browser.loading)
     browser.menu.setCurrentRow(1)
-    shot(prefix + "incompatible")
+    pack_shot("incompatible")
     browser.menu.setCurrentRow(0)
-    shot(prefix + "available")
+    pack_shot("available")
     release = Event()
 
     async def stream(
@@ -135,6 +153,10 @@ def capture_library(
         cancel: Event,
         timeout: float,
     ) -> int:
+        if partial.name.endswith(".image.part"):
+            artwork = sleeves.png_bytes(stand_in())
+            partial.write_bytes(artwork)
+            return len(artwork)
         progress(Progress(len(body) // 2, len(body), 102400))
         while not release.is_set():
             await asyncio.sleep(0.01)
@@ -147,16 +169,16 @@ def capture_library(
     ):
         browser.action.click()
         settle(lambda: browser.progress.value() in (49, 50))
-        shot(prefix + "downloading")
+        pack_shot("downloading")
         browser.cancel.click()
-        settle(lambda: not browser.loading and browser.action.text() == "Resume")
-        shot(prefix + "cancelled")
+        settle(lambda: not browser.loading and browser.action.text() == "Resume download")
+        pack_shot("cancelled")
         with patch(
             "content.libraries.make_available", side_effect=ValueError("Unreadable pack image.")
         ):
             browser.action.click()
             settle(lambda: not browser.loading and browser.action.text() == "Retry")
-            shot(prefix + "invalid")
+            pack_shot("invalid")
 
         # Pause the real bridge at its published phase boundaries so short local operations
         # remain visible long enough to capture.
@@ -191,17 +213,17 @@ def capture_library(
             browser.action.click()
             for state, gate in gates.items():
                 settle(lambda state=state: browser.feedback.text() == state.capitalize() + "…")
-                shot(prefix + state)
+                pack_shot(state)
                 gate.set()
         settle(lambda: not browser.job and not browser.loading and browser.remove.isVisible())
-        shot(prefix + "installed")
+        pack_shot("installed")
         update = catalogue.Catalogue(
             Manifest(1, (replace(pack, version="1.1.0"), newer)), cat.source
         )
         with patch("content.catalogue.fetch_catalogue", return_value=update):
             browser.refresh.click()
             settle(lambda: not browser.loading)
-            shot(prefix + "update")
+            pack_shot("update")
         remove = libraries.remove_pack
         removed = Event()
 
@@ -215,20 +237,20 @@ def capture_library(
             patch("content.libraries.remove_pack", paused_remove),
         ):
             browser.remove.click()
-            shot(prefix + "removing")
+            pack_shot("removing")
             removed.set()
             settle(lambda: not browser.job and not browser.loading)
-            shot(prefix + "removed")
+            pack_shot("removed")
         folder = browser.cache.root / ("pack-" + pack.id)
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"{pack.version}--{pack.sha256}.zip").write_bytes(body)
         with patch("content.catalogue.fetch_catalogue", return_value=cat):
             browser.refresh.click()
             settle(lambda: browser.action.text() == "Add to library")
-            shot(prefix + "cached")
+            pack_shot("cached")
         browser.action.click()
         settle(lambda: not browser.job and not browser.loading)
-    browser.back.click()
+    browser.action.click()
 
 
 def render_skins(
@@ -281,11 +303,7 @@ def render_skins(
     page.retry_button.click()
     settle(lambda: loaded() and not page.data.issues)
     capture_library(page, shot, settle)
-    gallery_ready()
-    gallery.create.click()
-    page.maker.fine.click()
-    page.maker.wallpapers.setCurrentIndex(1)
-    page.maker.wallpapers.activated.emit(1)
+    settle(lambda: page.mode == "maker" and bool(page.maker.theme.image))
     QApplication.processEvents()
     view.scroll.ensureWidgetVisible(page.maker.credit)
     frame("downloaded-wallpaper")
@@ -342,8 +360,8 @@ def render_skins(
     frame("preview-duel")
     with patch("music.settings._game_running", return_value=True):
         view.inspector.apply.click()
-        settle(lambda: page.retry_button.isVisible() and page.job is None)
-        frame("close-game")
+        settle(lambda: page.block.isVisible() and page.job is None)
+        shot("skins-close-game")
     release = Event()
 
     def closed(_: Path) -> bool:
@@ -351,7 +369,7 @@ def render_skins(
         return False
 
     with patch("music.settings._game_running", side_effect=closed):
-        page.retry_button.click()
+        page.block.retry.click()
         frame("applying")
         release.set()
         settle(lambda: page.look.active and loaded())
@@ -447,14 +465,14 @@ def render_skins(
             settle(lambda: view.progress.percent.text() == "42%")
             frame("pack-download")
             view.progress.cancel.click()
-            settle(lambda: loaded() and page.retry_button.text() == "Resume")
+            settle(lambda: loaded() and view.inspector.apply.text() == "Resume download")
             frame("pack-cancelled")
         with patch.object(
             page.store,
             "download",
             side_effect=DownloadError(DownloadFailure.INTEGRITY, "Simulated damaged download."),
         ):
-            page.retry_button.click()
+            view.inspector.apply.click()
             settle(lambda: loaded() and "failed verification" in page.message.text())
             frame("pack-verification-error")
         page.escape()
