@@ -27,17 +27,10 @@ import aiohttp
 
 import config as config_module
 import extras
-import gui
+from artwork_flow import format_size as _format_size
 from card_databases import get_db_files
 from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, find_edopro_folder
 from network_tls import create_http_session as _create_http_session
-
-try:
-    import tkinter as tk
-    from tkinter import filedialog
-except Exception:
-    tk = None
-    filedialog = None
 
 # Rich console setup
 # We import rich here so the rest of the file can use `console` everywhere.
@@ -216,6 +209,8 @@ async def notify_if_update_available(
     cfg: Config | None = None, session: aiohttp.ClientSession | None = None
 ) -> None:
     """Report a newer release if the check succeeds."""
+    if getattr(cfg, "update_checked_by_shell", False):
+        return
     try:
         if session is None:
             async with _create_http_session() as client:
@@ -323,31 +318,12 @@ def browse_for_edopro_path(initial_dir: str) -> tuple[str | None, bool]:
     if used_dialog:
         return selected, True
 
-    if sys.platform != "win32" or tk is None or filedialog is None:
+    if sys.platform != "win32":
         return None, False
+    from desktop_dialogs import console_folder_dialog
 
-    root = None
-    try:
-        start_dir = initial_dir if os.path.isdir(initial_dir) else os.path.expanduser("~")
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        root.update_idletasks()
-        selected = filedialog.askdirectory(
-            parent=root,
-            initialdir=start_dir,
-            title="Select your EDOPro folder",
-            mustexist=True,
-        )
-        if not selected:
-            return None, True
-        return normalize_edopro_path(selected), True
-    except Exception:
-        return None, False
-    finally:
-        if root is not None:
-            with contextlib.suppress(Exception):
-                root.destroy()
+    selected, available = console_folder_dialog(initial_dir)
+    return normalize_edopro_path(selected) if selected else None, available
 
 
 def read_edopro_path_from_console() -> str | None:
@@ -369,7 +345,7 @@ def detect_edopro_folder(cfg: Config) -> None:
     """
     if cfg.cli.edopro_path is not None:
         return
-    found = find_edopro_folder([cfg.edopro_path])
+    found = find_edopro_folder([cfg.discovery_guess()])
     if found:
         cfg.set_edopro_path(found)
         cfg.folder_detected = True
@@ -1524,6 +1500,7 @@ def _write_report(stats: DownloadStats, cfg: Config, runtime_seconds: float) -> 
                 f.write(f"{'=' * 40}\n")
                 for card_id, card_name, detail in stats.unexpected_errors:
                     f.write(f"  {card_id}\t{card_name}\n    {detail}\n")
+        cfg.report_path = report_path
         console.print(f"[dim]Report saved to: {report_path}[/dim]")
     except OSError as exc:
         console.print(f"[yellow]Could not write sync report: {exc}[/yellow]")
@@ -1769,14 +1746,6 @@ def _count_deck_files(folder: str) -> int:
     return count
 
 
-def _format_size(nbytes: int) -> str:
-    if nbytes >= 1024**3:
-        return f"{nbytes / 1024**3:.1f} GB"
-    if nbytes >= 1024**2:
-        return f"{nbytes / 1024**2:.0f} MB"
-    return f"{nbytes / 1024:.0f} KB"
-
-
 def _scan_art_folder(
     folder: str,
     extensions: tuple[str, ...],
@@ -1875,6 +1844,7 @@ class SyncInputError(SystemExit):
 
 async def run(cfg: Config):
     started_at = perf_counter()
+    cfg.report_path = None
     cfg.idle_summary = None
 
     console.print(f"[bold cyan]EDOPro HD Cards Downloader[/bold cyan] [dim]v{VERSION}[/dim]")
@@ -2451,8 +2421,9 @@ def main() -> int:
     launched_gui = False
 
     try:
-        cfg = Config()
-        if not cfg.health_check:
+        cfg = Config(defer_discovery=True)
+        studio_launch = _should_show_gui(cfg) and not cfg.cli.legacy_gui
+        if not cfg.health_check and not studio_launch:
             detect_edopro_folder(cfg)
 
         if sys.platform == "win32":
@@ -2460,12 +2431,29 @@ def main() -> int:
             # pinned 3.11 build (aiohttp needs the selector loop on Windows).
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-        if _should_show_gui(cfg) and gui.gui_available():
+        if studio_launch:
+            launched_gui = True
+            try:
+                from studio.app import run_app
+            except ImportError as exc:
+                from desktop_dialogs import show_startup_error
+
+                show_startup_error(f"EDOPro Studio needs PySide6-Essentials. {exc}")
+                return 1
+            exit_code = run_app(cfg, VERSION, run, _apply_gui_choices)
+        elif cfg.cli.legacy_gui:
+            import gui
+
+            launched_gui = True
             try:
                 exit_code = gui.run_app(cfg, VERSION, run, _apply_gui_choices)
-                launched_gui = True
-            except gui.GuiUnavailable:
-                launched_gui = False  # no display / broken Tk — console still works
+            except gui.GuiUnavailable as exc:
+                from desktop_dialogs import show_startup_error
+
+                show_startup_error(
+                    f"The legacy EDOPro window requires a working Tk installation. {exc}"
+                )
+                return 1
         if not launched_gui:
             asyncio.run(run(cfg))
     except KeyboardInterrupt:

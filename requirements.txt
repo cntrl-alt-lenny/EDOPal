@@ -4,3 +4,4 @@ aiohttp==3.14.3
 rich==15.0.0
 certifi==2026.7.22
 miniaudio==1.73
+PySide6-Essentials==6.12.0

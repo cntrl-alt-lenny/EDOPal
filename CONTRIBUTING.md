@@ -45,8 +45,12 @@ release_assets/ReadMe-*.txt          # platform instructions
 .github/workflows/build.yml          # release packaging and smoke checks
 ```
 
-## App window (gui.py)
-Double-clicking the packaged app opens the artwork screen. Customize EDOPro, Music library and Tournament decks share its selected installation. Tk runs on the main thread. Artwork workers send results through a queue and receive cancellation through a per-run event. A sync for imported decks uses a fresh configuration so its deck paths and options stay within that job. Power flags use the console entry point unless the caller explicitly requests `--gui`. Use `python main.py --gui` to exercise the desktop flow from source.
+## Desktop interfaces
+
+A plain packaged launch opens the Studio shell. Use `python main.py --gui` from source or `--legacy-gui` for the original Tk interface during the page migration. Power flags retain their console flow. The [Studio developer guide](studio/README.md) covers page registration, the shared task runner, component and token usage, headless screenshots and tests.
+
+Both desktop interfaces share artwork choices and summary models in `artwork_flow.py`. Each sync for imported decks gets its own configuration and cancellation event. The backend stays independent of Qt.
+
 
 ## Soundtrack covers
 

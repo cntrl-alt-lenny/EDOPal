@@ -9,7 +9,6 @@ run_app raises GuiUnavailable and the caller falls back to the console flow.
 """
 
 import contextlib
-import copy
 import os
 import platform
 import queue
@@ -19,6 +18,21 @@ from pathlib import Path
 
 import config
 import extras
+from artwork_flow import (
+    CHECKBOXES,
+    Summary,
+    coverage_summary,
+    make_run_config,
+    sync_summary,
+    valid_decks,
+)
+from artwork_flow import (
+    GuiProgress as _GuiProgress,
+)
+from artwork_flow import compact_path as _elide_path
+from artwork_flow import (
+    recommended_my_decks as _recommended_my_decks,
+)
 
 try:
     import tkinter as tk
@@ -47,115 +61,6 @@ FOCUS = "#e5bf72"
 DISABLED = "#3a3b36"
 CHECK_EDGE = "#57584e"
 CONTENT_WIDTH = 848
-
-# (section, [(key, label, hint, default), ...])
-CHECKBOX_GROUPS = [
-    (
-        "ARTWORK",
-        [
-            (
-                "field_art",
-                "Field Spell playmat artwork",
-                "Also fetch the art shown on the board during duels",
-                True,
-            ),
-            (
-                "my_decks",
-                "Only cards from my decks",
-                "Recommended first run — much faster, then sync the rest later",
-                False,
-            ),
-            (
-                "hd_era_art",
-                "HD GOAT / Pre-Errata artwork",
-                "Modern text in HD; untick for original wording at lower resolution",
-                True,
-            ),
-        ],
-    ),
-    (
-        "EXTRAS",
-        [
-            (
-                "theme",
-                "Midnight Circuit theme",
-                "Custom backgrounds and card sleeves",
-                False,
-            ),
-            (
-                "audio",
-                "Synth music and cues",
-                "Adds two tracks and replaces ten duel cues",
-                False,
-            ),
-            (
-                "save_report",
-                "Save a sync report",
-                "Writes a text file listing anything unavailable",
-                False,
-            ),
-        ],
-    ),
-    (
-        "MAINTENANCE",
-        [
-            (
-                "repair",
-                "Repair broken images first",
-                "Finds and re-downloads corrupt files",
-                False,
-            ),
-            (
-                "force",
-                "Re-download everything",
-                "Full refresh instead of only missing artwork",
-                False,
-            ),
-        ],
-    ),
-]
-
-CHECKBOXES = [box for _section, boxes in CHECKBOX_GROUPS for box in boxes]
-
-
-def _recommended_my_decks(cfg) -> bool:
-    """Recommend deck-first sync on an empty install that already has decks."""
-    deck_dir = os.path.join(getattr(cfg, "edopro_path", "") or "", "deck")
-    if not os.path.isdir(deck_dir):
-        return False
-    pics_path = getattr(cfg, "pics_path", "") or ""
-    image_count = 0
-    if os.path.isdir(pics_path):
-        with contextlib.suppress(OSError), os.scandir(pics_path) as entries:
-            for entry in entries:
-                if entry.name.lower().endswith(".jpg") and entry.is_file():
-                    image_count += 1
-                    if image_count == 500:
-                        return False
-    for _root, _dirs, files in os.walk(deck_dir):
-        if any(name.lower().endswith(".ydk") for name in files):
-            return True
-    return False
-
-
-def _elide_path(path: str, limit: int = 36) -> str:
-    """Shorten a long path to its last few folders so the row stays one line.
-
-    Wrapping instead would widen the window and add a second line to every
-    screen, since all three share one size. The tail is the part that tells
-    you which folder this is, so that is what survives.
-    """
-    if len(path) <= limit:
-        return path
-    separator = "\\" if "\\" in path else "/"
-    parts = [part for part in path.split(separator) if part]
-    tail = parts[-1] if parts else path
-    for count in range(2, len(parts) + 1):
-        candidate = separator.join(parts[-count:])
-        if len(candidate) + 1 > limit:
-            break
-        tail = candidate
-    return f"…{separator}{tail}"
 
 
 class GuiUnavailable(RuntimeError):
@@ -429,27 +334,6 @@ def _apply_style(root) -> None:
         darkcolor=GOLD,
         thickness=10,
     )
-
-
-class _GuiProgress:
-    """Rich-Progress-compatible adapter; thread-safe via the event queue."""
-
-    def __init__(self, events: "queue.Queue"):
-        self._events = events
-        self._next_id = 0
-
-    def add_task(self, description: str, total: int = 0):
-        task_id = self._next_id
-        self._next_id += 1
-        self._events.put(("task", task_id, description, total))
-        return task_id
-
-    def update(self, task_id, description: str | None = None, **_kwargs) -> None:
-        if description:
-            self._events.put(("desc", task_id, description))
-
-    def advance(self, task_id, step: int = 1) -> None:
-        self._events.put(("adv", task_id, step))
 
 
 class _App:
@@ -754,21 +638,7 @@ class _App:
                 "Deck artwork", "Wait for the current task to finish.", parent=self.root
             )
             return False
-        selected = Path(self.cfg.edopro_path).resolve()
-        deck_folder = (selected / "deck").resolve()
-        if (
-            selected != game_path.resolve()
-            or not config.folder_has_card_databases(str(selected))
-            or not paths
-            or not deck_folder.is_relative_to(selected)
-            or not all(
-                path.is_file()
-                and path.suffix.lower() == ".ydk"
-                and not path.is_symlink()
-                and path.resolve().parent == deck_folder
-                for path in paths
-            )
-        ):
+        if not valid_decks(self.cfg.edopro_path, game_path, paths):
             messagebox.showinfo(
                 "Deck artwork",
                 "Select the EDOPro installation containing these decks and its card databases.",
@@ -1044,13 +914,7 @@ class _App:
         self.mode = "coverage" if stats_only else "sync"
         # Filters and runtime flags belong to this job. A second sync can target
         # another folder or the full library without inheriting the first job.
-        self.run_config = cfg = copy.copy(self.cfg)
-        if deck_paths:
-            cfg.deck_paths = [str(path) for path in deck_paths]
-            cfg.decks_folder = None
-            cfg.prune = False
-            picks.update(my_decks=False, force=False, textures=False, theme=False, audio=False)
-        self.apply_choices(cfg, picks)
+        self.run_config = cfg = make_run_config(self.cfg, picks, self.apply_choices, deck_paths)
         if cfg.folder_detected and cfg.cli.edopro_path is None:
             cfg.set_edopro_path(cfg.edopro_path, save=True)
         self.finished = self.coverage_shown = self.folder_cancelled = False
@@ -1227,29 +1091,19 @@ class _App:
     def _show_coverage(self, data: dict) -> None:
         self.mode = "coverage"
         self.coverage_shown = True
-        self.summary_title_var.set("Artwork coverage")
+        self._render_result(coverage_summary(data))
 
-        def pct(part: int, whole: int) -> str:
-            return f"{100 * part / whole:.0f}%" if whole else "n/a"
-
-        self.hero_ok_var.set(pct(data["cards_have"], data["cards_total"]))
-        self.hero_ok_caption.configure(text="card art on disk")
-        self.hero_bad_var.set(pct(data["fields_have"], data["fields_total"]))
-        self.hero_bad_label.configure(style="Big.TLabel")
-        self.hero_bad_caption.configure(text="field art on disk")
-
-        from main import _format_size  # local import avoids a cycle at module load
-
-        rows = [
-            ("Cards indexed", f"{data['cards_total']:,}"),
-            ("Card art on disk", f"{data['cards_have']:,}"),
-            ("Field art on disk", f"{data['fields_have']:,} of {data['fields_total']:,}"),
-            ("Disk usage", _format_size(data["disk_bytes"])),
-        ]
-        if data["known_missing"]:
-            rows.append(("Known-missing (cached)", f"{data['known_missing']:,}"))
-        self._breakdown_rows(rows)
-        self.summary_note_var.set(f"Images folder: {data['pics_path']}")
+    def _render_result(self, summary: Summary) -> None:
+        self.summary_title_var.set(summary.title)
+        self.hero_ok_var.set(summary.first[0])
+        self.hero_ok_caption.configure(text=summary.first[1])
+        self.hero_bad_var.set(summary.second[0])
+        self.hero_bad_caption.configure(text=summary.second[1])
+        self.hero_bad_label.configure(
+            style="BigBad.TLabel" if summary.warning else "BigCalm.TLabel"
+        )
+        self._breakdown_rows(summary.rows)
+        self.summary_note_var.set(summary.full_note)
 
     def _finish(self, payload: dict) -> None:
         self.finished = True
@@ -1266,110 +1120,16 @@ class _App:
             self.exit_code = payload["exit"] or 0
         elif "error" in payload:
             self.exit_code = 1
-        error_text = payload.get("error")
-        if error_text is None and payload.get("exit") not in (None, 0):
-            error_text = (
-                "Check that the selected installation has readable card databases, then try again."
-            )
-
-        stats = payload.get("stats")
-        if (
-            error_text is None
-            and self.mode == "coverage"
-            and not self.coverage_shown
-            and not self.folder_cancelled
-        ):
-            error_text = (
-                "Coverage could not be measured. Check the selected EDOPro folder and try again."
-            )
-
-        if error_text is not None:
-            self.summary_title_var.set("Something went wrong")
-            self.hero_ok_var.set("—")
-            self.hero_bad_var.set("—")
-            self.hero_bad_label.configure(style="BigCalm.TLabel")
-            self._breakdown_rows([])
-            self.summary_note_var.set(error_text)
-        elif stats is None and self.folder_cancelled:
-            self.summary_title_var.set("No folder selected")
-            self.hero_ok_var.set("—")
-            self.hero_ok_caption.configure(text="nothing synced")
-            self.hero_bad_var.set("")
-            self.hero_bad_caption.configure(text="")
-            self._breakdown_rows([])
-            self.summary_note_var.set("Choose Back to home to select your EDOPro folder.")
-        elif self.mode == "coverage":
-            pass  # _show_coverage already populated the screen
-        elif stats is None and cfg.idle_summary:
-            title, details = cfg.idle_summary
-            self.summary_title_var.set(title)
-            self.hero_ok_var.set("0")
-            self.hero_ok_caption.configure(text="downloaded")
-            self.hero_bad_var.set("")
-            self.hero_bad_caption.configure(text="")
-            self._breakdown_rows([])
-            self.summary_note_var.set(details)
-        elif stats is None:
-            self.summary_title_var.set("Already up to date")
-            self.hero_ok_var.set("✓")
-            self.hero_ok_caption.configure(text="all artwork present")
-            self.hero_bad_var.set("")
-            self.hero_bad_caption.configure(text="")
-            self._breakdown_rows([])
-            installed = cfg.installed_extras
-            if installed:
-                self.summary_title_var.set("Extras installed")
-                self.summary_note_var.set(
-                    f"Installed {', '.join(installed)}. Reopen EDOPro to use them."
+        if not self.coverage_shown or "error" in payload or payload.get("exit"):
+            self._render_result(
+                sync_summary(
+                    cfg,
+                    payload,
+                    self.cancel_event.is_set(),
+                    self.folder_cancelled,
+                    self.mode == "coverage",
                 )
-            else:
-                self.summary_note_var.set("Nothing was missing — enjoy your duels!")
-        else:
-            cancelled = self.cancel_event.is_set()
-            self.summary_title_var.set("Sync cancelled" if cancelled else "Sync complete")
-            downloaded = stats.total_ok + stats.field_ok
-            unavailable = stats.failed + stats.field_failed
-            self.hero_ok_var.set(f"{downloaded:,}")
-            self.hero_bad_var.set(f"{unavailable:,}")
-            self.hero_bad_label.configure(
-                style="BigBad.TLabel" if unavailable else "BigCalm.TLabel"
             )
-            rows = []
-            if stats.total_ok:
-                rows.append(("Card artwork", f"{stats.total_ok:,}"))
-            if stats.field_ok:
-                rows.append(("Field Spell artwork", f"{stats.field_ok:,}"))
-            if stats.skipped:
-                rows.append(("Already on disk", f"{stats.skipped:,}"))
-            rush = stats.rush_failures
-            unofficial = stats.unofficial_failures
-            tokens = len(stats.token_failures)
-            official = len(stats.official_failures)
-            transient = stats.transient_failures
-            if rush:
-                rows.append(("Rush Duel (no art yet)", f"{rush:,}"))
-            if unofficial:
-                rows.append(("Anime / custom (no art yet)", f"{unofficial:,}"))
-            if tokens:
-                rows.append(("Tokens / placeholders", f"{tokens:,}"))
-            if official:
-                rows.append(("Official cards unavailable", f"{official:,}"))
-            if stats.field_failed:
-                rows.append(("Field art unavailable", f"{stats.field_failed:,}"))
-            if transient:
-                rows.append(("Network errors (will retry)", f"{transient:,}"))
-            self._breakdown_rows(rows)
-            notes = []
-            installed = cfg.installed_extras
-            if installed:
-                notes.append(f"Installed {', '.join(installed)}. Reopen EDOPro to use them.")
-            if unavailable:
-                notes.append(
-                    "Unavailable cards are remembered for 14 days and skipped on the next run."
-                )
-            if cfg.save_report:
-                notes.append(f"Report folder: {Path(cfg.config_path).parent}")
-            self.summary_note_var.set(" ".join(notes))
 
         self._show(self.summary_frame)
         self.root.bind("<Return>", self._on_return)
