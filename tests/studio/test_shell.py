@@ -39,6 +39,7 @@ def test_sidebar_navigation_and_keyboard(
     assert window.nav["skins"].hasFocus()
     qtbot.keyClick(window.nav["skins"], Qt.Key.Key_Return)
     assert window.current.id == "skins"
+    qtbot.waitUntil(lambda: not window.ctx.tasks.jobs)
 
 
 def test_picker_switch_validates_persists_and_broadcasts(
