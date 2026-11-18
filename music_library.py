@@ -480,7 +480,7 @@ def _game_running(game: Path) -> bool:
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise OSError(
-                "Could not check whether EDOPro is open. Change Music in EDOPro’s audio settings instead."
+                "Could not check whether EDOPro is open. Use EDOPro’s audio settings instead."
             ) from exc
         executables = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
     return any(
@@ -492,18 +492,24 @@ def _game_running(game: Path) -> bool:
 
 def set_music_enabled(game: Path, enabled: bool) -> None:
     """Change only the existing enable_music bit, preserving EDOPro's volume and file bytes."""
+    _set_audio_enabled(game, enabled, _ENABLE_MUSIC, "music", "enable_music")
+
+
+def _set_audio_enabled(
+    game: Path, enabled: bool, pattern: re.Pattern[bytes], label: str, key: str
+) -> None:
     root = game.resolve(strict=True)
     conf = root / "config" / "system.conf"
     if not conf.resolve().is_relative_to(root) or conf.is_symlink():
         raise OSError("The EDOPro settings file points outside the selected installation.")
     if _game_running(root):
-        raise OSError("Close this EDOPro installation before changing its music setting.")
+        raise OSError(f"Close this EDOPro installation before changing its {label} setting.")
     with locked(_sound_path(game, ".edopro-hd-sync"), ".audio-settings.lock"):
         original = conf.read_bytes()
-        matches = list(_ENABLE_MUSIC.finditer(original))
-        if not matches:
+        matches = list(pattern.finditer(original))
+        if not matches or matches[-1][1] not in (b"0", b"1"):
             raise ValueError(
-                "Set Music in EDOPro’s audio settings. This configuration has no recognized enable_music setting."
+                f"This configuration has no recognized {key} switch. Use EDOPro’s audio settings."
             )
         match = matches[-1]
         value = b"1" if enabled else b"0"
