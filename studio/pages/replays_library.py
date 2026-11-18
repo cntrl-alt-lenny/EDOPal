@@ -1,13 +1,42 @@
 """Replay display metadata and rolling-copy detection, independent of Qt."""
 
 import csv
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from replays import ReplayEntry, ReplayNotes, find_last_replays
 from replays.format import HAND_TEST, SINGLE
-from replays.shelf import ReplaySort
+from replays.shelf import ReplaySort, _folder, _snapshot
 
 SORTS: dict[str, ReplaySort] = {"Newest first": "date", "Name": "name", "Most turns": "turns"}
+
+
+@dataclass(frozen=True)
+class SavedCopy:
+    path: Path
+    signature: tuple[int, ...]
+    replay_id: str
+
+    @classmethod
+    def check(cls, path: Path, replay_id: str) -> "SavedCopy | None":
+        try:
+            signature, content = _snapshot(path)
+        except (OSError, ValueError):
+            return None
+        return (
+            cls(path, signature, replay_id)
+            if hashlib.sha256(content).hexdigest() == replay_id
+            else None
+        )
+
+    def remove(self, game: Path) -> None:
+        if self.path.parent != _folder(game) or self.check(self.path, self.replay_id) != self:
+            raise ValueError(
+                "The saved copy has changed or moved. Refresh Replays to see what is available."
+            )
+        self.path.unlink()
+
 
 # Exact presets in Project Ignis script/constant.lua. Modified presets have no reliable name.
 _RULES = {

@@ -1,17 +1,20 @@
 """Offline, reproducible Health check and Replays gallery."""
 
 import hashlib
+import sqlite3
 import struct
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
 
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
-from doctor import inspect_installation, storage_breakdown
+from doctor import DoctorReport, inspect_installation, storage_breakdown
+from doctor.model import finding
 from replays import AnnotationStore, ReplayNotes, index_replays
 from studio import theme as t
 from studio.context import Installation
@@ -98,6 +101,8 @@ def render_tools(
 
     ctx = window.ctx
     game = Path(selected.path)
+    with closing(sqlite3.connect(game / "cards.cdb")) as cards, cards:
+        cards.execute("UPDATE texts SET name = 'Practice card ' || (id - 1000)")
     fresh = game.parent / "Fresh installation"
     fresh.mkdir(exist_ok=True)
     (fresh / "EDOPro.exe").touch()
@@ -115,8 +120,17 @@ def render_tools(
     window.navigate("health")
     page = window.current
     shot("health-no-installation")
+    page.reports.pop(Path(selected.path), None)
+
+    def inspect_with_marker(*args: object, **kwargs: object) -> DoctorReport:
+        report = inspect_installation(*args, **kwargs)
+        if any(item.id == "state.lock_idle" for item in report.findings):
+            return report
+        idle = finding("state.lock_idle", path=game / "config" / "update.lock")
+        return replace(report, findings=(*report.findings, idle))
+
     with patch("doctor.report._game_running", return_value=False):
-        with hold_read("studio.pages.health.inspect_installation", inspect_installation):
+        with hold_read("studio.pages.health.inspect_installation", inspect_with_marker):
             ctx.set_installation(selected)
             shot("health-loading")
         settle(lambda: page.state == "overview")
@@ -135,6 +149,17 @@ def render_tools(
         page.support.click()
         shot("health-support")
         page.escape()
+        finding_button("Notes").click()
+        lock = finding_button("An earlier update left a marker")
+        lock.click()
+        explanation = next(
+            item
+            for item in page.scroll.widget().findChildren(QLabel)
+            if item.text().startswith("You can leave it in place")
+        )
+        settle(explanation.isVisible)
+        page.scroll.ensureWidgetVisible(explanation)
+        shot("health-idle-lock")
         with hold_read("studio.pages.health.storage_breakdown", storage_breakdown):
             page.disk.click()
             shot("health-storage-loading")
@@ -240,7 +265,18 @@ def render_tools(
         shot("replays-preserved")
     seed_replays(game, Path(ctx.cfg.config_path).parent, extra=320)
     page.refresh()
-    settle(lambda: page.state == "library")
+    settle(lambda: page.state == "library" and len(page.entries) >= 327)
     page.list.scrollToBottom()
     shot("replays-large-library")
+    with (
+        patch("studio.pages.replays._game_running", return_value=False),
+        patch("studio.pages.replays.confirm_action", return_value=True),
+    ):
+        remove = next(
+            b for b in page.scroll.widget().findChildren(Button) if b.text() == "Remove saved copy"
+        )
+        remove.click()
+        settle(lambda: page.state == "library" and page.preserve is not None)
+        shot("replays-copy-removed")
+        window.notice.hide()
     QApplication.processEvents()

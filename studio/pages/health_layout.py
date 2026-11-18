@@ -9,9 +9,9 @@ from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLayout,
+    QMessageBox,
     QPlainTextEdit,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -22,13 +22,33 @@ from studio import theme as t
 from studio.context import AppContext, Installation
 from studio.pages.base import Page
 from studio.tasks import Job, Work
-from studio.widgets import Button, Hero, Panel, glyph, label, margins
+from studio.widgets import Button, Hero, label, margins
 
 
 def row() -> QHBoxLayout:
     layout = QHBoxLayout()
     layout.setSpacing(t.MD)
     return layout
+
+
+def confirm_action(parent: QWidget, title: str, message: str, affirmative: str) -> bool:
+    dialog = QMessageBox(QMessageBox.Icon.Question, title, message, parent=parent)
+    dialog.setTextFormat(Qt.TextFormat.PlainText)
+    accept = dialog.addButton(affirmative, QMessageBox.ButtonRole.AcceptRole)
+    cancel = dialog.addButton(QMessageBox.StandardButton.Cancel)
+    dialog.setDefaultButton(cancel)
+    dialog.setEscapeButton(cancel)
+    dialog.exec()
+    return dialog.clickedButton() is accept
+
+
+def task_heading(body: QVBoxLayout, title: str, description: str = "") -> None:
+    copy = QVBoxLayout()
+    copy.setSpacing(t.XS)
+    copy.addWidget(label(title, "heading", True))
+    if description:
+        copy.addWidget(label(description, "body", True))
+    body.addLayout(copy)
 
 
 def tool_margins(body: QLayout, width: int) -> None:
@@ -67,18 +87,24 @@ class ToolPage(Page):
 
     def __init__(self, context: AppContext) -> None:
         super().__init__(context)
-        outer = QVBoxLayout(self)
-        margins(outer, 0)
+        self.outer = QVBoxLayout(self)
+        margins(self.outer, 0)
+        self.outer.setSpacing(0)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        outer.addWidget(self.scroll)
+        self.outer.addWidget(self.scroll, 1)
+        self.footer: QWidget | None = None
         self.read_job: Job | None = None
         self.entered = False
         self.state = ""
 
     def surface(self, state: str) -> QVBoxLayout:
         self.state = state
+        if self.footer is not None:
+            self.footer.hide()
+            self.footer.deleteLater()
+            self.footer = None
         old = self.scroll.takeWidget()
         if old is not None:
             old.hide()
@@ -87,29 +113,38 @@ class ToolPage(Page):
         self.body = QVBoxLayout(canvas)
         self.body.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self._fit_width()
-        self.body.setSpacing(t.LG)
         canvas.resize(self.scroll.viewport().size())
         self.scroll.setWidget(canvas)
         self.scroll.verticalScrollBar().setValue(0)
         return self.body
 
+    def pin_footer(self, footer: QWidget) -> None:
+        self.footer = footer
+        self._fit_width()
+        self.outer.addWidget(footer)
+        footer.show()
+
     def _fit_width(self) -> None:
         tool_margins(self.body, self.width())
+        compact = self.height() < t.MIN_SIZE[1]
+        inset = self.body.contentsMargins().left()
+        if compact:
+            self.body.setContentsMargins(inset, t.MD, inset, t.MD)
+        self.body.setSpacing(t.MD if compact else t.LG)
+        if self.footer is not None:
+            self.footer.setContentsMargins(inset, t.SM, inset, t.MD)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         if self.scroll.widget():
             self._fit_width()
 
-    def banner(self, headline: str, description: str, *, large: bool = False) -> Hero:
+    def banner(self, headline: str, description: str) -> Hero:
         hero = Hero(
             "Tools" if headline == self.title else self.title, headline, description, self.mood
         )
-        hero.setMinimumHeight(t.HERO_MIN if large else t.TILE_LARGE)
-        if large:
-            hero.setMaximumHeight(t.HERO_MAX)
-            hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.body.addWidget(hero, int(large))
+        hero.setMinimumHeight(t.TILE_LARGE)
+        self.body.addWidget(hero)
         return hero
 
     def state_view(
@@ -126,24 +161,14 @@ class ToolPage(Page):
         self.surface(state)
         if back:
             self.back_button(back)
-        self.banner(self.title, self.introduction, large=True)
-        panel = Panel()
-        line = row()
-        line.addWidget(glyph("warning" if state.endswith("error") else self.icon, t.ICON_BIG))
-        copy = QVBoxLayout()
-        copy.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        copy.addWidget(label(headline, "heading", True))
-        copy.addWidget(label(message, "body", True))
-        line.addLayout(copy, 1)
-        panel.body.addLayout(line)
-        technical_details(panel.body, technical)
+        task_heading(self.body, headline, message)
         if action and callback:
             button = Button(action, "primary")
             button.clicked.connect(callback)
-            panel.body.addWidget(button, 0, Qt.AlignmentFlag.AlignRight)
-        self.body.addWidget(panel)
-        if action and callback:
+            self.body.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
             button.setFocus()
+        technical_details(self.body, technical)
+        self.body.addStretch()
 
     def no_game(self) -> None:
         self.state_view(
@@ -201,8 +226,8 @@ class ToolPage(Page):
     def folder_read_error() -> str:
         return f"{config.APP_NAME} couldn’t read the EDOPro folder. Reconnect the drive or choose another folder."
 
-    def back_button(self, callback: Callable[[], None]) -> Button:
-        button = Button("Back", "quiet", "back")
+    def back_button(self, callback: Callable[[], None], destination: str = "") -> Button:
+        button = Button(destination or self.title, "quiet", "back")
         button.clicked.connect(callback)
         self.body.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
         return button

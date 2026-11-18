@@ -6,7 +6,6 @@ from dataclasses import fields, is_dataclass
 from itertools import islice
 from pathlib import Path
 
-import config
 from doctor import Finding, ListConflict
 
 AREAS = {
@@ -89,9 +88,9 @@ def heading(item: Finding) -> str:
     return {
         "windbot.list_conflicts": "Some practice decks exceed installed card limits",
         "repositories.config": "Game update sources checked",
-        "state.lock_idle": "No update is using this file",
+        "state.lock_idle": "An earlier update left a marker",
         "process.closed": "EDOPro appears to be closed",
-    }.get(item.id, item.title.replace("Studio", config.APP_NAME))
+    }.get(item.id, item.title)
 
 
 def deck_heading(item: Finding, issue: str) -> str:

@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TypeVar
 from weakref import ref
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QFileDialog, QScrollArea, QVBoxLayout
 
@@ -35,7 +34,7 @@ from studio.pages.backup_screens import (
     Screen,
 )
 from studio.pages.base import Page
-from studio.pages.health_layout import tool_margins
+from studio.pages.health_layout import confirm_action, tool_margins
 from studio.tasks import Job, WorkerContext
 from studio.widgets import margins
 
@@ -48,12 +47,8 @@ class BackupPage(Page):
 
     def __init__(self, context: AppContext) -> None:
         super().__init__(context)
-        layout = QVBoxLayout(self)
-        margins(layout, 0)
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        layout.addWidget(self.scroll)
+        self.frame = QVBoxLayout(self)
+        margins(self.frame, 0)
         self.screen: Screen | None = None
         self.job: Job | None = None
         self.writing = self.closing = False
@@ -72,8 +67,7 @@ class BackupPage(Page):
             return False
         self._discard_read()
         self.archive = self.manifest = self.plan = None
-        if screen := self.scroll.takeWidget():
-            screen.deleteLater()
+        self._remove_screen()
         self.screen = self.back = None
         return True
 
@@ -115,6 +109,11 @@ class BackupPage(Page):
         if isinstance(self.screen, (SaveScreen, PreviewScreen)) and compact:
             self.screen.body.setContentsMargins(t.LG, t.MD, t.LG, t.MD)
             self.screen.body.setSpacing(t.SM)
+        if self.screen and self.screen.fixed_footer:
+            inset = self.screen.body.contentsMargins().left()
+            self.screen.fixed_footer.layout().setContentsMargins(
+                inset, 0, inset, t.MD if compact else t.XL
+            )
         if isinstance(self.screen, HomeScreen):
             ratio = 0.47 if self.screen.has_installation else 0.65
             height = t.HERO_MIN if self.screen.pending else int(self.height() * ratio)
@@ -124,14 +123,23 @@ class BackupPage(Page):
             size = t.DISPLAY - t.XS if compact else t.HUGE
             self.screen.hero.headline.setStyleSheet(f"font-size: {size}px;")
 
+    @property
+    def scroll(self) -> QScrollArea:
+        assert self.screen is not None
+        return self.screen.scroll
+
+    def _remove_screen(self) -> None:
+        if self.screen:
+            self.frame.removeWidget(self.screen)
+            self.screen.hide()
+            self.screen.deleteLater()
+
     def _show(self, screen: Screen, back: Callable[[], None] | None = None) -> None:
-        previous = self.scroll.takeWidget()
-        if previous:
-            previous.deleteLater()
+        self._remove_screen()
         self.screen, self.back = screen, back
         self._size_screen()
-        self.scroll.setWidget(screen)
-        self.scroll.verticalScrollBar().setValue(0)
+        self.frame.addWidget(screen)
+        screen.show()
         if screen.focus and screen.focus.isEnabled():
             screen.focus.setFocus()
 
@@ -373,10 +381,12 @@ class BackupPage(Page):
             return
         count = sum(item.action != "skip" for item in plan.items)
         change = "1 change" if count == 1 else f"{count:,} changes"
-        if count and self.ctx.confirm(
+        if count and confirm_action(
+            self,
             f"Apply {change}?",
             f"Review the proposed changes before restoring to {plan.install.game.name}. "
             "Nothing has been changed yet.",
+            f"Restore to {plan.install.game.name}",
         ):
             self.run_restore(plan)
 
@@ -408,7 +418,15 @@ class BackupPage(Page):
             if mode == "finish"
             else UNDO_DESCRIPTION
         )
-        if self.ctx.confirm(title, message):
+        if mode == "finish":
+            affirmative = "Finish restore"
+        elif tx.status == "rolling_back":
+            affirmative = "Continue undo"
+        else:
+            affirmative = (
+                "Undo this restore" if tx.status == "complete" else "Undo interrupted restore"
+            )
+        if confirm_action(self, title, message, affirmative):
             self.run_recovery(tx, mode)
 
     def run_recovery(self, tx: backup.Transaction, mode: Mode) -> None:
@@ -553,7 +571,14 @@ class BackupPage(Page):
             retry_label, retry = "Check history", self.show_home
         if problem.interrupted:
             back = self.show_home
+        return_to = {
+            self.show_home: self.title,
+            self.show_archive: "Backup contents",
+            self.show_save: "Save a backup",
+        }.get(back, "Restore preview")
         self._show(
-            ErrorScreen(problem, title, back, retry, retry_label, path, self.confirm_recovery),
+            ErrorScreen(
+                problem, title, back, retry, retry_label, path, self.confirm_recovery, return_to
+            ),
             back,
         )

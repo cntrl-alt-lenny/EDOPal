@@ -205,9 +205,11 @@ def restore_review(plan: backup.Plan, cancel: Cancel = None) -> Review:
                     values_here, values_backup = values[item.mine], values[item.theirs]
                 else:
                     values_here, values_backup = item.mine or "(blank)", item.theirs or "(blank)"
-                names = f"In this EDOPro folder · {values_here}\nBackup · {values_backup}"
-                if item.action != "skip" and item.target != CONF:
-                    names += f"\nSeparate copy · {item.target.partition('/')[2]}"
+                names = (
+                    f"Separate copy · {item.target.partition('/')[2]}"
+                    if item.action != "skip" and item.target != CONF
+                    else ""
+                )
                 action = (
                     f"{action}  ·  In this EDOPro folder: {values_here} / Backup: {values_backup}"
                 )
@@ -266,10 +268,11 @@ def comparison_rows(differences: tuple[backup.Difference, ...], cancel: Cancel =
 
 def error_text(error: Exception, fallback: str) -> tuple[str, str]:
     message = str(error)
-    if isinstance(error, backup.GameRunning):
-        return "Close EDOPro to continue", "Exit this copy of EDOPro, then choose Retry."
     if isinstance(error, backup.Cancelled):
-        return "Stopped", "You can start again when you’re ready."
+        title = (
+            "Backup cancelled" if fallback == "Couldn’t save your backup" else "Operation cancelled"
+        )
+        return title, "You can start again when you’re ready."
     if isinstance(error, FileExistsError):
         return "That name is already in use", "Choose a new filename. Your existing backup is safe."
     if isinstance(error, FileNotFoundError):
