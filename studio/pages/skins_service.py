@@ -14,7 +14,9 @@ import themes
 from content import catalogue, download
 from content.cache import PackCache
 from content.manifest import Pack
+from content.media import Media
 from music import settings
+from state_lock import appearance_lock
 from studio import theme as t
 from studio.context import Installation
 from studio.tasks import WorkerContext
@@ -32,6 +34,30 @@ class Collection:
     highlights: dict[str, bool]
     scale: bool
     active_name: str
+    wallpapers: tuple[Media, ...]
+    sleeve_summary: str
+
+
+def sleeve_summary(library: sleeves.Library, game: Path | None) -> str:
+    if not game or not library.root.is_dir():
+        return ""
+    try:
+        slots = sleeves.status(library, game)
+        assigned = {slot: status for slot, status in slots.items() if status.entry_id}
+        if not assigned:
+            return ""
+        names = {entry.id: entry.name for entry in library.entries()}
+        if any(s.entry_id not in names for s in assigned.values()):
+            names.update({entry.id: entry.name for entry in library.entries(in_bin=True)})
+        parts = []
+        for slot, status in assigned.items():
+            owner = "Your sleeve" if slot == "mine" else "Opponent"
+            name = names.get(status.entry_id, "Assigned sleeve")
+            changed = " (changed in game)" if status.matches is False else ""
+            parts.append(f"{owner} · {name}{changed}")
+        return "    ·    ".join(parts)
+    except (OSError, ValueError, KeyError):
+        return "Could not read assigned sleeves"
 
 
 def ensure_closed(game: Path) -> None:
@@ -76,6 +102,8 @@ class SkinStore:
                 str(exc),
             )
         game = Path(installation.path) if installation.path else None
+        if game is not None and not game.is_dir():
+            game = None
         entries = [(preset_id(p), p, "Preset") for p in themes.PRESETS]
         saved = self.library.entries()
         entries.extend((key, value, "Mine") for key, value in saved.items())
@@ -123,6 +151,8 @@ class SkinStore:
                 if active.startswith("Studio-")
                 else active.removeprefix("Monokai ") or "Game default",
             ),
+            self.library.wallpapers(),
+            sleeve_summary(sleeves.Library(self.root / "sleeves"), game),
         )
 
     def backdrop(self, game: Path | None, scene: str) -> QImage | None:
@@ -211,7 +241,29 @@ class SkinStore:
     def change(
         self, game: Path, action: str, look: Look | None, shared: Pack | None, highlight: bool
     ) -> str:
-        ensure_closed(game)
+        if not config.folder_has_card_databases(str(game)):
+            raise ValueError(
+                "The game folder is no longer ready. Reconnect it or choose another folder."
+            )
+        with appearance_lock(game):
+            ensure_closed(game)
+            if action == "sleeves":
+                sleeves.reapply(sleeves.Library(self.root / "sleeves"), game, self.config)
+                return "Your assigned sleeves are back in game."
+            message = self._change_look(game, action, look, shared, highlight)
+            # The legacy appearance installer carries sleeves across pack changes itself.
+            if action != "restore" and not (look and look.pack):
+                try:
+                    sleeves.reapply(sleeves.Library(self.root / "sleeves"), game, self.config)
+                except (OSError, ValueError, KeyError) as exc:
+                    raise extras.SleeveReapplyError(
+                        f"{message} Could not restore your sleeves. {exc}"
+                    ) from exc
+            return message + " Your chosen sleeves carry over."
+
+    def _change_look(
+        self, game: Path, action: str, look: Look | None, shared: Pack | None, highlight: bool
+    ) -> str:
         if action == "recover":
             completed = themes.recover(game)
             message = {
@@ -220,7 +272,9 @@ class SkinStore:
                 "remove": "Finished removing the theme from this game.",
             }.get(completed, "Your game’s appearance is up to date.")
         elif action == "restore":
-            extras.apply_appearance(str(game), str(self.config), restore=True)
+            extras.apply_appearance(
+                str(game), str(self.config), restore=True, pack_cache=self.cache
+            )
             message = "Restored the look and fonts you used before the skin packs."
         else:
             assert look
@@ -251,8 +305,4 @@ class SkinStore:
                 "undo": f"Reversed the last change to {look.name} in the game.",
                 "remove": f"Removed {look.name} from the game.",
             }[action]
-        try:
-            sleeves.reapply(sleeves.Library(self.root / "sleeves"), game, self.config)
-        except (OSError, ValueError, KeyError) as exc:
-            return f"{message} Your sleeves need attention on the Sleeves page. {exc}"
-        return message + " Your chosen sleeves carry over."
+        return message

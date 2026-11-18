@@ -561,6 +561,10 @@ def _install_effects(root: Path, config_path: str, name: str) -> None:
     _change_group(root, config_path, "effects", bundled_files(name))
 
 
+class SleeveReapplyError(OSError):
+    """The appearance change succeeded, but the saved sleeves still need attention."""
+
+
 @appearance_writer
 def apply_appearance(
     edopro_path: str,
@@ -680,4 +684,9 @@ def apply_appearance(
             for slot, explicit in (("mine", player_sleeve), ("opponent", opponent_sleeve))
             if explicit
         )
-        reapply(Library(library_dir), root, Path(config_path), exclude=exclude)
+        try:
+            reapply(Library(library_dir), root, Path(config_path), exclude=exclude)
+        except (OSError, ValueError, KeyError) as exc:
+            raise SleeveReapplyError(
+                f"The look was changed. Could not restore your sleeves. {exc}"
+            ) from exc

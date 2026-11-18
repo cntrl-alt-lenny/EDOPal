@@ -7,7 +7,7 @@ from studio import theme as t
 from studio.tasks import TaskRunner
 from studio.widgets import Button, ToggleSwitch
 
-from .sleeves_collection import SOURCES, Choice
+from .sleeves_collection import Choice
 from .sleeves_editor import Editor
 from .sleeves_widgets import Menu
 
@@ -87,10 +87,12 @@ class Manager(Editor):
         self.favourite.setChecked(bool(entry and entry.favourite))
         self.remove.setText("Restore to collection" if in_bin else "Move to bin")
         self.save.setText("Save changes" if entry else "Save to collection")
-        source = SOURCES[entry.source] if entry else "Ready-made design"
+        source = choice.detail if entry else "Ready-made design"
         self.hint.setText(
             f"Source · {source}" + (f" · {entry.passcode}" if entry and entry.passcode else "")
         )
+        if entry and entry.origin:
+            self.hint.setText(choice.tooltip)
         library = self.library
         if entry:
             self.schedule(lambda: QImage(str(library.image_path(entry.id))))
