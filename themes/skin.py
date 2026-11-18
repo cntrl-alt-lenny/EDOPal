@@ -8,6 +8,7 @@ from zipfile import ZipFile
 from PySide6.QtGui import QColor, QImage
 
 import extras
+from config import APP_NAME
 
 from .colors import WHITE, alpha, derive, mix, pole, towards
 from .imaging import png
@@ -119,7 +120,7 @@ def skin_xml(theme: Theme) -> bytes:
     for key, value in (
         ("Name", theme.name),
         ("Version", str(theme.version)),
-        ("Author", "EDOPro Studio"),
+        ("Author", APP_NAME),
     ):
         ET.SubElement(props, key, data=value)
     global_node = ET.SubElement(root, "Global", guialpha="255")

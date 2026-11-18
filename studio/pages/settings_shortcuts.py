@@ -70,6 +70,17 @@ def shortcut_status(link: Shortcut, executable: Path, previous: str) -> str:
     return "occupied"
 
 
+def inspect_shortcut(link: Shortcut, executable: Path, previous: str) -> tuple[Shortcut, str]:
+    status = shortcut_status(link, executable, previous)
+    if link.windows and status == "absent":
+        # Shortcuts created before the rename still belong to their original locations.
+        legacy = Shortcut(link.title, link.path.with_name("EDOPro Studio.lnk"), True)
+        legacy_status = shortcut_status(legacy, executable, previous)
+        if legacy_status in ("installed", "moved"):
+            return legacy, legacy_status
+    return link, status
+
+
 def change_shortcut(link: Shortcut, executable: Path, previous: str, *, remove: bool) -> None:
     status = shortcut_status(link, executable, previous)
     if status == "occupied":

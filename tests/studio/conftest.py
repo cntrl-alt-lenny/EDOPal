@@ -1,3 +1,4 @@
+import gc
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -7,8 +8,10 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("PYTEST_QT_API", "pyside6")
 
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
+from shiboken6 import isValid
 
 import main
 import tournament_decks
@@ -41,18 +44,29 @@ def make_window(
     def factory(run: RunCoro | None = None) -> StudioWindow:
         ctx = AppContext(game, main.VERSION, run or DemoSync(), main._apply_gui_choices)
         window = StudioWindow(ctx, startup=False)
+        windows.append(window)
         ctx.set_installation(Installation.inspect(game.edopro_path))
-        qtbot.addWidget(window)
         window.show()
         window.activateWindow()
         qapp.processEvents()
-        windows.append(window)
         return window
 
     windows: list[StudioWindow] = []
     yield factory
-    # HD Cards measures the installation in the background when it is selected.
-    # Let that finish before the temporary game folder is removed, so one test's
-    # worker can never fail the next test.
-    for window in windows:
-        qtbot.waitUntil(lambda w=window: not w.ctx.tasks.jobs, timeout=15000)
+    # One owner controls shutdown, including any final jobs scheduled by a result.
+    while windows:
+        window = windows.pop()
+        runner = window.ctx.tasks
+        runner.cancel_all()
+        if isValid(window):
+            window.close()
+        qtbot.waitUntil(lambda runner=runner: not runner.jobs, timeout=15000)
+        assert runner.pool.waitForDone(15000)
+        if isValid(window):
+            window.close()
+            window.deleteLater()
+        window.ctx.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        del runner, window
+    # Collect Python cycles containing layout wrappers here, while all workers are idle.
+    gc.collect()

@@ -42,7 +42,7 @@ class ResultView(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.body = body = page_layout(self)
-        body.addStretch(0)
+        self.setMaximumWidth(t.WIDE_CONTENT)
         self.title = label("", "display", True)
         self.kicker = label("HD CARDS", "goldKicker")
         body.addWidget(self.kicker)
@@ -90,10 +90,10 @@ class ResultView(QWidget):
         self.undo = Button("Undo this sync", "secondary", "back")
         self.undo.setToolTip("Put back replaced artwork and remove files added by this sync.")
         self.undo.hide()
-        actions.addWidget(self.done)
-        actions.addWidget(self.undo)
-        actions.addStretch()
         actions.addWidget(self.close_button)
+        actions.addStretch()
+        actions.addWidget(self.undo)
+        actions.addWidget(self.done)
         body.addLayout(actions)
         body.addStretch(1)
 
@@ -103,7 +103,6 @@ class ResultView(QWidget):
 
     def show_result(self, summary: Summary) -> None:
         message_only = not (summary.first[0] or summary.second[0] or summary.rows)
-        self.body.setStretch(0, int(message_only))
         self.title.setText(summary.title)
         self.title.setVisible(not message_only)
         self.kicker.setVisible(not message_only)

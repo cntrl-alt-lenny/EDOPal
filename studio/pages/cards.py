@@ -5,11 +5,12 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from artwork_flow import Summary, coverage_summary, make_run_config, sync_summary, valid_decks
 from config import Config
+from studio import theme as t
 from studio.context import AppContext, GameOpenError, Installation
 from studio.pages.base import Page
 from studio.pages.card_results import ResultView
@@ -38,7 +39,7 @@ class CardsPage(Page):
         self.results = ResultView()
         progress_view = QWidget()
         stage = page_layout(progress_view)
-        stage.addStretch()
+        progress_view.setMaximumWidth(t.WIDE_CONTENT)
         self.banner = Hero(
             "HD Cards", "Artwork sync", "Updating the selected installation.", "download"
         )
@@ -50,7 +51,6 @@ class CardsPage(Page):
         layout = page_layout(blocked)
         self.back = Button("HD Cards", "quiet", "back")
         layout.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addStretch()
         layout.addWidget(
             Hero(
                 "HD Cards",
@@ -60,6 +60,7 @@ class CardsPage(Page):
             )
         )
         self.guard = GameClosedBlock()
+        blocked.setMaximumWidth(t.WIDE_CONTENT)
         layout.addWidget(self.guard)
         layout.addStretch()
         self.guard.retry.clicked.connect(self._retry)
@@ -95,6 +96,7 @@ class CardsPage(Page):
         context.busy_changed.connect(lambda busy: self.settings.setEnabled(not busy))
         self.settings.back.clicked.connect(self._discard_settings)
         self.results.done.clicked.connect(lambda: self.open_view("options"))
+        self.results.failures.clicked.connect(self._reveal_failures)
         self.options.undo.clicked.connect(self._confirm_restore)
         self.results.undo.clicked.connect(self._confirm_restore)
         self.progress.cancel.clicked.connect(self.cancel)
@@ -428,6 +430,12 @@ class CardsPage(Page):
             self.progress.cancel.setEnabled(False)
             self.progress.phase.setText("Finishing current work…")
 
+    def _reveal_failures(self, expanded: bool) -> None:
+        target = self.results.list if expanded else self.results.failures
+        target.setFocus()
+        area = self.views["results"]
+        QTimer.singleShot(0, area, lambda: area.ensureWidgetVisible(target))
+
     def hidden(self) -> bool:
         if self.ctx.busy:
             if self.restoring:
@@ -460,6 +468,8 @@ class CardsPage(Page):
             return True
         elif self.state == "settings":
             self._discard_settings()
+        elif self.state == "results" and self.results.failures.isChecked():
+            self.results.failures.click()
         elif self.state != "options":
             self.open_view("options")
         else:

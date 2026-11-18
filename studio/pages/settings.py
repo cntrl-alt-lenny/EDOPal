@@ -7,14 +7,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QUrl, Slot
+from PySide6.QtCore import Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QBoxLayout,
     QGridLayout,
     QHBoxLayout,
     QLayout,
-    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -29,8 +28,8 @@ from studio.pages.card_views import SettingsView, line, page_layout, scroll
 from studio.pages.settings_shortcuts import (
     Shortcut,
     change_shortcut,
+    inspect_shortcut,
     shortcut_locations,
-    shortcut_status,
 )
 from studio.pages.settings_storage import Storage, byte_size, inspect_storage
 from studio.pages.settings_views import PROJECT, actions, add_about, button, open_url
@@ -99,15 +98,15 @@ class SettingsPage(Page):
         content.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.back = button("Settings", self.home_view, "back", "quiet")
         content.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
-        self.banner = Hero("Settings", "", "", "settings")
-        self.banner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.banner.setMaximumHeight(t.HERO_MAX)
-        content.addWidget(self.banner, 1)
+        detail.setMaximumWidth(t.WIDE_CONTENT)
+        self.heading = label("", "heading", True)
+        content.addWidget(self.heading)
         self.inner = QVBoxLayout()
         self.inner.setSpacing(t.MD)
         content.addLayout(self.inner)
         self.message = label("", "body", True)
         content.addWidget(self.message)
+        content.addStretch()
         self.detail = scroll(detail)
         self.stack.addWidget(self.detail)
         context.update_changed.connect(self._update_news)
@@ -165,11 +164,7 @@ class SettingsPage(Page):
             self.defaults_view.verticalScrollBar().setValue(0)
             self.defaults.back.setFocus()
             return
-        title, hint, symbol = SECTIONS[key]
-        self.banner.headline.setText(title)
-        self.banner.description.setText(hint)
-        self.banner.symbol = symbol
-        self.banner.update()
+        self.heading.setText(SECTIONS[key][0])
         self.stack.setCurrentWidget(self.detail)
         self.detail.verticalScrollBar().setValue(0)
         self.back.setFocus()
@@ -228,6 +223,10 @@ class SettingsPage(Page):
                 self.message.setText(f"Could not finish. {result}")
                 if self.section == "home":
                     self.ctx.notify(self.message.text())
+                elif self.stack.currentWidget() is self.detail:
+                    QTimer.singleShot(
+                        0, self.detail, lambda: self.detail.ensureWidgetVisible(self.message)
+                    )
             else:
                 success(result)
 
@@ -430,7 +429,7 @@ class SettingsPage(Page):
             return
         exe = Path(sys.executable)
         previous = {
-            link: self.ctx.state.value("shortcuts/" + link.title, "", type=str)
+            link.title: self.ctx.state.value("shortcuts/" + link.title, "", type=str)
             for link in locations
         }
 
@@ -459,7 +458,7 @@ class SettingsPage(Page):
                         self.open_section("shortcuts")
 
                     self._work(
-                        lambda: change_shortcut(link, exe, previous[link], remove=remove),
+                        lambda: change_shortcut(link, exe, previous[link.title], remove=remove),
                         finished,
                         writing=True,
                     )
@@ -481,7 +480,7 @@ class SettingsPage(Page):
 
         self.message.setText("Checking shortcuts…")
         self._work(
-            lambda: [(link, shortcut_status(link, exe, previous[link])) for link in locations],
+            lambda: [inspect_shortcut(link, exe, previous[link.title]) for link in locations],
             display,
         )
 

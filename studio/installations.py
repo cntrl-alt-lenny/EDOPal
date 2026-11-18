@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal, Slot
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidget,
@@ -30,7 +31,6 @@ class InstallationPicker(QWidget):
         body = QVBoxLayout(self)
         margins(body, t.XXL)
         body.setSpacing(t.LG)
-        body.addStretch()
         body.addWidget(label("GAME FOLDERS", "goldKicker"))
         body.addWidget(label("Choose your installation", "display", True))
         body.addWidget(
@@ -99,7 +99,7 @@ class InstallationPicker(QWidget):
             item.setToolTip(path)
             item.setSizeHint(QSize(0, height))
             self.list.addItem(item)
-        self.list.setFixedHeight(min(t.PICKER_ROWS, len(paths)) * (height + 2 * t.XS) + t.MD)
+        self.list.setMaximumHeight(min(t.PICKER_ROWS, len(paths)) * (height + 2 * t.XS) + t.MD)
         if paths:
             current = self.ctx.installation.path
             self.list.setCurrentRow(paths.index(current) if current in paths else 0)
@@ -157,9 +157,7 @@ class InstallationPicker(QWidget):
             self.ctx.cfg.folder_detected = False
             self.ctx.set_installation(installation)
             if not saved:
-                self.ctx.notify(
-                    "Folder selected for this session. Studio could not save the preference."
-                )
+                self.ctx.notify("Folder selected for this session. Could not save your choice.")
             self.close_picker()
 
         job = self.ctx.tasks.start(inspect)
@@ -170,3 +168,8 @@ class InstallationPicker(QWidget):
         if self.back.isEnabled():
             self.serial += 1
             self.dismissed.emit()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        inset = max(t.XXL, (event.size().width() - t.WIDE_CONTENT) // 2)
+        self.layout().setContentsMargins(inset, t.XXL, inset, t.XXL)

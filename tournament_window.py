@@ -11,6 +11,7 @@ from pathlib import Path
 from tkinter import ttk
 
 from card_databases import installed_card_names
+from config import APP_NAME
 from goat_versions import GoatVersions, installed_aliases, installed_whitelist
 from tournament_decks import (
     PAGE_SIZE,
@@ -146,7 +147,7 @@ class TournamentWindow(tk.Toplevel):
         self.import_paths = ()
         self.last_selection = ()
         self.library = FormatLibrary()
-        self.title("Tournament decks · EDOPro HD Sync")
+        self.title(f"Tournament decks · {APP_NAME}")
         self.transient(parent)
         self.minsize(min(690, self.winfo_screenwidth()), min(485, self.winfo_screenheight() - 60))
         width = min(1020, self.winfo_screenwidth() - 24)

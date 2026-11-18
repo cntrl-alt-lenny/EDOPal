@@ -1,6 +1,7 @@
 from html import escape
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
 
 from studio import theme as t
@@ -18,6 +19,7 @@ class Hero(ArchiveArt):
         *,
         emphasis: str = "",
     ) -> None:
+        self._normal_heights: tuple[int, int] | None = None
         super().__init__(symbol)
         row = QHBoxLayout(self)
         row.setContentsMargins(t.XXL, t.LG, t.XL, t.LG)
@@ -34,6 +36,8 @@ class Hero(ArchiveArt):
         overline.addStretch()
         copy.addLayout(overline)
         self.headline = label(title, "heroTitle", True)
+        self._emphasis = emphasis
+        self._title = title
         if emphasis:
             self.headline.setTextFormat(Qt.TextFormat.RichText)
             self.headline.setText(
@@ -45,6 +49,70 @@ class Hero(ArchiveArt):
         copy.addStretch()
         row.addLayout(copy, 55)
         row.addStretch(45)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        # Some sections construct their banner after the last window resize.
+        if (compact := self.window().property("compactHeroes")) is not None:
+            self.set_compact(compact)
+        super().showEvent(event)
+
+    def set_compact(self, compact: bool) -> None:
+        """Adapt the banner while retaining the page's preferred full-size dimensions."""
+        if compact == (self._normal_heights is not None):
+            return
+        row = self.layout()
+        self.headline.setProperty("compact", compact)
+        self.headline.style().unpolish(self.headline)
+        self.headline.style().polish(self.headline)
+        if self._emphasis:
+            join = " " if compact else "<br/>"
+            self.headline.setText(
+                f'{escape(self._title)}{join}<i style="color:{t.PALE}">{escape(self._emphasis)}</i>'
+            )
+        row.setStretch(0, 72 if compact else 55)
+        row.setStretch(1, 28 if compact else 45)
+        pad = t.SM if compact else t.LG
+        row.setContentsMargins(t.XL if compact else t.XXL, pad, t.XL, pad)
+        row.itemAt(0).layout().setSpacing(t.XS if compact else t.SM)
+        if compact:
+            self._normal_heights = self.minimumHeight(), self.maximumHeight()
+            self._fit_compact()
+        else:
+            low, high = self._normal_heights
+            self._normal_heights = None
+            super().setMinimumHeight(low)
+            super().setMaximumHeight(high)
+        self.updateGeometry()
+
+    def _fit_compact(self) -> None:
+        # Keep long titles and error descriptions readable after wrapping.
+        height = max(t.TILE_H + t.LG, self.layout().totalHeightForWidth(self.width()))
+        if self.minimumHeight() != height or self.maximumHeight() != height:
+            super().setFixedHeight(height)
+
+    def event(self, event: QEvent) -> bool:
+        result = super().event(event)
+        if event.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Resize) and self._normal_heights:
+            self._fit_compact()
+        return result
+
+    def setFixedHeight(self, height: int) -> None:
+        if self._normal_heights is None:
+            super().setFixedHeight(height)
+        else:
+            self._normal_heights = height, height
+
+    def setMinimumHeight(self, height: int) -> None:
+        if self._normal_heights is None:
+            super().setMinimumHeight(height)
+        else:
+            self._normal_heights = height, self._normal_heights[1]
+
+    def setMaximumHeight(self, height: int) -> None:
+        if self._normal_heights is None:
+            super().setMaximumHeight(height)
+        else:
+            self._normal_heights = self._normal_heights[0], height
 
 
 class EmptyState(QWidget):

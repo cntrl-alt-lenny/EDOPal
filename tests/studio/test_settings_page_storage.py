@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,6 +15,7 @@ from studio.pages.settings_shortcuts import (
     Shortcut,
     change_shortcut,
     desktop_entry,
+    inspect_shortcut,
     shortcut_status,
 )
 from studio.pages.settings_storage import inspect_storage
@@ -60,6 +62,18 @@ def test_desktop_entry_escapes_paths_and_updates_moved_app(tmp_path: Path) -> No
     assert shortcut_status(link, second, str(first)) == "moved"
     change_shortcut(link, second, str(first), remove=False)
     assert link.path.read_text(encoding="utf-8") == desktop_entry(second)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows shell links")
+def test_settings_can_still_remove_pre_rename_shortcuts(tmp_path: Path) -> None:
+    exe = Path(sys.executable)
+    old = Shortcut("Desktop", tmp_path / "EDOPro Studio.lnk", True)
+    current = Shortcut("Desktop", tmp_path / "EDOPal.lnk", True)
+    change_shortcut(old, exe, "", remove=False)
+    link, status = inspect_shortcut(current, exe, str(exe))
+    assert link == old and status == "installed"
+    change_shortcut(link, exe, str(exe), remove=True)
+    assert inspect_shortcut(current, exe, "") == (current, "absent")
 
 
 def test_explicit_release_check_distinguishes_offline_from_current() -> None:

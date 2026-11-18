@@ -1,5 +1,5 @@
 """
-EDOPro HD Cards Downloader - Automatically download missing HD card artwork for EDOPro.
+EDOPal - Automatically download missing HD card artwork for EDOPro.
 
 Improvements over the original:
   - Rich progress bars and color-coded console output
@@ -1426,7 +1426,7 @@ def _write_report(stats: DownloadStats, cfg: Config, runtime_seconds: float) -> 
     try:
         os.makedirs(os.path.dirname(report_path), exist_ok=True)
         with open(report_path, "w", encoding="utf-8") as f:
-            f.write("EDOPro HD Cards Downloader Report\n")
+            f.write(f"{config_module.APP_NAME} Report\n")
             f.write("=" * 40 + "\n")
             f.write(f"Generated: {now.strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"Runtime:   {format_duration(runtime_seconds)}\n")
@@ -1841,7 +1841,7 @@ async def run(cfg: Config):
     cfg.report_path = None
     cfg.idle_summary = None
 
-    console.print(f"[bold cyan]EDOPro HD Cards Downloader[/bold cyan] [dim]v{VERSION}[/dim]")
+    console.print(f"[bold cyan]{config_module.APP_NAME}[/bold cyan] [dim]v{VERSION}[/dim]")
 
     if cfg.health_check:
         if not run_health_check(cfg):

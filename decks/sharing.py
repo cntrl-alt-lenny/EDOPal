@@ -7,6 +7,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import APP_NAME
 from tournament_decks import MAX_YDK, SECTIONS, DeckError, publish_ydk
 
 from .cards import Catalog, passcode
@@ -54,7 +55,7 @@ def preview_ydke(code: str, catalog: Catalog) -> Preview:
 def save_copy(game: Path, name: str, reviewed: Preview) -> Path:
     """Save the reviewed contents in a new .ydk file, including on repeat saves."""
     _check(reviewed.sections)
-    lines = ["#created by EDOPro Studio (new copy)"]
+    lines = [f"#created by {APP_NAME} (new copy)"]
     for marker, section in zip(SECTIONS, reviewed.sections, strict=True):
         lines.append(marker)
         lines.extend(map(str, section))

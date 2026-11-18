@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from PySide6.QtCore import QObject, QSettings, Signal
+from PySide6.QtCore import QObject, QSettings, Signal, Slot
 
 import config
 from artwork_flow import recommend_deck_scope
@@ -70,6 +70,11 @@ class AppContext(QObject):
 
     def attach(self, host: WindowServices) -> None:
         self._host = host
+
+    @Slot()
+    def detach(self) -> None:
+        self._host = None
+        self.tasks.abandon_all()
 
     def navigate(self, page_id: str) -> bool:
         return self._host is not None and self._host.navigate(page_id)

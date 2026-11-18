@@ -6,16 +6,34 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import main
+from content.cache import PackCache
 from studio.context import Installation
 from studio.pages.settings_shortcuts import Shortcut
 from studio.shell import StudioWindow
 
 
-def render_shell_states(
+def render_picker_states(
     window: StudioWindow,
     shot: Callable[[str], None],
     settle: Callable[[Callable[[], bool]], None],
     root: Path,
+) -> None:
+    picker = window.picker
+    with patch("config.find_edopro_folders", return_value=[]):
+        window.change.click()
+        settle(lambda: "No installations" in picker.hint.text())
+        shot("42-picker-empty")
+        with patch.object(window.ctx, "choose_folder", return_value=str(root)):
+            picker.browse.click()
+            settle(lambda: "containing EDOPro" in picker.hint.text())
+            shot("43-picker-invalid")
+        picker.back.click()
+
+
+def render_artwork_recovery(
+    window: StudioWindow,
+    shot: Callable[[str], None],
+    settle: Callable[[Callable[[], bool]], None],
     selected: Installation,
 ) -> None:
     ctx = window.ctx
@@ -49,11 +67,19 @@ def render_shell_states(
         settle(lambda: card.state == "results")
         shot("40-network-retry")
         card.results.done.click()
-    for i, key in enumerate(("mydecks", "replays", "backup", "health"), 21):
-        window.navigate(key)
-        shot(f"{i}-{key}")
+
+
+def render_settings_states(
+    window: StudioWindow,
+    shot: Callable[[str], None],
+    settle: Callable[[Callable[[], bool]], None],
+    root: Path,
+    selected: Installation,
+) -> None:
+    ctx = window.ctx
     window.navigate("settings")
     page = window.current
+    shot("13-settings")
     second = root / "Games" / "Portable"
     second.mkdir()
     (second / "EDOPro.exe").touch()
@@ -63,6 +89,8 @@ def render_shell_states(
     shot("25-game-folders")
     page.open_section("defaults")
     shot("26-card-defaults")
+    # Other gallery pages can populate their own pack cache before Settings opens.
+    page.cache = PackCache(root / "settings-gallery" / "packs")
     page.open_section("storage")
     settle(lambda: page.message.text() == "")
     shot("27-storage-empty")
@@ -70,7 +98,7 @@ def render_shell_states(
     pack.mkdir(parents=True)
     (pack / "1.0.0.zip").write_bytes(bytes(24576))
     page.open_section("storage")
-    settle(lambda: bool(page.remove_buttons))
+    settle(lambda: page.message.text() == "" and "midnight-circuit" in page.remove_buttons)
     page.detail.ensureWidgetVisible(page.clear_packs)
     shot("28-downloaded-packs")
     with (
@@ -82,8 +110,7 @@ def render_shell_states(
         ),
     ):
         page.clear_packs.click()
-        settle(lambda: not ctx.busy)
-        page.detail.ensureWidgetVisible(page.message)
+        settle(lambda: not ctx.busy and "A pack is in use" in page.message.text())
         shot("41-pack-in-use")
     page.open_section("updates")
     with patch("main.check_for_update", new=AsyncMock(return_value=None)):
@@ -101,7 +128,7 @@ def render_shell_states(
     page.open_section("shortcuts")
     shot("32-source-shortcuts")
     windows = sys.platform == "win32"
-    filename = "Studio.lnk" if windows else "Studio.desktop"
+    filename = "EDOPal.lnk" if windows else "edopal.desktop"
     menu = "Start menu" if windows else "Applications menu"
     links = tuple(Shortcut(name, root / name / filename, windows) for name in ("Desktop", menu))
     with patch("studio.pages.settings.shortcut_locations", return_value=links):
@@ -118,6 +145,11 @@ def render_shell_states(
         create.click()
         settle(lambda: links[0].path.is_file() and not ctx.busy and page.message.text() == "")
         shot("34-shortcut-created")
+        links[1].path.parent.mkdir(parents=True, exist_ok=True)
+        links[1].path.write_text("Reserved by another app.", encoding="utf-8")
+        page.open_section("shortcuts")
+        settle(lambda: page.message.text() == "")
+        shot("44-shortcut-name-in-use")
     page.open_section("about")
     shot("35-about")
     ctx.state.remove("games/known")

@@ -1,11 +1,12 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from pytestqt.qtbot import QtBot
 
 import main
 from config import Config
+from studio import theme as t
 from studio.shell import StudioWindow
 from tools.studio_screenshots import DemoSync
 
@@ -43,6 +44,7 @@ def test_progress_to_failure_summary_and_report(
 ) -> None:
     fake = DemoSync()
     window = make_window(fake)
+    window.resize(960, 600)
     card = window.current
     card.settings.toggles["save_report"].setChecked(True)
     card.options.start.click()
@@ -60,9 +62,19 @@ def test_progress_to_failure_summary_and_report(
     card.results.failures.click()
     assert card.results.list.isVisible()
     assert card.results.model.rowCount() == 4
+    viewport = card.views["results"].viewport()
+    qtbot.waitUntil(
+        lambda: viewport.rect().contains(card.results.list.mapTo(viewport, QPoint(0, 0)))
+    )
     assert any("Will retry" in item for item in card.results.model.stringList())
     assert Path(card.run_config.report_path).is_file()
+    assert (
+        Path(card.run_config.report_path).read_text(encoding="utf-8").splitlines()[0]
+        == "EDOPal Report"
+    )
     assert str(card.run_config.report_path) in card.summary.full_note
+    qtbot.keyClick(window, Qt.Key.Key_Escape)
+    assert card.state == "results" and not card.results.list.isVisible()
     card.results.done.click()
     assert card.state == "options"
     assert window.change.isEnabled()
@@ -175,3 +187,17 @@ def test_burst_progress_keeps_counts_at_phase_boundaries(
     qtbot.waitUntil(lambda: card.state == "results")
     assert card.progress.phase.text() == "Field art"
     assert (card.done, card.total) == (3, 3)
+
+
+def test_progress_banner_starts_at_the_page_inset(
+    make_window: Callable[..., StudioWindow], qtbot: QtBot
+) -> None:
+    window = make_window()
+    window.resize(1600, 1000)
+    card = window.current
+    card.options.start.click()
+    qtbot.waitUntil(lambda: card.done == 78)
+    assert card.banner.y() == t.XXL
+    assert card.progress.y() == card.banner.geometry().bottom() + 1 + t.LG
+    card.cancel()
+    qtbot.waitUntil(lambda: card.state == "results")

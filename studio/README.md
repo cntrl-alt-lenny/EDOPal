@@ -1,6 +1,6 @@
-# Building pages for EDOPro Studio
+# Building pages for EDOPal
 
-`main.py --gui` and the packaged application's normal launch open Studio. The console backend and its flags remain available. Use `--legacy-gui` to compare a section with the original Tk window. Studio requires the pinned PySide6-Essentials dependency.
+EDOPal is your unofficial companion for EDOPro. Launch it with `main.py --gui` or by opening the packaged app. The console backend and its flags remain available. Use `--legacy-gui` to compare a section with the original Tk window. The desktop app uses the pinned PySide6-Essentials dependency.
 
 ## Run a local example
 
@@ -16,7 +16,9 @@ The source app uses real downloads when you press **Sync HD cards**. **Show cove
 
 ## Add or replace a page
 
-The shell creates each class in `studio.shell.PAGES` once, in sidebar order. Replace the matching placeholder class in `studio/pages/` and keep its ID. For a new section, register its class in that tuple and add an original 24-unit SVG path in `studio/icons.py`. The scrolling rail starts groups at `cards` (Customise), `decks` (Decks) and `replays` (Tools). Settings stays pinned below the scroll area. The reserved pages are `mydecks`, `replays`, `backup` and `health`. Replace their classes in the matching page files without changing their IDs. Up and Down move focus through all groups, and Enter selects the focused section.
+The shell creates each class in `studio.shell.PAGES` once, in sidebar order. For a new section, register its class in that tuple and add an original 24-unit SVG path in `studio/icons.py`. Supply plain text for the page title. The scrolling rail starts groups at `cards` (Customise), `decks` (Decks) and `replays` (Tools). Settings stays pinned below the scroll area. Up and Down move focus through all groups, and Enter selects the focused section.
+
+The shell switches shared `Hero` banners to compact type and spacing at window heights of 800 logical pixels or less. This also applies to banners created during navigation. A page can use `hero.setVisible(is_home)` when opening a subview, or put the banner in the home widget of a stack. Resizing preserves that choice and restores the page’s preferred tall-window dimensions.
 
 ```python
 from PySide6.QtWidgets import QVBoxLayout
@@ -73,12 +75,14 @@ def read_names(worker: WorkerContext) -> list[str]:
     return sorted(names)
 
 
-job = self.ctx.tasks.start(read_names)
+job = self.ctx.tasks.start(read_names, owner=self)
 job.result.connect(self.show_names)
 job.error.connect(lambda exc: self.ctx.notify(str(exc)))
 ```
 
 `Job.progress`, `result`, `error`, `cancelled` and `finished` are delivered on the UI thread. Connect immediately after starting the job. `job.cancel()` requests cancellation. A cooperating worker can return its partial result. The runner emits the result or error, then `cancelled` if requested, then `finished`. Use `finished` for shared cleanup. For installation-changing jobs, call `ctx.set_busy(True)` before starting and release it on completion. Gate the page's own actions and navigation while busy. Read-only galleries can capture a selection generation to ignore results from a previous folder.
+
+Every job in the shell is tied to the lifetime of its window. Pass `owner=widget` when a closure updates a shorter-lived view, such as a preview replaced during navigation. Destroying the owner requests cancellation and drops pending UI signals, including `finished`. Put required file cleanup in the worker’s `finally` block. The runner reports idle after worker results and completion handlers have drained, including any jobs started by those handlers.
 
 The artwork-specific entry is `ctx.tasks.sync(job_config, ctx.run_coro)`. It installs the existing Rich-compatible progress adapter, notice and coverage sinks, folder request and cancellation event on the isolated job config. It runs asyncio inside the worker. Rapid count and description updates are combined before reaching Qt. Each phase keeps its final count. Both desktop interfaces use `artwork_flow.py` for scoped-job configuration, deck validation, first-run recommendations and result models.
 
@@ -163,12 +167,15 @@ $env:PYTEST_QT_API = 'pyside6'
 $env:TEMP = $env:TMP = [IO.Path]::GetFullPath('build/tmp')
 [IO.Directory]::CreateDirectory($env:TEMP) | Out-Null
 & $py tools/studio_screenshots.py --out build/studio-shots --size 1280x800 --size 1600x1000
+& $py tools/studio_screenshots.py --page shell --out build/shell-shots --size 960x600 --size 2560x1440
 & $py -m pytest -q tests/studio --basetemp build/tests-studio
 & $py -m pytest -q --basetemp build/tests-all
 & $py -m ruff check .
 ```
 
 The renderer creates its game under the clone, injects a simulated download coroutine and uses the real coverage pipeline. It suppresses startup discovery and update requests. The output directory contains one folder per size.
+
+`--page cards` covers artwork and the installation picker, `--page settings` covers preferences, and `--page shell` renders both.
 
 Use `make_window` in `tests/studio/` to build the real shell against a synthetic installation and optional fake coroutine. Activate normal controls and wait for observable state with `qtbot.waitUntil` or `waitSignal`.
 
