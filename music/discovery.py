@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from content.media import Origin
 from music.audio import FORMATS, _audio, _digest, _scene
 from music.catalogue import ART, ID, LOCAL, Game, catalog, identify, library_root
+from music.digest_cache import browsing_digests
 from music.packs import pack_media
 
 
@@ -114,7 +115,9 @@ def records(state: Path, filename: str = "selection.json") -> list[dict]:
     return values
 
 
-def active_tracks(game: Path, scene: str, games: dict[str, Game]) -> list[Track]:
+def active_tracks(
+    game: Path, scene: str, games: dict[str, Game], *, digest_file: Callable[[Path], str] = _digest
+) -> list[Track]:
     try:
         selected = records(_state(game, scene))
     except (ValueError, OSError):
@@ -124,7 +127,7 @@ def active_tracks(game: Path, scene: str, games: dict[str, Game]) -> list[Track]
     for folder in _folders(game, scene):
         for path in _audio(folder):
             index = ordered.get(path.name)
-            digest = _digest(path)
+            digest = digest_file(path)
             if folder.name == scene and index is not None and selected[index]["digest"] == digest:
                 record = selected[index]
                 rows.append(
@@ -145,8 +148,15 @@ def active_tracks(game: Path, scene: str, games: dict[str, Game]) -> list[Track]
     return sorted(rows, key=lambda t: ordered.get(t.path.name, len(ordered)))
 
 
-def physical_tracks(game: Path, scene: str, root: Path, games: dict[str, Game]) -> Iterator[Track]:
-    output = active_tracks(game, scene, games)
+def physical_tracks(
+    game: Path,
+    scene: str,
+    root: Path,
+    games: dict[str, Game],
+    *,
+    digest_file: Callable[[Path], str] = _digest,
+) -> Iterator[Track]:
+    output = active_tracks(game, scene, games, digest_file=digest_file)
     for base in _folders(game, scene):
         for path in _audio(backup_folder(game, scene, base)):
             output.append(
@@ -157,12 +167,14 @@ def physical_tracks(game: Path, scene: str, root: Path, games: dict[str, Game]) 
                     scene,
                     False,
                     "parked",
-                    _digest(path),
+                    digest_file(path),
                 )
             )
     for key in games:
         for path in _audio(root / key / scene):
-            output.append(Track(key, _title(path), path, scene, False, "personal", _digest(path)))
+            output.append(
+                Track(key, _title(path), path, scene, False, "personal", digest_file(path))
+            )
     for row in pack_media(root):
         item = row.item
         if item.role == "track" and scene in item.scenes and row.path.is_file():
@@ -174,12 +186,12 @@ def physical_tracks(game: Path, scene: str, root: Path, games: dict[str, Game]) 
                     scene,
                     False,
                     "pack",
-                    _digest(row.path),
+                    digest_file(row.path),
                     row.origin,
                 )
             )
     for path in _audio(ART.parent / "extras" / "sound" / "BGM" / scene):
-        output.append(Track(LOCAL, _title(path), path, scene, False, "bundled", _digest(path)))
+        output.append(Track(LOCAL, _title(path), path, scene, False, "bundled", digest_file(path)))
     # Identical personal audio can identify an otherwise anonymous installed recording.
     # Keep its playable live path and active flag. Explicit album assignments are independent.
     personal = {row.digest: row for row in output if row.source in {"personal", "pack"}}
@@ -191,13 +203,21 @@ def physical_tracks(game: Path, scene: str, root: Path, games: dict[str, Game]) 
         yield replace(row, origin=row.origin or credits.get((row.game, row.digest)))
 
 
-def scan_scene(game: Path, scene: str, root: Path, games: dict[str, Game]) -> list[Track]:
+def scan_scene(
+    game: Path,
+    scene: str,
+    root: Path,
+    games: dict[str, Game],
+    *,
+    digest_file: Callable[[Path], str] = _digest,
+) -> list[Track]:
     unique = {}
-    for row in physical_tracks(game, scene, root, games):
+    for row in physical_tracks(game, scene, root, games, digest_file=digest_file):
         unique.setdefault((row.game, row.digest), row)
     return list(unique.values())
 
 
 def tracks(game: Path, scene: str, *, root: Path | None = None) -> list[Track]:
     root = root or library_root()
-    return scan_scene(game, _scene(scene), root, catalog(root=root))
+    with browsing_digests(root) as digest:
+        return scan_scene(game, _scene(scene), root, catalog(root=root), digest_file=digest)

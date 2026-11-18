@@ -8,12 +8,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from threading import RLock, Thread
 from typing import TYPE_CHECKING
 
 from desktop_helpers import desktop_environment
 
 if TYPE_CHECKING:
-    from miniaudio import Backend
+    from miniaudio import Backend, PlaybackDevice
 
 
 class PreviewPlayer:
@@ -30,6 +31,7 @@ class PreviewPlayer:
         self._process = None
         self._native = True
         self._backends = backends
+        self._device_lock = RLock()
 
     @property
     def playing(self) -> bool:
@@ -50,15 +52,16 @@ class PreviewPlayer:
     def seekable(self) -> bool:
         return self._native and self.duration > 0
 
-    def _release(self):
-        if self._device is not None:
-            try:
-                self._device.close()
-            finally:
-                self._device = None
-        if self._stream is not None:
-            self._stream.close()
-            self._stream = None
+    def _release(self) -> None:
+        with self._device_lock:
+            if self._device is not None:
+                try:
+                    self._device.close()
+                finally:
+                    self._device = None
+            if self._stream is not None:
+                self._stream.close()
+                self._stream = None
         if self._process is not None:
             with contextlib.suppress(OSError, subprocess.TimeoutExpired):
                 self._process.terminate()
@@ -92,9 +95,16 @@ class PreviewPlayer:
             else:
                 self._offset = offset
 
-    def _ended(self):
-        self._offset = self.duration
-        self._running = False
+    def _ended(self, device: PlaybackDevice) -> None:
+        # Device teardown joins the native callback thread. Run it elsewhere and
+        # ignore an EOF from a stream superseded by Stop, Seek or another Play.
+        def finish() -> None:
+            with self._device_lock:
+                if self._device is device:
+                    self._offset = self.duration
+                    self._release()
+
+        Thread(target=finish, name="preview-eof", daemon=True).start()
 
     def play(self, path: Path, *, seconds: float = 0):
         self.stop()
@@ -141,16 +151,20 @@ class PreviewPlayer:
     def _start_native(self) -> None:
         import miniaudio
 
-        callback = miniaudio.stream_with_callbacks(self._stream, end_callback=self._ended)
-        next(callback)
-        self._device = miniaudio.PlaybackDevice(
+        device = miniaudio.PlaybackDevice(
             sample_rate=self.RATE, buffersize_msec=80, backends=self._backends
         )
-        if self._device.backend == "Null" and miniaudio.Backend.NULL not in (self._backends or []):
-            raise OSError("No audio device is available for preview.")
-        self._running = True
-        self._started = time.monotonic()
-        self._device.start(callback)
+        with self._device_lock:
+            self._device = device
+            if device.backend == "Null" and miniaudio.Backend.NULL not in (self._backends or []):
+                raise OSError("No audio device is available for preview.")
+            callback = miniaudio.stream_with_callbacks(
+                self._stream, end_callback=lambda: self._ended(device)
+            )
+            next(callback)
+            self._running = True
+            self._started = time.monotonic()
+            device.start(callback)
 
     def _play_system(self, path: Path):
         env = desktop_environment()

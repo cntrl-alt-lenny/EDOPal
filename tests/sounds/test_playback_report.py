@@ -1,5 +1,7 @@
+import gc
 import subprocess
 import sys
+import weakref
 from pathlib import Path
 from threading import Event
 
@@ -9,6 +11,26 @@ import pytest
 from music_player import PreviewPlayer
 from sounds import AuditionPlayer, SoundSet, bundled_sets, set_sound_enabled, sound_settings
 from sounds.audio import decode_clip
+
+
+def test_completed_audition_releases_failed_future(wav, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*args, **kwargs) -> None:
+        raise OSError("audio device failed")
+
+    monkeypatch.setattr(PreviewPlayer, "play_memory", fail)
+    player = AuditionPlayer()
+    try:
+        future = player.preview(SoundSet("Sample", {"draw": decode_clip(wav(), "wav")}), "draw")
+        with pytest.raises(OSError, match="audio device failed"):
+            future.result(timeout=5)
+        # Drain the single worker so its own execution frame has returned.
+        player._executor.submit(lambda: None).result(timeout=5)
+        reference = weakref.ref(future)
+        del future
+        gc.collect()
+        assert reference() is None
+    finally:
+        player.close()
 
 
 def test_automatic_null_device_reports_no_audio(

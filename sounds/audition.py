@@ -43,8 +43,15 @@ class AuditionPlayer:
                 raise RuntimeError("This audition player is closed.")
             self._stop()
             self._cancel = Event()
-            self._future = self._executor.submit(self._play, clips, self._cancel, sampler)
-            return self._future
+            future = self._future = self._executor.submit(self._play, clips, self._cancel, sampler)
+        # add_done_callback can run immediately if the worker has already finished.
+        future.add_done_callback(self._finished)
+        return future
+
+    def _finished(self, future: Future[None]) -> None:
+        with self._lock:
+            if self._future is future:
+                self._future = None
 
     def preview(self, sound_set: SoundSet, key: str) -> Future[None]:
         """An explicit silence stops playback. An unassigned event has no preview."""

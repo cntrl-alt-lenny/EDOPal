@@ -30,6 +30,7 @@ from music.catalogue import (
 from music.catalogue import (
     identify as _identify,
 )
+from music.digest_cache import browsing_digests
 from music.discovery import (
     Track,
     _folders,
@@ -288,7 +289,9 @@ def set_playlist(
 
 def playlist(game: Path, scene: str, *, root: Path | None = None) -> list[Track]:
     """The scene's ordered active rows, including EDOPro's native playlist before any edit."""
-    return active_tracks(game, scene, catalog(root=root))
+    root = root or library_root()
+    with browsing_digests(root) as digest:
+        return active_tracks(game, scene, catalog(root=root), digest_file=digest)
 
 
 def use_track(game: Path, track: Track, *, root: Path | None = None) -> None:

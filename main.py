@@ -627,19 +627,22 @@ def prune_orphan_images(pics_path: str, known_ids: set[int]) -> int:
 
 def collect_deck_filter_ids(cfg: Config) -> set[int] | None:
     """Gather card IDs from every deck path/folder on `cfg`, or None if unused."""
-    if not cfg.deck_paths and not cfg.decks_folder:
+    folder = cfg.decks_folder
+    if not folder and not cfg.deck_paths and getattr(cfg, "my_decks", False):
+        folder = os.path.join(cfg.edopro_path, "deck")
+    if not cfg.deck_paths and not folder:
         return None
     wanted: set[int] = set()
     paths: list[str] = list(cfg.deck_paths)
-    if cfg.decks_folder:
-        if os.path.isdir(cfg.decks_folder):
+    if folder:
+        if os.path.isdir(folder):
             # EDOPro nests decks in subfolders, so walk the whole tree.
-            for current_root, dirnames, filenames in os.walk(cfg.decks_folder):
+            for current_root, dirnames, filenames in os.walk(folder):
                 dirnames.sort()
                 for entry in sorted(filenames):
-                    if entry.endswith(".ydk"):
+                    if entry.lower().endswith(".ydk"):
                         paths.append(os.path.join(current_root, entry))
-        else:
+        elif cfg.decks_folder:
             console.print(
                 f"[yellow]--decks-folder path is not a directory: {cfg.decks_folder}[/yellow]"
             )
@@ -1745,7 +1748,7 @@ def _count_deck_files(folder: str) -> int:
         return 0
     count = 0
     for _root, _dirs, files in os.walk(folder):
-        count += sum(1 for f in files if f.endswith(".ydk"))
+        count += sum(1 for f in files if f.lower().endswith(".ydk"))
     return count
 
 
@@ -1823,19 +1826,42 @@ async def run(cfg: Config):
     ):
         return None
 
+    def requested_scope() -> set[int] | None:
+        if cfg.stats:
+            return None
+        ids = collect_deck_filter_ids(cfg)
+        if cfg.my_decks and not ids:
+            has_decks = cfg.deck_paths or _count_deck_files(
+                cfg.decks_folder or os.path.join(cfg.edopro_path, "deck")
+            )
+            cfg.idle_summary = (
+                "No cards found in your decks — nothing to sync"
+                if has_decks
+                else "No decks found — nothing to sync",
+                "No card IDs were found in your saved decks. Save a deck in EDOPro, then try again, or choose Full library.",
+            )
+            console.print(f"{cfg.idle_summary[0]}. {cfg.idle_summary[1]}")
+            if cfg.notice_sink is not None:
+                cfg.notice_sink(cfg.idle_summary[0])
+        return ids
+
+    deck_filter = requested_scope()
+    if cfg.idle_summary:
+        return None
     unreadable: list[str] = []
     dbs = get_db_files(cfg.edopro_path, unreadable=unreadable)
     if not dbs:
         dbs = prompt_for_edopro_path(cfg, unreadable=unreadable)
         if not dbs:
             return None
+        # The picker can select another installation with a different deck folder.
+        if cfg.my_decks:
+            deck_filter = requested_scope()
+            if cfg.idle_summary:
+                return None
 
     if not cfg.stats:
         os.makedirs(cfg.pics_path, exist_ok=True)
-
-    deck_filter = None
-    if not cfg.stats and (cfg.deck_paths or cfg.decks_folder):
-        deck_filter = collect_deck_filter_ids(cfg)
     era_suffixes = tuple(cfg.suffixes)
     scoped_index = bool(deck_filter) and len(deck_filter) <= SMALL_DECK_INDEX_LIMIT
     if scoped_index:
@@ -1874,20 +1900,6 @@ async def run(cfg: Config):
                 extras.install(cfg.edopro_path, cfg.config_path, group)
                 cfg.installed_extras.append(label)
 
-    # "Only my decks" (tick-box or --my-decks) points the deck filter at
-    # EDOPro's own deck folder.
-    if cfg.my_decks and not cfg.deck_paths and not cfg.decks_folder:
-        deck_dir = os.path.join(cfg.edopro_path, "deck")
-        if _count_deck_files(deck_dir):
-            cfg.decks_folder = deck_dir
-        else:
-            console.print(
-                "[yellow]No decks found in the EDOPro deck folder — "
-                "syncing everything instead.[/yellow]"
-            )
-            if cfg.notice_sink is not None:
-                cfg.notice_sink("No decks found — syncing everything instead")
-
     # Fresh install with decks? Offer the fast path before a ~13,000-card sync.
     if (
         cfg.interactive_prompts
@@ -1907,26 +1919,16 @@ async def run(cfg: Config):
             "(run again later for the full set)"
         ):
             cfg.decks_folder = deck_dir
+            cfg.my_decks = True
+            deck_filter = requested_scope()
+            if cfg.idle_summary:
+                return None
 
-    if deck_filter is None:
-        deck_filter = collect_deck_filter_ids(cfg)
     if deck_filter is not None and not deck_filter:
-        if cfg.my_decks:
-            # The window/quick-start path: empty decks just mean "sync it all".
-            console.print(
-                "[yellow]No card IDs found in your decks — syncing everything instead.[/yellow]"
-            )
-            if cfg.notice_sink is not None:
-                cfg.notice_sink("Your decks are empty — syncing everything instead")
-            deck_filter = None
-        else:
-            # An explicit --deck/--decks-folder that matched nothing is almost
-            # certainly a typo'd path; escalating it to a full ~13,000-card
-            # download would be a nasty surprise.
-            raise SyncInputError(
-                "The selected deck files contain no card IDs. Choose a saved .ydk deck "
-                "or check the deck folder."
-            )
+        raise SyncInputError(
+            "The selected deck files contain no card IDs. Choose a saved .ydk deck "
+            "or check the deck folder."
+        )
     missing_from_dbs = set()
     if deck_filter is not None:
         id_to_name = {cid: name for cid, name in full_id_to_name.items() if cid in deck_filter}
