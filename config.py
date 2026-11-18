@@ -72,6 +72,18 @@ APP_NAME = "EDOPro Studio"
 APP_DATA_NAME = "EDOPro HD Sync"
 
 
+def app_version() -> str:
+    """Read the VERSION bundled with the application or beside the source."""
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(
+        os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__)
+    )
+    try:
+        with open(os.path.join(base, "VERSION"), encoding="utf-8") as stream:
+            return stream.read().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
 def user_data_dir() -> str:
     """Return a writable per-user directory for packaged-app state."""
     home = os.path.expanduser("~")

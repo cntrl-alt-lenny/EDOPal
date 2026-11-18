@@ -6,6 +6,9 @@ import stat
 from contextlib import closing
 from pathlib import Path
 
+# Cards with the SPELL and FIELD bits also use separate playmat artwork.
+FIELD_SPELL_TYPE = 0x80002
+
 
 def get_db_files(
     edopro_path: str, *, unreadable: list[str] | None = None, confined: bool = False

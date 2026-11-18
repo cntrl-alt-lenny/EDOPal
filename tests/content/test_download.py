@@ -9,12 +9,13 @@ from threading import Event, Timer
 from types import SimpleNamespace
 
 import pytest
-from conftest import PNG, FakeHTTP, pack_entry, send
 
 from content.cache import CacheBusyError, PackCache
 from content.catalogue import PackState, pack_status
 from content.download import DownloadError, DownloadFailure, Progress, download_pack, fetch_preview
 from content.manifest import Pack, parse_manifest
+
+from .conftest import PNG, FakeHTTP, pack_entry, send
 
 APP = "5.5.0"
 DATA = bytes(range(256)) * 1024

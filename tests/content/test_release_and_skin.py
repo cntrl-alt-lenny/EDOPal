@@ -7,7 +7,6 @@ from pathlib import Path
 from zipfile import ZipFile, ZipInfo
 
 import pytest
-from conftest import PNG, FakeHTTP, pack_entry, send
 
 import extras
 import main
@@ -16,6 +15,8 @@ from content.cache import PackCache, file_sha256
 from content.download import download_pack
 from content.manifest import parse_manifest
 from tools.build_content_release import build_release
+
+from .conftest import PNG, FakeHTTP, pack_entry, send
 
 
 def test_cached_skin_matches_bundled_with_highlight_and_restore(

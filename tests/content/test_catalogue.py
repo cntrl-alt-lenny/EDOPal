@@ -4,7 +4,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from conftest import FakeHTTP, pack_entry, send
 
 from config import Config
 from content.cache import PackCache
@@ -17,6 +16,8 @@ from content.catalogue import (
 )
 from content.download import download_pack
 from content.manifest import DEFAULT_MANIFEST_URL, ManifestError, parse_manifest
+
+from .conftest import FakeHTTP, pack_entry, send
 
 
 def manifest(*packs: dict, version: int = 1, **fields: object) -> bytes:

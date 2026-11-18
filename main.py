@@ -27,9 +27,18 @@ import aiohttp
 
 import config as config_module
 import extras
+from artwork_coverage import JPEG_END as JPEG_END
+from artwork_coverage import JPEG_MAGIC as JPEG_MAGIC
+from artwork_coverage import MIN_IMAGE_BYTES as MIN_IMAGE_BYTES
+from artwork_coverage import PNG_MAGIC as PNG_MAGIC
+from artwork_coverage import field_art_dir as _field_art_dir
+from artwork_coverage import image_sample as _image_sample
+from artwork_coverage import looks_like_image as _looks_like_image
+from artwork_coverage import looks_like_jpeg as _looks_like_jpeg
+from artwork_coverage import scan_artwork_coverage
 from artwork_flow import format_size as _format_size
-from card_databases import get_db_files
-from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, find_edopro_folder
+from card_databases import FIELD_SPELL_TYPE, get_db_files
+from config import BUILTIN_MANUAL_MAP, DEFAULTS, Config, app_version, find_edopro_folder
 from network_tls import create_http_session as _create_http_session
 
 # Rich console setup
@@ -140,19 +149,7 @@ else:
     console = _FallbackConsole()
 
 
-def _read_version() -> str:
-    """Read the VERSION file bundled next to the script/executable."""
-    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(
-        os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__)
-    )
-    try:
-        with open(os.path.join(base, "VERSION"), encoding="utf-8") as f:
-            return f.read().strip() or "dev"
-    except OSError:
-        return "dev"
-
-
-VERSION = _read_version()
+VERSION = app_version()
 
 
 def format_duration(seconds: float) -> str:
@@ -423,11 +420,6 @@ def prompt_for_edopro_path(cfg: Config, *, unreadable: list[str] | None = None) 
             "[yellow]That folder does not look like EDOPro. It needs cards.cdb, "
             "expansions/*.cdb, or repositories/**/*.delta.cdb.[/yellow]"
         )
-
-
-# datas.type bitfield: TYPE_SPELL (0x2) | TYPE_FIELD (0x80000). Cards with both
-# bits are Field Spells, which also get playmat artwork in pics/field/.
-FIELD_SPELL_TYPE = 0x80002
 
 
 SMALL_DECK_INDEX_LIMIT = 500
@@ -805,48 +797,11 @@ class DownloadStats:
         self.unexpected_errors.append((card_id, name, f"{type(exc).__name__}: {exc}"))
 
 
-# A real card image is a JPEG: it starts with the magic bytes FF D8 FF and is
-# far larger than any error page. Checking both guards against an HTML error
-# page or a truncated response being saved as a .jpg when the server replies 200.
-JPEG_MAGIC = b"\xff\xd8\xff"
-JPEG_END = b"\xff\xd9"
-MIN_IMAGE_BYTES = 512
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 
 
-def _looks_like_jpeg(content: bytes) -> bool:
-    """Return True when `content` has the basic shape of a complete JPEG."""
-    return (
-        len(content) >= MIN_IMAGE_BYTES
-        and content.startswith(JPEG_MAGIC)
-        and JPEG_END in content[-64:]
-    )
-
-
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-
-
-def _looks_like_image(content: bytes) -> bool:
-    """Return True for a complete-looking PNG or JPEG (used for textures)."""
-    if len(content) < MIN_IMAGE_BYTES:
-        return False
-    if content.startswith(JPEG_MAGIC):
-        return JPEG_END in content[-64:]
-    return content.startswith(PNG_MAGIC) and b"IEND" in content[-32:]
-
-
-def _image_sample(path: str) -> bytes:
-    """Read only the size threshold, signature and trailer our image checks inspect."""
-    with open(path, "rb", buffering=0) as source:
-        head = source.read(MIN_IMAGE_BYTES)
-        if len(head) < MIN_IMAGE_BYTES:
-            return head
-        source.seek(-64, os.SEEK_END)
-        return head + source.read(64)
-
-
 def field_art_dir(cfg: Config) -> str:
-    return os.path.join(cfg.pics_path, "field")
+    return _field_art_dir(cfg.pics_path)
 
 
 def has_field_art(cfg: Config, card_id: int) -> bool:
@@ -1746,57 +1701,13 @@ def _count_deck_files(folder: str) -> int:
     return count
 
 
-def _scan_art_folder(
-    folder: str,
-    extensions: tuple[str, ...],
-    is_valid: Callable[[bytes], bool] | None = None,
-) -> tuple[set[int], int]:
-    """Return valid image IDs and total recognized-file bytes for one art folder."""
-    ids: set[int] = set()
-    size = 0
-    sample_suffices = is_valid in (_looks_like_jpeg, _looks_like_image)
-    if not os.path.isdir(folder):
-        return ids, size
-    with os.scandir(folder) as it:
-        for entry in it:
-            if not entry.is_file():
-                continue
-            stem, _, ext = entry.name.rpartition(".")
-            if ext not in extensions:
-                continue
-            try:
-                size += entry.stat().st_size
-                if is_valid is not None:
-                    if sample_suffices:
-                        content = _image_sample(entry.path)
-                    else:
-                        with open(entry.path, "rb") as file_obj:
-                            content = file_obj.read()
-                    if not is_valid(content):
-                        continue
-            except OSError:
-                continue
-            try:
-                ids.add(int(stem))
-            except ValueError:
-                continue
-    return ids, size
-
-
 def collect_coverage_stats(cfg: Config, id_to_name: dict[int, str], field_ids: set[int]) -> dict:
     """Gather how much artwork is on disk versus what the databases know about."""
-    card_files, card_bytes = _scan_art_folder(cfg.pics_path, ("jpg",), _looks_like_jpeg)
-    field_files, field_bytes = _scan_art_folder(
-        field_art_dir(cfg), ("jpg", "png"), _looks_like_image
-    )
+    stats = scan_artwork_coverage(cfg.pics_path, id_to_name, field_ids)
     cached = len(load_failure_cache(_failure_cache_path(cfg)))
     field_cached = len(load_failure_cache(_field_failure_cache_path(cfg)))
     return {
-        "cards_total": len(id_to_name),
-        "cards_have": sum(1 for cid in id_to_name if cid in card_files),
-        "fields_total": len(field_ids & id_to_name.keys()),
-        "fields_have": sum(1 for cid in field_ids if cid in id_to_name and cid in field_files),
-        "disk_bytes": card_bytes + field_bytes,
+        **stats,
         "known_missing": cached + field_cached,
         "pics_path": os.path.abspath(cfg.pics_path),
     }
