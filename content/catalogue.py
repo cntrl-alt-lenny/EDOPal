@@ -166,15 +166,27 @@ def _fallback(saved: _Saved | None, detail: str) -> Catalogue:
     return Catalogue(bundled_manifest(), CatalogueSource.BUNDLED, detail)
 
 
+def _record(cache: PackCache, url: str) -> Path:
+    key = "manifest-" + hashlib.sha256(url.encode("utf-8")).hexdigest()
+    return cache.root / key / "catalogue.json"
+
+
+def offline_catalogue(cache: PackCache, *, config_url: str = "") -> Catalogue:
+    """Show the last catalogue for this source without waiting for the network."""
+    saved = _read_saved(_record(cache, resolve_manifest_url(config_url)))
+    if saved:
+        return Catalogue(saved.manifest, CatalogueSource.CACHED)
+    return Catalogue(bundled_manifest(), CatalogueSource.BUNDLED)
+
+
 async def fetch_catalogue(
     cache: PackCache, *, config_url: str = "", timeout: float = 15
 ) -> Catalogue:
     """Refresh the catalogue, retaining the last valid response for this URL."""
     url = resolve_manifest_url(config_url)
-    key = "manifest-" + hashlib.sha256(url.encode("utf-8")).hexdigest()
-    record = cache.root / key / "catalogue.json"
+    record = _record(cache, url)
     try:
-        with cache._work(key):
+        with cache._work(record.parent.name):
             saved = _read_saved(record)
             async with (
                 create_http_session() as session,

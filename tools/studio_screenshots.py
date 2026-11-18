@@ -29,6 +29,7 @@ from studio import theme  # noqa: E402
 from studio.context import AppContext, Installation  # noqa: E402
 from studio.shell import StudioWindow  # noqa: E402
 from tools.studio_decks_screenshots import render_decks  # noqa: E402
+from tools.studio_skins_screenshots import render_skins  # noqa: E402
 
 PAGE_RENDERERS = {"decks": render_decks}
 
@@ -166,6 +167,8 @@ def render(out: Path, size: tuple[int, int], root: Path, *, page: str | None = N
                 renderer(window, selected, shot, settle, overview=f"{number:02}-{key}")
                 continue
             window.navigate(key)
+            if key == "skins":
+                render_skins(window, shot, settle)
             shot(f"{number:02}-{key}")
         window.navigate("cards")
         fake.release.clear()

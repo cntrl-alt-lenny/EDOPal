@@ -24,6 +24,7 @@ class InstallState:
     active: bool
     can_undo: bool
     recovery_pending: bool
+    undo_removes_install: bool = False
 
 
 def install_state(game: Path, theme_id: str) -> InstallState:
@@ -36,6 +37,7 @@ def install_state(game: Path, theme_id: str) -> InstallState:
         bool(folder and store.config()[1].get("skin") == folder),
         record["undo"] is not None,
         store.pending.exists(),
+        bool(record["undo"] and record["undo"]["prior"] is None),
     )
 
 
@@ -220,8 +222,9 @@ def remove_theme(game: Path, theme_id: str) -> None:
     _reverse(game, theme_id, "remove")
 
 
-def recover(game: Path) -> None:
-    """Finish any interrupted game operation. Safe to repeat."""
+def recover(game: Path) -> str | None:
+    """Finish interrupted work and report the action completed, if any."""
     root = game.resolve(strict=True)
     with appearance_lock(root):
-        recover_locked(root)
+        op = recover_locked(root)
+        return op["action"] if op else None

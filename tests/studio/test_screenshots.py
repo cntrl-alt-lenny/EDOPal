@@ -25,9 +25,66 @@ def test_screenshot_cli_writes_all_views_at_requested_size(tmp_path: Path) -> No
         timeout=60,
         check=True,
     )
-    assert "Rendered 18 views" in process.stdout
     files = list((tmp_path / "1280x800").glob("*.png"))
-    assert len(files) == 18
+    assert f"Rendered {len(files)} views" in process.stdout
+    names = {path.stem for path in files}
+    shell = [
+        "hd-cards",
+        "sync-settings",
+        "coverage",
+        "sync-progress",
+        "sync-summary",
+        "no-installation",
+        "installation-picker",
+        "skins",
+        "sleeves",
+        "sounds",
+        "music",
+        "decks",
+        "settings",
+        "unavailable-artwork",
+        "sync-cancelled",
+        "up-to-date",
+        "sync-error",
+        "awaiting-databases",
+    ]
+    assert {f"{i:02}-{name}" for i, name in enumerate(shell, 1)} <= names
+    skins = [
+        "active-gallery",
+        "applied",
+        "applying",
+        "awaiting-game",
+        "close-game",
+        "empty-library",
+        "gallery",
+        "light",
+        "maker-colour",
+        "maker-overrides",
+        "maker-photo",
+        "maker-quick",
+        "maker-wallpapers",
+        "my-library",
+        "no-installation",
+        "no-results",
+        "offline",
+        "pack-applied",
+        "pack-cancelled",
+        "pack-detail",
+        "pack-download",
+        "pack-gallery",
+        "pack-highlight",
+        "pack-ready",
+        "pack-restored",
+        "pack-verification-error",
+        "preview-deck",
+        "preview-duel",
+        "preview-menu",
+        "previous-look",
+        "recovered",
+        "rename",
+        "saved-theme",
+    ]
+    assert {f"skins-{name}" for name in skins} <= names
     for path in files:
         with Image.open(path) as image:
             assert image.size == (1280, 800)

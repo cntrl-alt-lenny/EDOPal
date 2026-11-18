@@ -19,6 +19,8 @@ ThemeLibrary(directory=None)                      # Defaults to config.user_data
 library.entries() -> dict[str, Theme]             # Map saved IDs to definitions.
 library.load(theme_id) -> Theme                   # Read one saved definition.
 library.save(theme, theme_id=None) -> str         # Supply an ID to edit, omit it to duplicate.
+library.delete(theme_id) -> None                  # Remove from the library, retaining the recipe for games.
+library.removed_entries() -> dict[str, Theme]     # Identify still-installed copies of deleted themes.
 library.add_image(path) -> str                    # Validate and copy a local PNG/JPEG, returning its SHA-256.
 library.image(theme) -> QImage | None             # Resolve and decode a saved photo for preview/install.
 library.export_file(theme_id, path) -> None       # Write one self-contained share file.
@@ -30,7 +32,7 @@ install_theme(game, theme_id, theme, *, image=None) -> str  # Install or edit, t
 switch_back(game, theme_id) -> None               # Select the predecessor, restoring owned font keys.
 undo_theme(game, theme_id) -> None                # Reverse one edit, or the first install.
 remove_theme(game, theme_id) -> None              # Remove verified owned files and restore selection if active.
-recover(game) -> None                             # Finish the installation's pending operation.
+recover(game) -> str | None                       # Finish pending work and return its action.
 ```
 
 Filesystem arguments are `pathlib.Path` objects. A theme ID is 32 lowercase hexadecimal characters. `PRESETS` contains 16 editable definitions. `SCENES` contains `menu`, `deck` and `duel`. `WIDGETS` maps the 15 state names to their XML paths, source sizes and top/left/bottom/right border widths.
