@@ -17,6 +17,11 @@ from decks.duplicates import DuplicateIndex, find_duplicates
 from decks.history import DeckStore, Ledger
 from studio.pages.decks_preview_data import PreviewCard, PreviewSection, local_artwork
 
+TOURNAMENT_NAME = re.compile(
+    r"^.+? - (?P<event>.+?) - (?:(?P<place>\d+) )?(?P<name>.+) - "
+    r"(?P<pilot>.+?) \[FL\d+\](?P<variant>(?: \([^()]+\))*)$"
+)
+
 
 def scan_collection(
     index: DeckIndexer, store: DeckStore, cancel: Event
@@ -58,6 +63,18 @@ def file_problem(reason: str) -> str:
 
 def deck_title(deck: SavedDeck) -> str:
     return (deck.folder / deck.name).as_posix()
+
+
+def library_title(name: str) -> tuple[str, str]:
+    """Show Format Library metadata separately while retaining the original file name."""
+    match = TOURNAMENT_NAME.fullmatch(name)
+    if match is None:
+        return name, ""
+    event, place, title, pilot, variant = (
+        match.group(key) for key in ("event", "place", "name", "pilot", "variant")
+    )
+    parts = (event, f"Place {int(place)}" if place else "", pilot)
+    return title + variant, " · ".join(filter(None, parts))
 
 
 def section_counts(counts: Counts) -> str:
@@ -120,6 +137,8 @@ class LibraryRow:
     changed: str
     problem: str
     match: str = ""
+    title: str = ""
+    tournament: str = ""
 
 
 def library_rows(
@@ -134,6 +153,7 @@ def library_rows(
     matches = {m.deck.path: m.counts for m in lib.by_card(term)} if by_card and term else {}
     rows = []
     for deck in lib.decks:
+        title, tournament = library_title(deck.name)
         if folder is not None and deck.folder != folder:
             continue
         if term and (
@@ -155,9 +175,11 @@ def library_rows(
                 changed_date(deck.modified_ns),
                 problem,
                 marks.get(deck.path, "") if marks else "",
+                title,
+                tournament,
             )
         )
-    rows.sort(key=lambda r: (r.deck.name.casefold(), r.folder.casefold()))
+    rows.sort(key=lambda r: (r.title.casefold(), r.folder.casefold()))
     if sort == 1:
         rows.sort(key=lambda r: r.deck.modified_ns, reverse=True)
     elif sort == 2:

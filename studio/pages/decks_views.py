@@ -16,6 +16,7 @@ from studio.tasks import TaskRunner
 from studio.widgets import (
     Button,
     ElidedLabel,
+    GameClosedBlock,
     Hero,
     Notice,
     Panel,
@@ -30,14 +31,14 @@ class Detail(QWidget):
     def __init__(self, back: str) -> None:
         super().__init__()
         self.body = QVBoxLayout(self)
-        self.body.setContentsMargins(t.XXL, t.XXL, t.XXL, t.XL)
-        self.body.setSpacing(t.MD)
+        self.body.setContentsMargins(t.XXL, t.LG, t.XXL, t.LG)
+        self.body.setSpacing(t.SM)
         self.back = Button(back, "quiet", "back")
         self.body.addWidget(self.back, 0, Qt.AlignmentFlag.AlignLeft)
 
     def heading(self, title: str, detail: str) -> tuple[ElidedLabel, ElidedLabel]:
         name = ElidedLabel()
-        name.setProperty("role", "display")
+        name.setProperty("role", "heading")
         name.set_value(title)
         meta = ElidedLabel()
         meta.setProperty("role", "body")
@@ -108,18 +109,27 @@ class ImportView(QWidget):
         body = QVBoxLayout(self)
         body.setContentsMargins(t.XXL, t.XXL, t.XXL, t.XXL)
         body.setSpacing(t.LG)
-        body.addStretch()
-        body.addWidget(
-            Hero(
-                "Tournament decks",
-                "Saving decks",
-                "You can change folders when the save finishes.",
-                "decks",
-            )
+        hero = Hero(
+            "Tournament decks",
+            "Saving decks",
+            "You can change folders when the save finishes.",
+            "decks",
         )
+        hero.setFixedHeight(t.TILE_LARGE)
+        body.addWidget(hero)
         self.progress = ProgressBlock()
         self.progress.cancel.setText("Cancel import")
         body.addWidget(self.progress)
+        body.addStretch()
+
+
+class BlockedSave(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        body = QVBoxLayout(self)
+        body.setContentsMargins(t.XXL, t.XL, t.XXL, t.XL)
+        self.block = GameClosedBlock()
+        body.addWidget(self.block)
         body.addStretch()
 
 
@@ -136,15 +146,14 @@ class ReceiptView(Detail):
             ("Already saved", "deck"),
             ("Skipped", "warning"),
         ):
-            panel = Panel(t.LG)
+            panel = Panel(t.MD)
             row = QHBoxLayout()
             value = label("0", "metric")
             row.addWidget(value)
-            row.addStretch()
-            row.addWidget(glyph(symbol, t.ICON_BIG))
-            panel.body.addLayout(row)
             caption_label = label(caption, "body")
-            panel.body.addWidget(caption_label)
+            row.addWidget(caption_label, 1)
+            row.addWidget(glyph(symbol, t.ICON))
+            panel.body.addLayout(row)
             metrics.addWidget(panel, 1)
             self.totals.append(value)
             self.captions.append(caption_label)
@@ -172,7 +181,7 @@ class ReceiptView(Detail):
         self.actions.setSpacing(t.SM)
         maintenance = QHBoxLayout()
         next_steps = QHBoxLayout()
-        self.undo = Button("Undo this import")
+        self.undo = Button("Undo last change")
         self.retry = Button("Retry")
         self.review = Button("Review GOAT matches")
         self.artwork = Button(HD_ARTWORK, "secondary", "download")
@@ -214,7 +223,7 @@ class ReceiptView(Detail):
             elif kept:
                 detail = f"Earlier copies kept ({len(saved.kept)})."
             else:
-                detail = "Saved in your deck folder."
+                detail = ""
             self.selected_detail.setText(detail)
             self.selected_file.set_value(
                 f"{saved.path.name}   ·   Kept {kept}" if kept else saved.path.name
@@ -240,10 +249,9 @@ class ReceiptView(Detail):
             title = "Decks saved"
         self.title.set_value(title)
         self.meta.set_value(
-            "Find these decks the next time you start EDOPro."
-            if receipt.paths
-            else "Choose Back to return to your tournament."
+            "Find these decks the next time you start EDOPro." if receipt.paths else ""
         )
+        self.meta.setVisible(bool(receipt.paths))
         counts = (len(receipt.created), len(receipt.paths) - len(receipt.created), receipt.skipped)
         self.captions[0].setText("Added")
         for value, count in zip(self.totals, counts, strict=True):
@@ -274,7 +282,6 @@ class ReceiptView(Detail):
             notes.append("Open EDOPro to download its cards before playing.")
         if receipt.historical and receipt.paths:
             notes.append(f"Historical versions used for {receipt.historical_changes} card copies.")
-            notes.append(GOAT_ROOM_SETTINGS)
         if receipt.paths and not ready:
             notes.append("Open EDOPro once to download its cards before getting HD artwork.")
         self.notes.setText("\n".join(notes))

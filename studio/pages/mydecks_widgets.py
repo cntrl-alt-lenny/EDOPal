@@ -43,7 +43,7 @@ KINDS = {"monster": t.GOLD, "spell": t.GREEN, "trap": t.RED, "other": t.TEXT, "u
 class DeckHero(Hero):
     def __init__(self, description: str) -> None:
         super().__init__("Deck library", "My decks", description, "mydecks")
-        self.setFixedHeight(t.TILE_LARGE + t.XL)
+        self.setFixedHeight(t.TILE_LARGE)
 
     def _print(self, p: QPainter, x: float, y: float, height: float) -> None:
         scale = min(height * 1.20, self.width() * 0.23) / 100
@@ -86,6 +86,8 @@ class Screen(QWidget):
         self.body.setContentsMargins(t.XXL, t.XL, t.XXL, t.XL)
         self.body.setSpacing(t.MD)
         self.initial: QWidget | None = None
+        self.back: Button | None = None
+        self.return_name = title or "My decks"
         if back:
             row = QHBoxLayout()
             self.back = button("Back", back, "quiet", "back")
@@ -95,12 +97,12 @@ class Screen(QWidget):
             self.initial = self.back
         if title:
             heading = ElidedLabel()
-            heading.setProperty("role", "display")
+            heading.setProperty("role", "heading")
             heading.set_value(title)
             self.body.addWidget(heading)
 
-    def panel(self) -> Panel:
-        panel = Panel(t.LG)
+    def panel(self, inset: int = t.LG) -> Panel:
+        panel = Panel(inset)
         self.body.addWidget(panel, 1)
         return panel
 
@@ -175,7 +177,15 @@ class RowModel(QAbstractListModel):
             return ", ".join(
                 filter(
                     None,
-                    (row.deck.name, row.folder, row.counts, row.changed, row.problem, row.match),
+                    (
+                        row.title,
+                        row.tournament,
+                        row.folder,
+                        row.counts,
+                        row.changed,
+                        row.problem,
+                        row.match,
+                    ),
                 )
             )
         if role == Qt.ItemDataRole.ToolTipRole:
@@ -211,14 +221,16 @@ class DeckDelegate(QStyledItemDelegate):
         paint_text(
             p,
             QRect(left, top + t.SM, title_end - left - t.SM, t.XL),
-            row.deck.name,
+            row.title,
             t.INK,
             t.SUBTITLE,
             True,
         )
-        folder = row.folder + (f"   ·   {row.problem}" if row.problem else "")
+        folder = (row.tournament or row.folder) + (f"   ·   {row.problem}" if row.problem else "")
         if row.match:
-            folder = f"{row.match}   ·   {folder}"
+            folder = (
+                f"{folder}   ·   {row.match}" if row.tournament else f"{row.match}   ·   {folder}"
+            )
         if title_end == stats:
             folder += f"   ·   {row.changed}"
         paint_text(

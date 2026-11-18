@@ -6,8 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 from pytestqt.qtbot import QtBot
 
 from artwork_flow import valid_decks
@@ -48,6 +48,12 @@ def control(screen: Screen, name: str) -> Button:
     return next(b for b in screen.findChildren(Button) if b.text() == name)
 
 
+def in_viewport(page: MyDecksPage, widget: QWidget) -> bool:
+    viewport = page.scroll.viewport()
+    rect = widget.rect().translated(widget.mapTo(viewport, widget.rect().topLeft()))
+    return widget.isVisible() and viewport.rect().contains(rect)
+
+
 def open_row(view: Collection, title: str, qtbot: QtBot) -> None:
     row = next(i for i, r in enumerate(view.model.rows) if r.deck.name == title)
     index = view.model.index(row)
@@ -61,6 +67,7 @@ def test_history_compares_restores_and_recovers_missing_deck(
     saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     win, page = saved
+    win.resize(960, 600)
     deck = page.lib.search("Empty Jar - Athens")[0]
     before = deck.preview.sections
     open_row(page.view, deck.name, qtbot)
@@ -82,6 +89,8 @@ def test_history_compares_restores_and_recovers_missing_deck(
     history = page.view
     assert isinstance(history, HistoryScreen)
     qtbot.waitUntil(lambda: "Moved between sections" in history.report.toPlainText())
+    page.slide.setCurrentTime(page.slide.duration())
+    assert in_viewport(page, history.restore) and page.scroll.verticalScrollBar().maximum() == 0
     assert history.rows.count() == 1
     assert "+1 Sangan" in history.rows.item(0).text()
     assert "−1 Cyber Jar" in history.rows.item(0).text()
@@ -110,6 +119,7 @@ def test_opening_odds_tags_update_before_write_and_survive_edit(
     saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     win, page = saved
+    win.resize(960, 600)
     deck = page.lib.search("Empty Jar - Athens")[0]
     open_row(page.view, deck.name, qtbot)
     control(page.view, "Opening odds").click()
@@ -120,6 +130,8 @@ def test_opening_odds_tags_update_before_write_and_survive_edit(
     odds.name.setText("Starters")
     odds.add.click()
     qtbot.waitUntil(lambda: not odds.saving and odds.group.currentText() == "Starters")
+    page.slide.setCurrentTime(page.slide.duration())
+    assert in_viewport(page, odds.add) and page.scroll.verticalScrollBar().maximum() == 0
     assert odds.table.item(0, 1).text() == "0.00%"
     assert odds.table.item(2, 2).text() == "100.00%"
     odds.search.setText("Sangan")
@@ -156,7 +168,8 @@ def test_opening_odds_tags_update_before_write_and_survive_edit(
 def test_duplicates_can_review_five_decks_and_open_folder(
     saved: tuple, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _, page = saved
+    win, page = saved
+    win.resize(960, 600)
     deck = page.lib.search("Empty Jar - Athens")[0]
     seed_five_matches(page.lib.game, deck.preview.sections)
     page.view.refresh.click()
@@ -183,6 +196,8 @@ def test_duplicates_can_review_five_decks_and_open_folder(
         next(i for i, member in enumerate(group.members) if member.name.endswith("Winter"))
     )
     qtbot.waitUntil(lambda: "moved from Main to Side" in group.report.toPlainText())
+    page.slide.setCurrentTime(page.slide.duration())
+    assert in_viewport(page, group.folder) and page.scroll.verticalScrollBar().maximum() == 0
     group.folder.click()
     qtbot.waitUntil(lambda: len(paths) == 1)
     assert paths[0].stem == "Empty Jar - Winter"
@@ -246,9 +261,9 @@ def test_deck_contents_clipboard_artwork_and_file_reveal(
     handoffs = []
     monkeypatch.setattr(win.ctx, "sync_deck_files", lambda *args: handoffs.append(args) or True)
     control(view, "Get HD artwork").click()
-    qtbot.waitUntil(lambda: p.retry.isVisible())
+    qtbot.waitUntil(p.game_block.retry.isVisible)
     assert not handoffs
-    p.retry.click()
+    p.game_block.retry.click()
     qtbot.waitUntil(lambda: handoffs == [(p.lib.game, (d.path,))])
 
 
@@ -341,18 +356,35 @@ def test_import_busy_retry_no_clobber_and_undo(
         assert "Stay on this page" in p.message.text()
     finally:
         gate.set()
-    qtbot.waitUntil(lambda: p.retry.isVisible())
-    assert "Close this copy" in p.message.text()
+    qtbot.waitUntil(p.game_block.retry.isVisible)
+    assert not review.save_btn.isVisible()
+    assert p.game_block.retry.hasFocus()
     assert not (original.parent / "Spellcasters (2).ydk").exists()
     monkeypatch.setattr(copies, "_game_running", lambda _: False)
-    p.retry.click()
+    p.game_block.retry.click()
     qtbot.waitUntil(lambda: isinstance(p.view, Collection))
     new = original.with_name("Spellcasters (2).ydk")
     assert new in p.receipts and new.is_file() and original.read_bytes() == data
-    monkeypatch.setattr(win.ctx, "confirm", lambda *_: False)
+    prompt = []
+
+    def cancel_removal() -> None:
+        dialog = QApplication.activeModalWidget()
+        assert isinstance(dialog, QMessageBox)
+        cancel = dialog.button(QMessageBox.StandardButton.Cancel)
+        prompt.extend(
+            (
+                dialog.windowTitle(),
+                {b.text() for b in dialog.buttons()},
+                dialog.defaultButton() is cancel,
+            )
+        )
+        cancel.click()
+
+    QTimer.singleShot(0, cancel_removal)
     control(p.view, "Remove saved copy").click()
+    assert prompt == ["Remove saved copy", {"Cancel", "Remove saved copy"}, True]
     assert new.is_file()
-    monkeypatch.setattr(win.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr(p, "_confirm", lambda *_: True)
     control(p.view, "Remove saved copy").click()
     qtbot.waitUntil(lambda: isinstance(p.view, Collection) and not p.receipts)
     assert not new.exists() and original.read_bytes() == data
@@ -374,7 +406,7 @@ def test_repair_preview_original_and_edited_copy_preserved(
     assert new.name == "Relinquished repaired.ydk" and original.read_bytes() == data
     assert "999" not in new.read_text()
     new.write_text("#main\n1001\n")
-    monkeypatch.setattr(win.ctx, "confirm", lambda *_: True)
+    monkeypatch.setattr(p, "_confirm", lambda *_: True)
     control(p.view, "Remove saved copy").click()
     qtbot.waitUntil(lambda: p.retry.isVisible())
     assert "edits have been kept" in p.message.text() and new.read_text() == "#main\n1001\n"
@@ -412,7 +444,7 @@ def test_no_selection_not_ready_scan_error_and_empty(
     (game / "cards.cdb").touch()
     p.view.initial.click()
     qtbot.waitUntil(lambda: isinstance(p.view, Collection))
-    assert p.view.empty.isVisible() and p.view.import_btn.isEnabled()
+    assert p.view.hero.headline.text() == "Your first deck" and p.view.import_btn.isEnabled()
 
 
 def test_old_scan_ignored_after_installation_change(
@@ -454,6 +486,41 @@ def test_no_lists_and_long_filename_at_minimum_size(saved: tuple, qtbot: QtBot) 
     assert p.view.width() <= p.scroll.viewport().width()
     control(p.view, "Check format").click()
     assert "No forbidden lists installed" in p.view.summary.text()
+    check = p.view
+    refresh = control(check, "Refresh")
+    assert refresh.y() - check.summary.y() < 3 * refresh.height()
+    (p.lib.game / "lflist.conf").write_text("!Test list\n1000 1\n", encoding="utf-8")
+    refresh.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, FormatCheck) and bool(p.view.verdicts))
+    assert p.view.deck.name == name
+
+
+def test_minimum_library_has_one_scroll_and_clear_filters(saved: tuple, qtbot: QtBot) -> None:
+    win, p = saved
+    win.resize(960, 600)
+    game = p.lib.game
+    folder = game / "lflists"
+    folder.mkdir(exist_ok=True)
+    (folder / "unfinished.conf").write_text("no name\n", encoding="utf-8")
+    source = (game / "deck/Spellcasters.ydk").read_bytes()
+    for i in range(60):
+        (game / f"deck/Version {i:02}.ydk").write_bytes(source)
+    p.view.refresh.click()
+    qtbot.waitUntil(lambda: isinstance(p.view, Collection))
+    view = p.view
+    qtbot.waitUntil(lambda: view.rows.verticalScrollBar().maximum() > 0)
+    assert p.scroll.verticalScrollBar().maximum() == 0
+    assert view.rows.viewport().rect().contains(view.rows.visualRect(view.model.index(2)))
+    assert abs(view.issue_btn.y() - view.summary.y()) < view.issue_btn.height()
+    view.issue_btn.click()
+    assert view.warning.isVisible() and not view.rows.isVisible()
+    view.issue_btn.click()
+    view.mode.setCurrentIndex(1)
+    view.search.setText("No such card")
+    assert view.clear_filters.isVisible() and not view.legend.isVisible()
+    view.clear_filters.click()
+    assert view.search.hasFocus() and view.mode.currentIndex() == 0 and not view.search.text()
+    assert view.model.rowCount() > 60 and view.rows.isVisible()
 
 
 def test_section_counts_for_card_in_multiple_folders_and_sections(saved: tuple) -> None:
@@ -498,9 +565,9 @@ def test_failed_save_does_not_publish_stale_preview(
     qtbot.waitUntil(review.save_btn.isEnabled)
     monkeypatch.setattr(copies, "_game_running", lambda _: True)
     review.save_btn.click()
-    qtbot.waitUntil(lambda: p.retry.isVisible())
+    qtbot.waitUntil(p.game_block.retry.isVisible)
     review.code.setText("a different sharing code")
-    assert not p.retry.isVisible() and not review.save_btn.isEnabled()
+    assert not p.game_block.retry.isVisible() and not review.save_btn.isEnabled()
     assert not (p.lib.game / "deck/Imported deck.ydk").exists()
 
 

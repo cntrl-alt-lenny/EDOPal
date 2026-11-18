@@ -22,9 +22,11 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLineEdit,
     QListView,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QWidget,
 )
 
 from decks import Preview
@@ -34,7 +36,7 @@ from studio import theme as t
 from studio.pages.mydecks_logic import card_name, quantity
 from studio.pages.mydecks_widgets import Screen, button, choice
 from studio.tasks import Job, TaskRunner
-from studio.widgets import Panel, SearchField, label
+from studio.widgets import Panel, SearchField, label, margins
 
 TagEdits = dict[tuple[int, int], bool]
 TagRows = tuple[tuple[int, str], ...]
@@ -105,8 +107,8 @@ class OddsScreen(Screen):
         confirm: Callable[[str, str], bool],
     ) -> None:
         super().__init__("Opening-hand odds", back)
-        self.body.setSpacing(t.SM)
-        self.body.setContentsMargins(t.XXL, t.LG, t.XXL, t.LG)
+        self.body.setSpacing(t.XS)
+        self.body.setContentsMargins(t.XXL, t.MD, t.XXL, t.MD)
         self.track, self.deck, self.store, self.tasks = track, deck, store, tasks
         self.confirm = confirm
         self.groups: dict[int, TagGroup] = {}
@@ -123,32 +125,37 @@ class OddsScreen(Screen):
                 True,
             )
         )
-        header = Panel(t.MD)
-        form = QHBoxLayout()
+        group_controls = QHBoxLayout()
         self.group = choice("Group to count", ())
         self.group.setMinimumWidth(t.TILE_LARGE)
-        form.addWidget(self.group, 1)
+        group_controls.addWidget(self.group, 1)
+        self.remove = button("Remove group", self._remove_group, "quiet")
+        group_controls.addWidget(self.remove)
+
+        self.add_row = QWidget()
+        form = QHBoxLayout(self.add_row)
+        margins(form, 0)
         self.name = QLineEdit()
         self.name.setAccessibleName("New group name")
         self.name.setPlaceholderText("New group name")
         self.name.setMaxLength(GROUP_NAME_LIMIT)
         form.addWidget(self.name, 1)
         self.add = button("Add group", self._add_group, "primary")
-        self.remove = button("Remove group", self._remove_group, "quiet")
         form.addWidget(self.add)
-        form.addWidget(self.remove)
-        header.body.addLayout(form)
-        self.body.addWidget(header)
-        panels = QHBoxLayout()
+        self.workspace = QWidget()
+        panels = QHBoxLayout(self.workspace)
+        margins(panels, 0)
         panels.setSpacing(t.MD)
         cards = Panel(t.MD)
         cards.body.addWidget(label("Main Deck cards", "subheading"))
+        cards.body.addLayout(group_controls)
         self.search = SearchField("Find a Main Deck card")
         cards.body.addWidget(self.search)
         self.cards = QListView()
         self.cards.setObjectName("installList")
         self.cards.setAccessibleName("Main Deck cards. Space toggles the tag.")
         self.cards.setMinimumHeight(t.TILE_H)
+        self.cards.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.cards.setUniformItemSizes(True)
         self.model = TagCards(self.cards)
         self.filter = QSortFilterProxyModel(self.cards)
@@ -181,7 +188,6 @@ class OddsScreen(Screen):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
-        self.table.setMinimumHeight(t.TILE_LARGE)
         self.table.verticalHeader().setDefaultSectionSize(t.XXL)
         self.table.setStyleSheet(f"""
             QTableWidget {{ background: {t.PANEL}; alternate-background-color: {t.RAISED}; border: 0; }}
@@ -189,20 +195,24 @@ class OddsScreen(Screen):
                 padding: {t.XS}px; border: 0; }}
         """)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for i in (1, 2):
             self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(i, t.HUGE + t.XXL)
-        results.body.addWidget(self.table, 1)
+        self.table.setFixedHeight(self.table.horizontalHeader().sizeHint().height() + 4 * t.XXL)
+        results.body.addWidget(self.table)
+        results.body.addStretch()
         panels.addWidget(results, 4)
-        self.body.addLayout(panels, 1)
-        footer = QHBoxLayout()
+        self.body.addWidget(self.workspace, 1)
         self.status = label("Reading card groups…", "body", True)
-        footer.addWidget(self.status, 1)
-        self.retry = button("Retry", self._retry)
+        self.body.addWidget(self.status)
+        self.retry = button("Retry", self._retry, "primary")
         self.retry.hide()
-        footer.addWidget(self.retry)
-        self.body.addLayout(footer)
+        self.body.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignLeft)
+        self.body.addWidget(self.add_row)
+        self.empty_space = QWidget()
+        self.body.addWidget(self.empty_space, 1)
         self.group.currentIndexChanged.connect(self._selected)
         self.avoid.currentIndexChanged.connect(self._calculate)
         self.hits.valueChanged.connect(self._calculate)
@@ -259,6 +269,7 @@ class OddsScreen(Screen):
         if self.live:
             self.status.setText("Couldn’t read the saved card groups.")
             self.retry.show()
+            self.add_row.hide()
 
     def _set_groups(self, groups: tuple[TagGroup, ...], name: str = "") -> None:
         selected, avoided = self.group.currentData(), self.avoid.currentData()
@@ -292,6 +303,9 @@ class OddsScreen(Screen):
         self.remove.setEnabled(enabled and self.group.currentData() is not None)
         self.group.setEnabled(bool(self.groups))
         self.search.setEnabled(bool(self.groups) and bool(self.main))
+        self.workspace.setVisible(bool(self.groups))
+        self.empty_space.setVisible(not self.groups)
+        self.add_row.setVisible(self.ready and not self.blocked)
 
     def _calculate(self) -> None:
         group = self.groups.get(self.group.currentData())
@@ -363,7 +377,7 @@ class OddsScreen(Screen):
 
     def _remove_group(self) -> None:
         group = self.groups[self.group.currentData()]
-        if self.confirm("Remove card group?", f"Remove the group “{group.name}” and its tags?"):
+        if self.confirm("Remove card group", f"Remove the group “{group.name}” and its tags?"):
             store, track = self.store, self.track
             self._write(lambda: store.remove_group(track, group.id))
 

@@ -1,4 +1,4 @@
-"""The Studio tournament browser. Network and installation work run through AppContext."""
+"""The tournament browser. Network and installation work run through AppContext."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -15,13 +15,21 @@ from studio.pages.base import Page
 from studio.pages.decks_browser import Browser, ListMessage
 from studio.pages.decks_flow import (
     EventPage,
+    ImportBatch,
     StandingsSelection,
     format_choices,
     is_goat,
 )
 from studio.pages.decks_import import DeckImports
+from studio.pages.decks_layout import DeckPageScroll
 from studio.pages.decks_preview_data import PreviewSection, prepare_preview
-from studio.pages.decks_views import GoatReviewView, ImportView, PreviewView, ReceiptView
+from studio.pages.decks_views import (
+    BlockedSave,
+    GoatReviewView,
+    ImportView,
+    PreviewView,
+    ReceiptView,
+)
 from studio.tasks import Job, Work
 from studio.widgets import margins
 from tournament_decks import SITE, Deck, DeckError, Event, FormatLibrary
@@ -41,6 +49,8 @@ class DecksPage(Page):
         self.goat_available = False
         self.preview_target: tuple[Event, Deck] | None = None
         self.preview_cache: dict[int, tuple[PreviewSection, ...]] = {}
+        self.unpublished: set[int] = set()
+        self.completed: ImportBatch | None = None
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
         self.preview_timer.setInterval(t.MOTION_MS)
@@ -58,10 +68,14 @@ class DecksPage(Page):
         self.import_view = ImportView()
         self.results = ReceiptView()
         self.review = GoatReviewView()
-        for view in (self.browser, self.import_view, self.results, self.review):
+        self.blocked = BlockedSave()
+        for view in (self.browser, self.import_view, self.results, self.review, self.blocked):
             view.setMaximumWidth(t.CONTENT_MAX)
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
+            scroll = DeckPageScroll()
+            fixed = view in (self.browser, self.results)
+            scroll.setWidgetResizable(not fixed)
+            if fixed:
+                scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -81,8 +95,8 @@ class DecksPage(Page):
         b.format.currentTextChanged.connect(self.search)
         b.choose.clicked.connect(context.installations_requested.emit)
         b.credit.clicked.connect(lambda: self._open_url(f"{SITE}/events"))
-        b.event_message.retry.clicked.connect(lambda: self.load_events(self.page))
-        b.standings_message.retry.clicked.connect(lambda: self.load_standings(self.selection.event))
+        b.event_message.retry.clicked.connect(self._event_recovery)
+        b.standings_message.retry.clicked.connect(self._standings_recovery)
         b.previous.clicked.connect(lambda: self.load_events(self.page.previous()))
         b.next.clicked.connect(lambda: self.load_events(self.page.following(self.events)))
         b.events.currentItemChanged.connect(self._event_selected)
@@ -91,6 +105,8 @@ class DecksPage(Page):
         b.standings.itemSelectionChanged.connect(self._decks_selected)
         b.standings.currentItemChanged.connect(self._standing_focused)
         b.standings.itemActivated.connect(self._focus_preview)
+        b.open_preview.clicked.connect(self._focus_preview)
+        b.goat.toggled.connect(self._update_actions)
         b.event_link.clicked.connect(self._visit_event)
         b.select_all.clicked.connect(b.standings.selectAll)
         self.preview.message.retry.clicked.connect(self._load_preview)
@@ -124,6 +140,8 @@ class DecksPage(Page):
             (self.browser.search if self.ctx.installation.path else self.browser.choose).setFocus()
         elif self.view in (self.results, self.review):
             self.view.back.setFocus()
+        elif self.view is self.blocked:
+            self.blocked.block.retry.setFocus()
 
     def hidden(self) -> bool:
         if self.imports.job is not None:
@@ -149,7 +167,14 @@ class DecksPage(Page):
         if self.view is self.results:
             self._discard("artwork")
             self.results.artwork.setEnabled(True)
+            self.browser.show_standings(focus=False)
             self._show(self.browser, self.browser.standings, back=True)
+            return True
+        if self.view is self.blocked:
+            self.imports.leave_block()
+            return True
+        if self.browser.preview_open:
+            self.browser.show_standings()
             return True
         focused = QApplication.focusWidget()
         if focused is not None and self.preview.isAncestorOf(focused):
@@ -164,6 +189,8 @@ class DecksPage(Page):
     def installation_changed(self, installation: Installation) -> None:
         self._discard(*self.reads)
         self.preview_cache.clear()
+        self.unpublished.clear()
+        self.completed = None
         self.has_loaded = False
         self.imports.reset()
         self.saved.clear()
@@ -176,15 +203,16 @@ class DecksPage(Page):
 
     def _installation_controls(self, installation: Installation) -> None:
         b = self.browser
+        b.has_installation = bool(installation.path)
         for control in (b.format, b.search, b.submit):
             control.setEnabled(bool(installation.path))
         b.results.setVisible(bool(installation.path))
-        b.footer.setVisible(bool(installation.path))
         b.unavailable.setVisible(not installation.path)
         b.readiness.setVisible(bool(installation.path) and not installation.ready)
         if installation.path:
             folder = Path(installation.path) / "deck"
             b.destination.set_value(str(folder), f"Save to {folder.parent.name}")
+        b._show_archive_panel()
         self._update_actions()
 
     def _discard(self, *keys: str) -> None:
@@ -251,13 +279,15 @@ class DecksPage(Page):
             self.load_standings(events[0])
             self.browser.show_standings(focus=False)
         else:
-            hint = (
-                "Go back a page or try a different search."
-                if self.page.previous()
-                else ("Try another format or clear the event search.")
-            )
-            self.browser.event_message.set_copy("No tournaments found", hint, False)
-            self.preview.reset("No tournaments found", hint)
+            if self.page.previous():
+                hint, action = "There are no more events for this search.", "Previous page"
+            elif self.page.query:
+                hint, action = "Try another event name or code.", "Clear search"
+            elif self.page.format:
+                hint, action = "Format Library has no events in this format.", "Show all formats"
+            else:
+                hint, action = "Format Library has no public events available.", "Retry"
+            self.browser.event_message.set_copy("No tournaments found", hint, True, action)
         self._update_actions()
 
     def _event_selected(self) -> None:
@@ -272,6 +302,7 @@ class DecksPage(Page):
         self.selection.open(event)
         self.goat_available = False
         b = self.browser
+        b.has_event = event is not None
         if event is None or not is_goat(event):
             b.goat.setChecked(False)
         b.set_standings((), self.saved)
@@ -320,23 +351,44 @@ class DecksPage(Page):
         if decks:
             self._standing_focused()
         else:
-            detail = "Format Library has no published decks for this tournament. Try another event."
-            self.browser.standings_message.set_copy("No public decklists", detail, False)
-            self.preview.reset("No public decklists", detail)
+            self.browser.standings_message.set_copy(
+                "No public decklists",
+                "This event hasn’t published any decklists.",
+                True,
+                "Browse events",
+            )
         self._update_actions()
 
     @staticmethod
     def _error_copy(error: Exception, title: str) -> tuple[str, str]:
         cause = error.__cause__
         if isinstance(cause, (URLError, OSError)) and not isinstance(cause, HTTPError):
-            title = "Format Library is unreachable"
+            title = "Format Library offline"
         detail = str(error) if isinstance(error, DeckError) else "Something went wrong. Try again."
         return title, detail
 
     def _archive_error(self, message: ListMessage, error: Exception, title: str) -> None:
         title, detail = self._error_copy(error, title)
         message.set_copy(title, detail, True)
-        self.preview.reset(title, detail)
+
+    def _event_recovery(self) -> None:
+        action = self.browser.event_message.retry.text()
+        if action == "Clear search":
+            self.browser.search.clear()
+            self.search()
+        elif action == "Show all formats":
+            self.browser.format.setCurrentText("All formats")
+        elif action == "Previous page":
+            self.load_events(self.page.previous())
+        else:
+            self.load_events(self.page)
+
+    def _standings_recovery(self) -> None:
+        if self.browser.standings_message.retry.text() == "Browse events":
+            self.browser.browse_events()
+            self.browser.events.setFocus()
+        else:
+            self.load_standings(self.selection.event)
 
     def _events_failed(self, error: Exception) -> None:
         self._archive_error(self.browser.event_message, error, "Search unavailable")
@@ -356,18 +408,40 @@ class DecksPage(Page):
     def _update_actions(self) -> None:
         b = self.browser
         count = len(self.selection.selected)
+        batch = self.selected_batch()
+        available = len(batch.decks) if batch else 0
+        if self.completed != batch:
+            self.completed = None
+        completed = batch is not None and self.completed == batch
         b.previous.setEnabled(self.page.previous() is not None)
         b.next.setEnabled(self.page.following(self.events) is not None)
         b.event_link.setEnabled(self.selection.event is not None)
         b.select_all.setEnabled(self.selection.can_select_all)
         b.open_standings.setEnabled(self.selection.event is not None)
-        b.save.setEnabled(bool(count and self.ctx.installation.path))
-        b.save.setText(f"Add {count} decks" if count > 1 else "Add to EDOPro")
-        b.selection_count.setText(f"{count} selected")
+        b.save.setEnabled(bool(available and not completed))
+        b.save.setText(
+            "Saved" if completed else f"Add {available} decks" if available > 1 else "Add to EDOPro"
+        )
+        suffix = f" · {count - available} unpublished" if count > available else ""
+        b.selection_count.setText(f"{count} selected{suffix}")
         b.goat.setVisible(self.goat_available)
         b.recent.setVisible(self.imports.receipt is not None)
 
+    def selected_batch(self) -> ImportBatch | None:
+        if not self.ctx.installation.path:
+            return None
+        batch = self.selection.capture(
+            Path(self.ctx.installation.path), self.goat_available and self.browser.goat.isChecked()
+        )
+        if batch is None:
+            return None
+        decks = tuple(deck for deck in batch.decks if deck.id not in self.unpublished)
+        return ImportBatch(batch.game, batch.event, decks, batch.historical) if decks else None
+
     def _focus_preview(self) -> None:
+        if self.browser.layout_mode == "stacked":
+            self.browser.show_preview()
+            return
         target = (
             self.preview.contents.cards
             if self.preview.contents.isVisible()
@@ -397,7 +471,9 @@ class DecksPage(Page):
         self._cancel_preview()
         self.preview_target = event, deck
         self.preview.start(event, deck)
-        if deck.id in self.preview_cache:
+        if deck.id in self.unpublished:
+            self._show_unpublished()
+        elif deck.id in self.preview_cache:
             self.preview.loaded(self.preview_cache[deck.id])
         else:
             self.preview.show_message("Loading decklist…", "Reading the published cards.")
@@ -431,11 +507,16 @@ class DecksPage(Page):
             or isinstance(error, DeckError)
             and ("publicly available" in detail or "published a main deck" in detail)
         ):
-            self.preview.show_message(
-                "No public decklist", "Format Library hasn’t shared this decklist."
-            )
+            self.unpublished.add(self.preview_target[1].id)
+            self._show_unpublished()
+            self._update_actions()
         else:
             self.preview.show_message(title, detail, retry=True)
+
+    def _show_unpublished(self) -> None:
+        self.preview.show_message(
+            "No public decklist", "Format Library hasn’t shared this decklist."
+        )
 
     def _open_url(self, url: str) -> None:
         if not QDesktopServices.openUrl(QUrl(url)):

@@ -11,6 +11,8 @@ from pathlib import Path
 from decks import Preview, save_copy
 from decks.sources import identity
 from music.settings import _game_running
+from studio.context import GameOpenError
+from studio.pages.decks_dialogs import GAME_CHECK_DETAIL, GAME_OPEN_DETAIL
 from tournament_decks import MAX_YDK
 
 
@@ -22,8 +24,12 @@ class Receipt:
 
 
 def require_closed(game: Path) -> None:
-    if _game_running(game):
-        raise ValueError("Close this copy of EDOPro, then choose Retry.")
+    try:
+        opened = _game_running(game)
+    except OSError as exc:
+        raise GameOpenError(GAME_CHECK_DETAIL) from exc
+    if opened:
+        raise GameOpenError(GAME_OPEN_DETAIL)
 
 
 def publish(game: Path, name: str, reviewed: Preview) -> Receipt:

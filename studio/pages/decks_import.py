@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from studio.pages.decks_dialogs import confirm_deck_change
 from studio.pages.decks_flow import (
     GameOpen,
     ImportBatch,
@@ -35,6 +36,8 @@ class DeckImports:
         self.removed: set[Path] = set()
         self.undo_notice = ""
         self.retry_action: Callable[[], None] | None = None
+        self.blocked_retry: Callable[[], None] | None = None
+        self.blocked_from_receipt = False
         self.handoff_available = False
 
         host.browser.recent.clicked.connect(self.open_receipt)
@@ -45,22 +48,20 @@ class DeckImports:
         host.results.retry.clicked.connect(self._retry)
         host.results.artwork.clicked.connect(self._sync_artwork)
         host.results.open_saved.clicked.connect(self._open_saved)
+        host.blocked.block.retry.clicked.connect(self._retry_block)
 
     def reset(self) -> None:
         self.receipt = self.batch = None
         self.retry_action = None
+        self.blocked_retry = None
         self.handoff_available = False
         self._reset_undo()
 
     def start_import(self) -> None:
         if self.job or self.host.ctx.busy or not self.host.ctx.installation.path:
             return
-        game = Path(self.host.ctx.installation.path)
-        goat = self.host.goat_available and self.host.browser.goat.isChecked()
-        batch = self.host.selection.capture(game, goat)
+        batch = self.host.selected_batch()
         if batch is not None:
-            self.batch = batch
-            self._reset_undo()
             self._run_import(batch)
 
     def _run_import(self, batch: ImportBatch, resume: ImportReceipt | None = None) -> None:
@@ -75,7 +76,9 @@ class DeckImports:
                 return resume_import(resume, batch, library, worker.cancel, worker.progress)
             return import_decks(batch, library, worker.cancel, worker.progress)
 
-        job = self._mutate(work, self._import_done, self._import_error)
+        job = self._mutate(
+            work, lambda receipt: self._import_done(batch, receipt), self._import_error
+        )
         job.progress.connect(self._import_progress)
 
     def _mutate(self, work: Work, done: Callable, failed: Callable[[Exception], None]) -> Job:
@@ -106,7 +109,12 @@ class DeckImports:
             block.cancel.setEnabled(False)
             block.detail.setText("Stopping before the next save. Decks already saved will stay.")
 
-    def _import_done(self, receipt: ImportReceipt) -> None:
+    def _import_done(self, batch: ImportBatch, receipt: ImportReceipt) -> None:
+        if receipt.game_open and not receipt.paths:
+            self._block(receipt.blocked, lambda: self._run_import(batch, receipt))
+            return
+        self.batch = batch
+        self._reset_undo()
         self.receipt = receipt
         self.handoff_available = bool(receipt.paths)
         self.undo_pending = receipt.created
@@ -116,7 +124,14 @@ class DeckImports:
                     (entry.saved.path, *entry.saved.kept)
                 )
         self.host._refresh_saved_rows()
+        if not receipt.skipped:
+            self.host.completed = batch
         self.host._update_actions()
+        if receipt.game_open:
+            self._block(
+                receipt.blocked, lambda: self._run_import(batch, receipt), from_receipt=True
+            )
+            return
         self.open_receipt()
 
     def _import_error(self, exc: Exception) -> None:
@@ -156,8 +171,28 @@ class DeckImports:
             self.retry_action = lambda: self._run_import(batch, receipt)
         if self.undo_notice:
             self.host.results.notice.show_message(self.undo_notice)
+        self.host.results.retry.setText("Retry skipped decks")
         self.host.results.retry.setVisible(self.retry_action is not None)
         self.host._show(self.host.results, self.host.results.back)
+
+    def _block(self, reason: str, retry: Callable[[], None], *, from_receipt: bool = False) -> None:
+        self.blocked_retry = retry
+        self.blocked_from_receipt = from_receipt
+        view = self.host.blocked
+        self.host._show(view, view.block.retry)
+        view.block.show_reason(reason)
+
+    def _retry_block(self) -> None:
+        if self.blocked_retry and not self.job and not self.host.ctx.busy:
+            retry, self.blocked_retry = self.blocked_retry, None
+            retry()
+
+    def leave_block(self) -> None:
+        self.blocked_retry = None
+        if self.blocked_from_receipt:
+            self.open_receipt()
+        else:
+            self.host._show(self.host.browser, self.host.browser.standings, back=True)
 
     def _remaining_paths(self) -> tuple[Path, ...]:
         return tuple(path for path in self.receipt.paths if path not in self.removed)
@@ -184,8 +219,9 @@ class DeckImports:
     def _confirm_undo(self) -> None:
         if self.job or self.host.ctx.busy or not self.undo_pending:
             return
-        if self.host.ctx.confirm(
-            "Undo this import?",
+        if confirm_deck_change(
+            self.host,
+            "Remove saved copies",
             "Remove unchanged decks created by this import? Earlier copies and decks you’ve edited will stay.",
         ):
             self._undo()
@@ -218,16 +254,21 @@ class DeckImports:
             if not paths:
                 del self.host.saved[deck_id]
         self.host._refresh_saved_rows()
+        if outcome.removed:
+            self.host.completed = None
+            self.host._update_actions()
         self.undo_notice = f"Removed {len(self.removed)} {'deck' if len(self.removed) == 1 else 'decks'} from this import."
         if outcome.kept:
             self.undo_notice += f" Kept {len(outcome.kept)} changed or moved copies."
         if outcome.blocked:
-            self.undo_notice += f" {outcome.blocked}"
+            self._block(outcome.blocked, self._undo, from_receipt=True)
+            return
         elif outcome.pending:
             self.undo_notice += " Some copies couldn’t be removed. Choose Retry to try again."
         self.open_receipt()
         if outcome.pending:
             self.retry_action = self._undo
+            self.host.results.retry.setText("Retry undo")
             self.host.results.retry.show()
             self.host.results.retry.setFocus()
 
@@ -263,12 +304,14 @@ class DeckImports:
             else "Couldn’t open the saved decks. Try again."
         )
         if isinstance(error, GameOpen):
-            self.retry_action = self._sync_artwork
-            self.host.results.retry.show()
-            self.host.results.retry.setFocus()
+            self._block(error.args[0], self._retry_artwork, from_receipt=True)
         elif isinstance(error, DeckError):
             self.handoff_available = False
             self.host.results.artwork.hide()
+
+    def _retry_artwork(self) -> None:
+        self.open_receipt()
+        self._sync_artwork()
 
     def _handoff(self, game: Path, paths: tuple[Path, ...]) -> None:
         self.host.results.artwork.setEnabled(True)

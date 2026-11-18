@@ -6,14 +6,13 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QItemSelection, QItemSelectionModel, QModelIndex, Qt
-from PySide6.QtGui import QResizeEvent
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, QModelIndex, QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListView,
     QListWidget,
     QListWidgetItem,
-    QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -40,15 +39,24 @@ class Collection(Screen):
         show_missing: Callable[[], None],
     ) -> None:
         super().__init__()
+        self.body.setContentsMargins(t.XXL, t.MD, t.XXL, t.MD)
+        self.body.setSpacing(t.SM)
         self.lib, self.open_deck = lib, open_deck
         self.marks = duplicates.marks
         self.folders = sorted({d.folder for d in lib.decks}, key=lambda p: p.as_posix().casefold())
         summary = f"{quantity(len(lib.decks), 'deck')}   ·   {quantity(len(self.folders), 'folder')}   ·   {quantity(len(lib.banlists), 'installed list')}"
         self.hero = DeckHero(summary)
         self.body.addWidget(self.hero)
-        panel = self.panel()
+        panel = self.panel(t.MD)
+        panel.body.setSpacing(t.SM)
         top = QHBoxLayout()
-        top.addWidget(label("Deck library", "heading"), 1)
+        self.summary = label("", "subheading")
+        top.addWidget(self.summary)
+        if lib.issues:
+            self.issue_btn = button("Scan details", self.show_issues, "quiet", "warning")
+            self.issue_btn.setToolTip(quantity(len(lib.issues), "scan warning"))
+            top.addWidget(self.issue_btn)
+        top.addStretch()
         self.check = button("Check format", check, symbol="check")
         self.compare = button("Compare", compare, symbol="deck")
         self.import_btn = button("Import code", import_code, "primary", "download")
@@ -71,8 +79,6 @@ class Collection(Screen):
         for w, stretch in ((self.mode, 2), (self.search, 5), (self.folder, 2), (self.sort, 2)):
             filters.addWidget(w, stretch)
         panel.body.addLayout(filters)
-        self.summary = label("", "goldKicker")
-        panel.body.addWidget(self.summary)
         self.rows = QListView()
         ActivateOnEnter(self.rows)
         self.rows.setAccessibleName("Deck library. Open a deck to see its cards.")
@@ -91,20 +97,27 @@ class Collection(Screen):
         self.rows.clicked.connect(self.open)
         self.rows.activated.connect(self.open)
         panel.body.addWidget(self.rows, 1)
-        self.empty = label("", "body", True)
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        panel.body.addWidget(self.empty, 1)
+        self.empty_view = QWidget()
+        empty_layout = QVBoxLayout(self.empty_view)
+        empty_layout.setContentsMargins(0, 0, 0, 0)
+        self.empty = label("No decks match", "subheading", True)
+        empty_layout.addWidget(self.empty)
+        self.clear_filters = button("Clear search and filters", self.reset_filters, "primary")
+        empty_layout.addWidget(self.clear_filters, 0, Qt.AlignmentFlag.AlignLeft)
+        empty_layout.addStretch()
+        panel.body.addWidget(self.empty_view, 1)
         footer = QHBoxLayout()
-        if lib.issues:
-            self.issue_btn = button("Scan details", self.show_issues, "quiet", "warning")
-            footer.addWidget(self.issue_btn)
-        elif lib.decks:
+        self.legend = QWidget()
+        legend_items = QHBoxLayout(self.legend)
+        legend_items.setContentsMargins(0, 0, 0, 0)
+        if lib.decks:
             for word, colour in (("Monster", t.GOLD), ("Spell", t.GREEN), ("Trap", t.RED)):
                 swatch = QWidget()
                 swatch.setFixedSize(t.MD, t.XS)
                 swatch.setStyleSheet(f"background: {colour};")
-                footer.addWidget(swatch)
-                footer.addWidget(label(word, "muted"))
+                legend_items.addWidget(swatch)
+                legend_items.addWidget(label(word, "muted"))
+        footer.addWidget(self.legend)
         footer.addStretch()
         self.duplicates = button("Duplicates", show_duplicates, "quiet", "deck")
         self.duplicates.setEnabled(bool(lib.decks))
@@ -118,7 +131,6 @@ class Collection(Screen):
         self.warning = QListWidget()
         self.warning.setAccessibleName("Scan warnings")
         self.warning.setObjectName("installList")
-        self.warning.setMaximumHeight(t.TILE_LARGE)
         for issue in lib.issues:
             message = issue.replace(str(lib.game) + os.sep, "")
             item = QListWidgetItem(
@@ -127,7 +139,7 @@ class Collection(Screen):
             item.setToolTip(issue)
             self.warning.addItem(item)
         self.warning.hide()
-        panel.body.addWidget(self.warning)
+        panel.body.insertWidget(panel.body.indexOf(self.rows) + 1, self.warning, 1)
         self.search.textChanged.connect(self.filter)
         for box in (self.mode, self.sort, self.folder):
             box.currentIndexChanged.connect(self.filter)
@@ -139,9 +151,8 @@ class Collection(Screen):
             self.hero.description.setText(
                 "Import a shared deck or build one in EDOPro’s Deck Edit."
             )
-            self.hero.setMaximumHeight(t.HERO_MAX)
-            self.hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            self.body.setStretchFactor(self.hero, 2)
+            self.body.setAlignment(panel, Qt.AlignmentFlag.AlignTop)
+            panel.body.insertWidget(0, self.import_btn, 0, Qt.AlignmentFlag.AlignLeft)
             self.summary.hide()
             for control in (
                 self.mode,
@@ -150,20 +161,38 @@ class Collection(Screen):
                 self.sort,
                 self.check,
                 self.compare,
+                self.duplicates,
             ):
                 control.hide()
 
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        if self.lib.decks:
-            self.hero.setFixedHeight(
-                t.TILE_LARGE - t.LG
-                if self.width() < t.HERO_MAX + t.RAIL_WIDTH
-                else t.TILE_LARGE + t.XL
-            )
-
     def show_issues(self) -> None:
-        self.warning.setVisible(self.warning.isHidden())
+        showing = self.warning.isHidden()
+        self.warning.setVisible(showing)
+        self.issue_btn.setText("Back to decks" if showing else "Scan details")
+        self.show_results()
+        (self.warning if showing else self.search).setFocus()
+
+    def reset_filters(self) -> None:
+        with QSignalBlocker(self.search), QSignalBlocker(self.mode), QSignalBlocker(self.folder):
+            self.mode.setCurrentIndex(0)
+            self.folder.setCurrentIndex(0)
+            self.search.clear()
+        self.filter()
+        self.search.setFocus()
+
+    def show_results(self) -> None:
+        showing_decks = self.warning.isHidden()
+        rows = bool(self.model.rows)
+        has_matches = showing_decks and rows
+        no_matches = showing_decks and not rows and bool(self.lib.decks)
+        self.rows.setVisible(has_matches)
+        self.empty_view.setVisible(no_matches)
+        self.legend.setVisible(has_matches)
+        role = "secondary" if no_matches else "primary"
+        if self.import_btn.property("role") != role:
+            self.import_btn.setProperty("role", role)
+            self.import_btn.style().unpolish(self.import_btn)
+            self.import_btn.style().polish(self.import_btn)
 
     def first_result(self) -> None:
         if self.model.rows:
@@ -202,18 +231,8 @@ class Collection(Screen):
             self.lib, self.search.text(), by_card, folder, self.sort.currentIndex(), self.marks
         )
         self.model.replace(rows)
-        self.summary.setText(
-            f"{quantity(len(rows), 'deck').upper()}   /   "
-            + (
-                "MATCHING COPIES BY SECTION"
-                if by_card and self.search.text().strip()
-                else "MAIN, EXTRA AND SIDE"
-            )
-        )
-        self.rows.setVisible(bool(rows))
-        self.empty.setVisible(not rows)
-        self.empty.setText(
-            "No decks match. Try another name or folder."
-            if self.lib.decks
-            else "Your deck folder is empty. Import a sharing code here, or save your first deck in EDOPro’s Deck Edit."
-        )
+        self.summary.setText(quantity(len(rows), "deck"))
+        counts = "Matching copies by section" if by_card and self.search.text().strip() else ""
+        self.summary.setToolTip(counts)
+        self.rows.setAccessibleDescription(counts)
+        self.show_results()

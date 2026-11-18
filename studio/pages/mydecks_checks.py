@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QSizePolicy,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
@@ -34,9 +33,9 @@ from studio.pages.mydecks_logic import (
     list_names,
     quantity,
 )
-from studio.pages.mydecks_widgets import Contents, Screen, choice
+from studio.pages.mydecks_widgets import Contents, Screen, button, choice
 from studio.tasks import Job, TaskRunner, WorkerContext
-from studio.widgets import ActivateOnEnter, Hero, SectionHeader, glyph, label
+from studio.widgets import ActivateOnEnter, SectionHeader, glyph, label
 
 STATUS = {
     "legal": ("check", t.GREEN),
@@ -119,6 +118,7 @@ class FormatCheck(Screen):
         open_findings: Callable,
         deck: SavedDeck | None,
         selected: int = 0,
+        refresh: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(deck.name if deck else "Check a format", back)
         self.lib, self.deck = lib, deck
@@ -127,15 +127,20 @@ class FormatCheck(Screen):
         self.job: Job | None = None
         self.verdicts: list[Verdict] = []
         if not lib.banlists:
-            hero = Hero(
-                "Forbidden lists",
+            self.summary = label(
                 "No forbidden lists installed",
-                "Open EDOPro to update its lists, then refresh your deck library.",
-                "decks",
+                "subheading",
+                True,
             )
-            hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            self.summary = hero.headline
-            self.body.addWidget(hero, 1)
+            self.body.addWidget(self.summary)
+            self.body.addWidget(
+                label("Open EDOPro to update its lists, then refresh My decks.", "body", True)
+            )
+            if refresh:
+                self.body.addWidget(
+                    button("Refresh", refresh, "primary"), 0, Qt.AlignmentFlag.AlignLeft
+                )
+            self.body.addStretch()
             return
         if deck is None:
             self.body.addWidget(
