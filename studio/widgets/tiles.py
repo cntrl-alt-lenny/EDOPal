@@ -18,9 +18,10 @@ from studio.tasks import Job, TaskRunner, WorkerContext
 class Tile:
     title: str
     path: Path
+    # Order matters: pages pass the description positionally.
+    description: str = ""
     render: Callable[[WorkerContext], QImage] | None = None
     tooltip: str | None = None
-    description: str = ""
 
 
 class _Tiles(QAbstractListModel):

@@ -224,8 +224,8 @@ class Gallery(QWidget):
                 Tile(
                     v.name,
                     Path(v.key),
-                    partial(self.store.thumbnail, v, self.game, self.scale),
-                    f"{v.name} · {v.caption}",
+                    render=partial(self.store.thumbnail, v, self.game, self.scale),
+                    tooltip=f"{v.name} · {v.caption}",
                 )
                 for v in visible
             ]
