@@ -1,0 +1,291 @@
+{
+  "id": 88769,
+  "display": true,
+  "ydk": "created by...\n#main\n37781520\n21954587\n22446869\n22446869\n22446869\n74311226\n37104630\n706925\n706925\n706925\n58471134\n58471134\n58471134\n22076135\n23899727\n23899727\n23899727\n69293721\n4904812\n4904812\n26400609\n13959634\n68505803\n68505803\n1475311\n27243130\n27243130\n54447022\n54447022\n54447022\n37520316\n53129443\n60202749\n60202749\n60202749\n29401950\n53582587\n78474168\n78474168\n78474168\n#extra\n65749035\n73580471\n8561192\n48739166\n21044178\n46772449\n34086406\n440556\n59170782\n95992081\n15914410\n75367227\n74371660\n22110647\n80117527\n!side\n24508238\n24508238\n24508238\n23434538\n23434538\n23434538\n44330098\n5318639\n5318639\n5318639\n50323155\n50323155\n11593137\n11593137\n1224927\n",
+  "main": [
+    {
+      "artworkId": "68505803",
+      "name": "Genex Controller"
+    },
+    {
+      "artworkId": "68505803",
+      "name": "Genex Controller"
+    },
+    {
+      "artworkId": "74311226",
+      "name": "Atlantean Dragoons"
+    },
+    {
+      "artworkId": "37104630",
+      "name": "Atlantean Heavy Infantry"
+    },
+    {
+      "artworkId": "706925",
+      "name": "Atlantean Marksman"
+    },
+    {
+      "artworkId": "706925",
+      "name": "Atlantean Marksman"
+    },
+    {
+      "artworkId": "706925",
+      "name": "Atlantean Marksman"
+    },
+    {
+      "artworkId": "4904812",
+      "name": "Genex Undine"
+    },
+    {
+      "artworkId": "4904812",
+      "name": "Genex Undine"
+    },
+    {
+      "artworkId": "69293721",
+      "name": "Mermail Abyssgunde"
+    },
+    {
+      "artworkId": "37781520",
+      "name": "Mermail Abyssleed"
+    },
+    {
+      "artworkId": "23899727",
+      "name": "Mermail Abysslinde"
+    },
+    {
+      "artworkId": "23899727",
+      "name": "Mermail Abysslinde"
+    },
+    {
+      "artworkId": "23899727",
+      "name": "Mermail Abysslinde"
+    },
+    {
+      "artworkId": "21954587",
+      "name": "Mermail Abyssmegalo"
+    },
+    {
+      "artworkId": "58471134",
+      "name": "Mermail Abysspike"
+    },
+    {
+      "artworkId": "58471134",
+      "name": "Mermail Abysspike"
+    },
+    {
+      "artworkId": "58471134",
+      "name": "Mermail Abysspike"
+    },
+    {
+      "artworkId": "22446869",
+      "name": "Mermail Abyssteus"
+    },
+    {
+      "artworkId": "22446869",
+      "name": "Mermail Abyssteus"
+    },
+    {
+      "artworkId": "22446869",
+      "name": "Mermail Abyssteus"
+    },
+    {
+      "artworkId": "22076135",
+      "name": "Mermail Abyssturge"
+    },
+    {
+      "artworkId": "13959634",
+      "name": "Moulinglacia the Elemental Lord"
+    },
+    {
+      "artworkId": "26400609",
+      "name": "Tidal, Dragon Ruler of Waterfalls"
+    },
+    {
+      "artworkId": "1475311",
+      "name": "Allure of Darkness"
+    },
+    {
+      "artworkId": "53129443",
+      "name": "Dark Hole"
+    },
+    {
+      "artworkId": "27243130",
+      "name": "Forbidden Lance"
+    },
+    {
+      "artworkId": "27243130",
+      "name": "Forbidden Lance"
+    },
+    {
+      "artworkId": "37520316",
+      "name": "Mind Control"
+    },
+    {
+      "artworkId": "54447022",
+      "name": "Soul Charge"
+    },
+    {
+      "artworkId": "54447022",
+      "name": "Soul Charge"
+    },
+    {
+      "artworkId": "54447022",
+      "name": "Soul Charge"
+    },
+    {
+      "artworkId": "60202749",
+      "name": "Abyss-sphere"
+    },
+    {
+      "artworkId": "60202749",
+      "name": "Abyss-sphere"
+    },
+    {
+      "artworkId": "60202749",
+      "name": "Abyss-sphere"
+    },
+    {
+      "artworkId": "29401950",
+      "name": "Bottomless Trap Hole"
+    },
+    {
+      "artworkId": "78474168",
+      "name": "Breakthrough Skill"
+    },
+    {
+      "artworkId": "78474168",
+      "name": "Breakthrough Skill"
+    },
+    {
+      "artworkId": "78474168",
+      "name": "Breakthrough Skill"
+    },
+    {
+      "artworkId": "53582587",
+      "name": "Torrential Tribute"
+    }
+  ],
+  "extra": [
+    {
+      "artworkId": "73580471",
+      "name": "Black Rose Dragon"
+    },
+    {
+      "artworkId": "65749035",
+      "name": "Gungnir, Dragon of the Ice Barrier"
+    },
+    {
+      "artworkId": "8561192",
+      "name": "Leo, the Keeper of the Sacred Tree"
+    },
+    {
+      "artworkId": "21044178",
+      "name": "Abyss Dweller"
+    },
+    {
+      "artworkId": "440556",
+      "name": "Bahamut Shark"
+    },
+    {
+      "artworkId": "46772449",
+      "name": "Evilswarm Exciton Knight"
+    },
+    {
+      "artworkId": "75367227",
+      "name": "Ghostrick Alucard"
+    },
+    {
+      "artworkId": "34086406",
+      "name": "Lavalval Chain"
+    },
+    {
+      "artworkId": "95992081",
+      "name": "Leviair the Sea Dragon"
+    },
+    {
+      "artworkId": "22110647",
+      "name": "Mecha Phantom Beast Dracossack"
+    },
+    {
+      "artworkId": "15914410",
+      "name": "Mechquipped Angineer"
+    },
+    {
+      "artworkId": "74371660",
+      "name": "Mermail Abyssgaios"
+    },
+    {
+      "artworkId": "59170782",
+      "name": "Mermail Abysstrite"
+    },
+    {
+      "artworkId": "48739166",
+      "name": "Number 101: Silent Honor ARK"
+    },
+    {
+      "artworkId": "80117527",
+      "name": "Number 11: Big Eye"
+    }
+  ],
+  "side": [
+    {
+      "artworkId": "24508238",
+      "name": "D.D. Crow"
+    },
+    {
+      "artworkId": "24508238",
+      "name": "D.D. Crow"
+    },
+    {
+      "artworkId": "24508238",
+      "name": "D.D. Crow"
+    },
+    {
+      "artworkId": "44330098",
+      "name": "Gorz the Emissary of Darkness"
+    },
+    {
+      "artworkId": "23434538",
+      "name": "Maxx \"C\""
+    },
+    {
+      "artworkId": "23434538",
+      "name": "Maxx \"C\""
+    },
+    {
+      "artworkId": "23434538",
+      "name": "Maxx \"C\""
+    },
+    {
+      "artworkId": "5318639",
+      "name": "Mystical Space Typhoon"
+    },
+    {
+      "artworkId": "5318639",
+      "name": "Mystical Space Typhoon"
+    },
+    {
+      "artworkId": "5318639",
+      "name": "Mystical Space Typhoon"
+    },
+    {
+      "artworkId": "50323155",
+      "name": "Black Horn of Heaven"
+    },
+    {
+      "artworkId": "50323155",
+      "name": "Black Horn of Heaven"
+    },
+    {
+      "artworkId": "11593137",
+      "name": "Chaos Trap Hole"
+    },
+    {
+      "artworkId": "11593137",
+      "name": "Chaos Trap Hole"
+    },
+    {
+      "artworkId": "1224927",
+      "name": "Malevolent Catastrophe"
+    }
+  ]
+}

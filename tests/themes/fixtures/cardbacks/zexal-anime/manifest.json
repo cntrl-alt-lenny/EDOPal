@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "id": "cardback-zexal-anime",
+  "kind": "cardback",
+  "name": "ZEXAL",
+  "version": "1.0.0",
+  "label": "Yu-Gi-Oh! ZEXAL anime",
+  "era": "2011",
+  "group": "anime",
+  "image": "back.png",
+  "credits": [
+    {
+      "what": "Offline test image",
+      "source": "EDOPal card back study / ZEXAL anime",
+      "url": "_reference/build/cardbacks/screen/Back-Anime-ZX-2.png"
+    }
+  ],
+  "files": {
+    "back.png": "dd4f79eea9706c6d500ed14babec394644222a06a94355a885622ac1d13cf3d4"
+  }
+}

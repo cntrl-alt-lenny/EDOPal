@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "kind": "theme",
+  "id": "theme-nebula",
+  "name": "Nebula",
+  "version": "1.0.0",
+  "tested_edopro": "41.0.2",
+  "skin_dir": "skin",
+  "accent": "#a293e1",
+  "tagline": "Violet clouds and starlight",
+  "previews": {
+    "menu": "previews/menu.webp",
+    "deck": "previews/deck.webp",
+    "duel": "previews/duel.webp",
+    "tile": "previews/tile.webp"
+  },
+  "default_cardbacks": {
+    "you": "cardback-vortex-classic",
+    "opponent": "cardback-ocg-1998"
+  },
+  "credits": [
+    {
+      "what": "Offline test previews",
+      "source": "EDOPal skin lab, round 4",
+      "url": "_reference/skin-lab/gallery/r4/nebula-menu.jpg"
+    }
+  ],
+  "files": {
+    "previews/deck.webp": "2ba9413a400a7bfd31816b9a24c673ef5ca1d16cd67c4ef30f1a7750adfea71d",
+    "previews/duel.webp": "f008e841fb532233e129f003e2fab6cf7d58c130999e575fcd6da32061afad3e",
+    "previews/menu.webp": "bf47f70575749ed5da5be1eb71ed3f9e31c979054a1b807fd17228de6b6dbc1a",
+    "previews/tile.webp": "b16c1db92b38acbcfaab4d60b5adc6cf0be9163f744eb2e12c80028acac7bd5f",
+    "skin/skin.xml": "81e54134eea36d56384289a837e3e25db0ddabedb923e91eac4856ba154cb308",
+    "skin/textures/bg_menu.png": "05671a22cf3947510e57e4206d905b0e8004dd4855ab4c1984c2bd87eedc9dc1"
+  }
+}

@@ -1,0 +1,74 @@
+[
+  {
+    "id": 8,
+    "name": "Goat",
+    "date": "2005-08-20",
+    "banlist": "April 2005",
+    "category": "TCG",
+    "eventName": "SJC Indianapolis - August 2005",
+    "isPopular": true
+  },
+  {
+    "id": 20,
+    "name": "Edison",
+    "date": "2010-04-24",
+    "banlist": "March 2010",
+    "category": "TCG",
+    "eventName": "SJC Edison - April 2010",
+    "isPopular": true
+  },
+  {
+    "id": 24,
+    "name": "Tengu",
+    "date": "2011-09-17",
+    "banlist": "September 2011",
+    "category": "TCG",
+    "eventName": "YCS Toronto - September 2011",
+    "isPopular": true
+  },
+  {
+    "id": 27,
+    "name": "Wind-Up",
+    "date": "2012-10-21",
+    "banlist": "September 2012",
+    "category": "TCG",
+    "eventName": "YCS Providence - October 2012",
+    "isPopular": true
+  },
+  {
+    "id": 32,
+    "name": "HAT",
+    "date": "2014-07-12",
+    "banlist": "April 2014",
+    "category": "TCG",
+    "eventName": "North America WCQ 2014",
+    "isPopular": true
+  },
+  {
+    "id": 6,
+    "name": "Chaos",
+    "date": "2004-06-26",
+    "banlist": "April 2004",
+    "category": "TCG",
+    "eventName": "U.S. National Championship - June 2004",
+    "isPopular": false
+  },
+  {
+    "id": 13,
+    "name": "Trooper",
+    "date": "2007-08-18",
+    "banlist": "June 2007",
+    "category": "TCG",
+    "eventName": "SJC Indianapolis - August 2007",
+    "isPopular": false
+  },
+  {
+    "id": 18,
+    "name": "Cat",
+    "date": "2009-07-26",
+    "banlist": "March 2009",
+    "category": "TCG",
+    "eventName": "SJC Indianapolis - August 2009",
+    "isPopular": false
+  }
+]

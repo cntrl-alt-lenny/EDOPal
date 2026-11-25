@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "kind": "theme",
+  "id": "theme-moon",
+  "name": "Moon",
+  "version": "1.0.0",
+  "tested_edopro": "41.0.2",
+  "skin_dir": "skin",
+  "accent": "#b5c2d0",
+  "tagline": "Silver light on charcoal",
+  "previews": {
+    "menu": "previews/menu.webp",
+    "deck": "previews/deck.webp",
+    "duel": "previews/duel.webp",
+    "tile": "previews/tile.webp"
+  },
+  "default_cardbacks": {
+    "you": "cardback-vortex-classic",
+    "opponent": "cardback-ocg-1998"
+  },
+  "credits": [
+    {
+      "what": "Offline test previews",
+      "source": "EDOPal skin lab, round 4",
+      "url": "_reference/skin-lab/gallery/r4/moon-menu.jpg"
+    }
+  ],
+  "files": {
+    "previews/deck.webp": "2c1865d9793201d3ddb47893a0f02a72655e75c376524bebc5b858fe6466ad09",
+    "previews/duel.webp": "11e73815e439405dcd245090cd88f9ec333fda4112a93f557d67051ba5a41a2c",
+    "previews/menu.webp": "8098a856962db68f0c37b32ab3649ae90235369b20cd9823b889d4f6f445dc1b",
+    "previews/tile.webp": "db455a2b26a091f637e4d2071dff150daf402a1b31082f23117ab77e772638af",
+    "skin/skin.xml": "7b7e7e4e2018cb23d266a304e6ef1121d2bea536a21bdf82271227dc56e1fa30",
+    "skin/textures/bg_menu.png": "8a2f243945dc292e2e430d900ad051eb9601abe564934b6c51c81b886714e641"
+  }
+}

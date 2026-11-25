@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "kind": "cardback",
+  "id": "cardback-vortex-classic",
+  "name": "Classic Vortex",
+  "version": "1.0.0",
+  "image": "back.png",
+  "credits": [
+    {
+      "what": "Offline test image",
+      "source": "EDOPal card back reference study",
+      "url": "_reference/reports/cardbacks/vortex-clean.png"
+    }
+  ],
+  "label": "Yu-Gi-Oh! TCG",
+  "era": "2002",
+  "group": "tcg-ocg",
+  "default_for": "you",
+  "files": {
+    "back.png": "e7ad9993181ccc336977b4c7e9083ad620618531b00ef469a1ff0480319f76b6"
+  }
+}

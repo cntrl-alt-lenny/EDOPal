@@ -1,0 +1,39 @@
+# Python 3.12.10 release and test constraints. Install the project with pip -c.
+# Runtime versions match the wheels used to verify the Linux onedir and downloads.
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.5
+aiosignal==1.4.0
+attrs==26.1.0
+certifi==2026.11.20
+cffi==2.1.1
+frozenlist==1.8.0
+idna==3.20
+miniaudio==1.73
+multidict==7.2.1
+pillow==13.0.0
+propcache==0.5.4
+pycparser==3.12
+PySide6-Essentials==6.11.3
+shiboken6==6.11.3
+typing-extensions==4.16.0
+yarl==1.25.1
+
+# Wheel, freezer and macOS universal2 build tooling.
+altgraph==0.17.5
+delocate==0.13.0 ; sys_platform == "darwin"
+macholib==1.16.4 ; sys_platform == "darwin"
+packaging==26.4
+pefile==2024.8.26 ; sys_platform == "win32"
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.4
+pywin32-ctypes==0.2.3 ; sys_platform == "win32"
+setuptools==80.9.0
+
+# Test tools used by the release gate.
+colorama==0.4.6 ; sys_platform == "win32"
+iniconfig==2.3.1
+pluggy==1.7.0
+pygments==2.21.0
+pytest==9.2.0
+pytest-qt==4.5.0
+ruff==0.15.15

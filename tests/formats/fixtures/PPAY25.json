@@ -1,0 +1,28 @@
+{
+  "topDecks": [
+    {
+      "id": 88769,
+      "deckTypeName": "Mermail",
+      "builderName": "goodmorning",
+      "placement": 1
+    },
+    {
+      "id": 88767,
+      "deckTypeName": "Sylvan",
+      "builderName": "zanzisco",
+      "placement": 2
+    },
+    {
+      "id": 88765,
+      "deckTypeName": "Rock Spirit",
+      "builderName": "Aureum",
+      "placement": 3
+    },
+    {
+      "id": 88764,
+      "deckTypeName": "Masked Hero",
+      "builderName": "The Sun",
+      "placement": 4
+    }
+  ]
+}

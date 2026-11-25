@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency: release-${{ github.ref }}
+
+jobs:
+  tests:
+    uses: ./.github/workflows/test.yml
+
+  build:
+    name: Build and launch (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2025, macos-15]
+    outputs:
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: runner.os != 'macOS'
+        with:
+          python-version: '3.12.10'
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            packaging/requirements-py312.lock
+      - name: Set up universal2 Python 3.12.10
+        if: runner.os == 'macOS'
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 -o python.pkg https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg
+          echo '8373e58da4ea146b3eb1c1f9834f19a319440b6b679b06050b1f9ee3237aa8e4  python.pkg' | shasum -a 256 -c
+          sudo installer -pkg python.pkg -target /
+          /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -m venv "$RUNNER_TEMP/build-venv"
+          echo "$RUNNER_TEMP/build-venv/bin" >> "$GITHUB_PATH"
+      - name: Install Linux native build and display libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y squashfs-tools xvfb xauth weston libegl1 libgl1 libgl1-mesa-dri \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+            libxcb-shape0 libxcb-glx0 libxcb-randr0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
+            libwayland-cursor0 libwayland-egl1 libfontconfig1 fonts-dejavu-core
+      - name: Install the app and freezer
+        run: |
+          python -m pip install -c packaging/requirements-py312.lock setuptools
+          python -m pip install --no-build-isolation -c packaging/requirements-py312.lock . pyinstaller
+      - name: Match tag to app version
+        id: version
+        shell: python
+        run: |
+          import os
+          from edopal import __version__
+          from packaging.version import Version
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = Version(__version__)
+          if Version(tag.removeprefix("v")) != version:
+              raise SystemExit(f"Tag {tag} must match edopal.__version__ (v{__version__})")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"prerelease={str(version.is_prerelease).lower()}", file=output)
+      - name: Prepare universal2 wheels
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip install -c packaging/requirements-py312.lock delocate
+          python tools/macos_universal.py
+      - name: Freeze the onedir application
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m PyInstaller --noconfirm packaging/edopal.spec
+      - name: Enable Intel launch tests on Apple silicon
+        if: runner.os == 'macOS'
+        run: |
+          if ! arch -x86_64 /usr/bin/true; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+      - run: python tools/release.py package
+      - name: Launch the extracted application on Windows or macOS
+        if: runner.os != 'Linux'
+        env:
+          QT_QPA_PLATFORM: ${{ runner.os == 'Windows' && 'windows' || 'cocoa' }}
+        run: python tools/release.py verify
+      - name: Launch the extracted Linux downloads on X11
+        if: runner.os == 'Linux'
+        run: xvfb-run -a env QT_QPA_PLATFORM=xcb python tools/release.py verify
+      - name: Launch the extracted Linux downloads on Wayland
+        if: runner.os == 'Linux'
+        run: |
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          export WAYLAND_DISPLAY=edopal-test
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 \
+            --no-config --log="$RUNNER_TEMP/weston.log" &
+          weston_pid=$!
+          trap 'kill "$weston_pid" 2>/dev/null || true' EXIT
+          for _ in {1..100}; do
+            [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] && break
+            sleep 0.1
+          done
+          [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] || { cat "$RUNNER_TEMP/weston.log"; exit 1; }
+          env -u DISPLAY QT_QPA_PLATFORM=wayland python tools/release.py verify
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ runner.os }}
+          path: dist/release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [tests, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist/release
+      - name: Verify the four assets and write SHA-256 checksums
+        run: python3 tools/release.py checksums
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
+        with:
+          name: EDOPal ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ needs.build.outputs.prerelease }}
+          fail_on_unmatched_files: true
+          files: dist/release/*

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Skin>
+  <Properties><Name data="Abyss"/></Properties>
+  <Global guialpha="255">
+    <EGDC_WINDOW a="255" r="20" g="27" b="36"/>
+    <EGDC_HIGH_LIGHT a="255" r="127" g="180" b="216"/>
+    <EGDC_ICON_HIGH_LIGHT a="255" r="127" g="180" b="216"/>
+    <CheckBoxColor a="255" r="127" g="180" b="216"/>
+  </Global>
+  <Custom>
+    <DECK_WINDOW_HOVERED_CARD_OUTLINE a="255" r="127" g="180" b="216"/>
+    <DUELFIELD_SELECTABLE_CARD_OUTLINE a="255" r="127" g="180" b="216"/>
+  </Custom>
+</Skin>

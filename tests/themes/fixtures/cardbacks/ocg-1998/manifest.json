@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "kind": "cardback",
+  "id": "cardback-ocg-1998",
+  "name": "OCG 1998",
+  "version": "1.0.0",
+  "image": "back.png",
+  "credits": [
+    {
+      "what": "Offline test image",
+      "source": "EDOPal card back reference study",
+      "url": "_reference/reports/cardbacks/ocg-1998-clean.png"
+    }
+  ],
+  "label": "Yu-Gi-Oh! OCG",
+  "era": "1998",
+  "group": "tcg-ocg",
+  "default_for": "opponent",
+  "files": {
+    "back.png": "05552969e8f03edca11d7f8efcb04259807b06af10fe6af059747ad50fda7743"
+  }
+}

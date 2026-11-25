@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "kind": "cardback",
+  "id": "cardback-vortex-anime",
+  "name": "Anime Vortex",
+  "version": "1.0.0",
+  "image": "back.png",
+  "credits": [
+    {
+      "what": "Offline test image",
+      "source": "EDOPal card back reference study",
+      "url": "_reference/reports/cardbacks/vortex-anime.png"
+    }
+  ],
+  "label": "Yu-Gi-Oh! Duel Monsters anime",
+  "era": "2000",
+  "group": "anime",
+  "files": {
+    "back.png": "acf0b02e95f751fa2de18e9abd73e0af4c3b7e01cb47f1b9b6c6350d02280903"
+  }
+}

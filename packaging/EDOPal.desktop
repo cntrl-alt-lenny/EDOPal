@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=EDOPal
+Comment=HD cards, themes, music and formats for EDOPro
+Exec=EDOPal
+Icon=edopal
+Categories=Game;CardGame;
+Terminal=false

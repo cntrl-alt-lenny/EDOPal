@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "generated": "2026-11-25T00:00:00Z",
+  "packs": [
+    {
+      "id": "theme-abyss",
+      "kind": "theme",
+      "name": "Abyss",
+      "version": "1.0.0",
+      "size": 127204,
+      "sha256": "b375a5987c0c9fb07f81e08d69dc38165a71c0fed240c2151ddf20193c7e5299",
+      "url": "themes/abyss",
+      "thumbnail": "themes/abyss/previews/tile.webp",
+      "meta": {
+        "accent": "#7fb4d8",
+        "tagline": "Midnight ocean and seafoam",
+        "previews": [
+          "themes/abyss/previews/menu.webp",
+          "themes/abyss/previews/deck.webp",
+          "themes/abyss/previews/duel.webp"
+        ]
+      }
+    },
+    {
+      "id": "theme-nebula",
+      "kind": "theme",
+      "name": "Nebula",
+      "version": "1.0.0",
+      "size": 114249,
+      "sha256": "a91c09f20c6fd0540254cdc093c4ce03fce0f70fd5b36ef1b5a3b2b4c55f0917",
+      "url": "themes/nebula",
+      "thumbnail": "themes/nebula/previews/tile.webp",
+      "meta": {
+        "accent": "#a293e1",
+        "tagline": "Violet clouds and starlight",
+        "previews": [
+          "themes/nebula/previews/menu.webp",
+          "themes/nebula/previews/deck.webp",
+          "themes/nebula/previews/duel.webp"
+        ]
+      }
+    },
+    {
+      "id": "theme-moon",
+      "kind": "theme",
+      "name": "Moon",
+      "version": "1.0.0",
+      "size": 119183,
+      "sha256": "25a41dd743d2aaf398032ede7bf9d67298cf77d218d17da52c22ab878667ae6e",
+      "url": "themes/moon",
+      "thumbnail": "themes/moon/previews/tile.webp",
+      "meta": {
+        "accent": "#b5c2d0",
+        "tagline": "Silver light on charcoal",
+        "previews": [
+          "themes/moon/previews/menu.webp",
+          "themes/moon/previews/deck.webp",
+          "themes/moon/previews/duel.webp"
+        ]
+      }
+    },
+    {
+      "id": "cardback-vortex-classic",
+      "kind": "cardback",
+      "name": "Classic Vortex",
+      "version": "1.0.0",
+      "size": 32161,
+      "sha256": "5d8043d3a8596c89b5920071da35db935b8689f5b909872bc41d12a1fc24c408",
+      "url": "cardbacks/vortex-classic",
+      "thumbnail": "cardbacks/vortex-classic/back.png",
+      "meta": {
+        "label": "Yu-Gi-Oh! TCG",
+        "era": "2002",
+        "group": "tcg-ocg",
+        "default_for": "you"
+      }
+    },
+    {
+      "id": "cardback-ocg-1998",
+      "kind": "cardback",
+      "name": "OCG 1998",
+      "version": "1.0.0",
+      "size": 22713,
+      "sha256": "04276ac63d49d14ba8624d77550b51369f164e6d65e6bbe31e81bb5b9eb48f7f",
+      "url": "cardbacks/ocg-1998",
+      "thumbnail": "cardbacks/ocg-1998/back.png",
+      "meta": {
+        "label": "Yu-Gi-Oh! OCG",
+        "era": "1998",
+        "group": "tcg-ocg",
+        "default_for": "opponent"
+      }
+    },
+    {
+      "id": "cardback-vortex-anime",
+      "kind": "cardback",
+      "name": "Anime Vortex",
+      "version": "1.0.0",
+      "size": 21105,
+      "sha256": "f744d4c66192a38dd5dd9b1b0ccad5deae9bf40cc2d8d0fc78f2fd7510a78ba7",
+      "url": "cardbacks/vortex-anime",
+      "thumbnail": "cardbacks/vortex-anime/back.png",
+      "meta": {
+        "label": "Yu-Gi-Oh! Duel Monsters anime",
+        "era": "2000",
+        "group": "anime"
+      }
+    },
+    {
+      "id": "cardback-zexal-anime",
+      "kind": "cardback",
+      "name": "ZEXAL",
+      "version": "1.0.0",
+      "size": 24528,
+      "sha256": "f3258d3679ce6809614c1aff38657c979e77280de9756089869666e09a612cb9",
+      "url": "cardbacks/zexal-anime",
+      "thumbnail": "cardbacks/zexal-anime/back.png",
+      "meta": {
+        "label": "Yu-Gi-Oh! ZEXAL anime",
+        "era": "2011",
+        "group": "anime"
+      }
+    }
+  ]
+}

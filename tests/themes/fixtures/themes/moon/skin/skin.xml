@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Skin>
+  <Properties><Name data="Moon"/></Properties>
+  <Global guialpha="255">
+    <EGDC_WINDOW a="255" r="20" g="27" b="36"/>
+    <EGDC_HIGH_LIGHT a="255" r="181" g="194" b="208"/>
+    <EGDC_ICON_HIGH_LIGHT a="255" r="181" g="194" b="208"/>
+    <CheckBoxColor a="255" r="181" g="194" b="208"/>
+  </Global>
+  <Custom>
+    <DECK_WINDOW_HOVERED_CARD_OUTLINE a="255" r="181" g="194" b="208"/>
+    <DUELFIELD_SELECTABLE_CARD_OUTLINE a="255" r="181" g="194" b="208"/>
+  </Custom>
+</Skin>

@@ -1,27 +1,14 @@
-# Python artifacts
 __pycache__/
 *.py[cod]
-venv/
 .venv/
 build/
 dist/
-AppDir/
-*.spec
-
-# Mac artifacts
+.pytest_cache/
+.ruff_cache/
 .DS_Store
-
-# Generated output files (personal to each user's run)
-config.json
-manual_map.json
-failed_cards.json
-sync-report-*.txt
-Sync-Failed-*.txt
 *.part
-
-# EDOPro Game Files (IMPORTANT: Ignore these so they don't go to GitHub)
-pics/
-*.cdb
-*.ydk
-/expansions/
-EDOPro.exe
+# local-only reference material and the packs repo checkout
+/_reference/
+/packs/
+/shots/
+/logs/

@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "kind": "theme",
+  "id": "theme-abyss",
+  "name": "Abyss",
+  "version": "1.0.0",
+  "tested_edopro": "41.0.2",
+  "skin_dir": "skin",
+  "accent": "#7fb4d8",
+  "tagline": "Midnight ocean and seafoam",
+  "previews": {
+    "menu": "previews/menu.webp",
+    "deck": "previews/deck.webp",
+    "duel": "previews/duel.webp",
+    "tile": "previews/tile.webp"
+  },
+  "default_cardbacks": {
+    "you": "cardback-vortex-classic",
+    "opponent": "cardback-ocg-1998"
+  },
+  "credits": [
+    {
+      "what": "Offline test previews",
+      "source": "EDOPal skin lab, round 4",
+      "url": "_reference/skin-lab/gallery/r4/abyss-menu.jpg"
+    },
+    {
+      "what": "Inter test subsets",
+      "source": "Inter, SIL Open Font License",
+      "url": "https://rsms.me/inter/"
+    }
+  ],
+  "font": {
+    "text": "fonts/text.ttf",
+    "size": 12,
+    "num": "fonts/num.ttf"
+  },
+  "files": {
+    "fonts/Inter-OFL.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+    "fonts/num.ttf": "98423ae44c88e4ea759c15b193915dc234c18885e1a8410bad76e59c1064feaa",
+    "fonts/text.ttf": "da2e617309422e6cedbeb943cb3c648a14f25b465ea8b0d9d7fac808c06e942a",
+    "previews/deck.webp": "d572146759e09643f3293640f5ed496836966094ab39965c982111603d7cfe45",
+    "previews/duel.webp": "a1f6935e78be06b293cec4b65250d4b3d5177ed56d6ba4a27c178103610b04ec",
+    "previews/menu.webp": "2b1638cdbaf12f5a5f53e83606fefc54ee66980dbb9f7a3c9bc64dc72cd0b689",
+    "previews/tile.webp": "2bb10ab671d28793b3db4f3c26d50836075571da4a8ade9ead1d74aeaa06966e",
+    "skin/skin.xml": "e2655e086d04caac97ae6f699fa1a7f6d87bde8977783819e20bf029f7025e83",
+    "skin/textures/bg_menu.png": "8eed39dab40278b0971b1787edadb8da3638fa44de33402e7be77c52fe4a096d"
+  }
+}
