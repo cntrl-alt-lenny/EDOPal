@@ -87,7 +87,7 @@ def parse_events(obj: object) -> EventPage:
             events.append(
                 Event(code, name, _text(row.get("formatName")), _text(row.get("startedAt"))[:10], _positive(row.get("size")))
             )
-    return EventPage(tuple(events), len(obj) >= PAGE_SIZE)
+    return EventPage(tuple(sorted(events, key=lambda event: event.date, reverse=True)), len(obj) >= PAGE_SIZE)
 
 
 def parse_standings(obj: object) -> tuple[Deck, ...]:
@@ -145,6 +145,7 @@ def _thumbnail(data: bytes) -> bytes:
 class FormatLibrary:
     def __init__(self, cache_dir: Path):
         self._http = HttpCache(cache_dir)
+        self._images = HttpCache(cache_dir / "card-faces")
 
     @property
     def stale(self) -> bool:
@@ -184,6 +185,16 @@ class FormatLibrary:
     def thumbnail(self, deck: Deck) -> bytes:
         url = f"https://cdn.formatlibrary.com/images/decks/thumbnails/{deck.id}.png"
         return self._http.read(url, WEEK, 1024 * 1024, _thumbnail)
+
+    def card_face(self, code: int) -> bytes:
+        url = f"https://cdn.formatlibrary.com/images/cards/{code}.jpg"
+
+        def checked(data):
+            if not data.startswith(b"\xff\xd8"):
+                raise DeckError("Card image unavailable.")
+            return data
+
+        return self._images.read(url, WEEK, 2 * 1024 * 1024, checked)
 
     def forget_deck(self, deck: Deck) -> None:
         """Reload both representations after a publication changes between preview and save."""

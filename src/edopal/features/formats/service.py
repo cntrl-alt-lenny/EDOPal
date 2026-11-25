@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import os
+import tempfile
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import count
 from pathlib import Path
 from threading import Lock
@@ -30,10 +32,11 @@ class Standings:
 @dataclass(frozen=True)
 class Preview:
     detail: DeckPreview
-    thumbnail: bytes = b""
     changes: tuple[str, ...] = ()
     issues: tuple[str, ...] = ()
     stale: bool = False
+    limits: dict = field(default_factory=dict)
+    composition: tuple = ()
 
 
 def _filename_part(text: str) -> str:
@@ -102,27 +105,34 @@ class FormatsService:
     def preview(self, ctx, profile, install, deck):
         detail = self.client.preview(deck)
         stale = self.client.stale
+        status = profile.get("status", "historical")
+        card_data = ydk.read_cards(install.root) if install else ({}, [])
+        changes, issues = (), ()
         try:
-            thumbnail = self.client.thumbnail(deck)
-        except (ValueError, OSError):
-            thumbnail = b""
-        if not install or not detail.original or ctx.cancelled:
-            return Preview(detail, thumbnail, stale=stale)
-        try:
-            prepared = self._prepare(ctx, profile, install, detail.source or ydk.encode_ydk(detail.original), detail)
+            limits = self._limits(ctx, profile, install)
         except (ValueError, OSError, RuntimeError) as exc:
-            return Preview(detail, thumbnail, issues=(str(exc),), stale=stale)
-        return Preview(detail, thumbnail, prepared.changes, prepared.issues, stale)
+            limits, issues = {}, (str(exc),)
+        caps, counts = ydk.preview_metadata(detail, limits, card_data[0])
+        if install and detail.original and not issues and not ctx.cancelled:
+            source = detail.source or ydk.encode_ydk(detail.original)
+            prepared = ydk.prepare(
+                install, limits, source, detail, stock_tcg=status == "stock", sizes=profile["host"], card_data=card_data
+            )
+            changes, issues = prepared.changes, prepared.issues
+        return Preview(detail, changes, issues, stale, caps, counts)
+
+    def _limits(self, ctx, profile, install):
+        status = profile.get("status", "historical")
+        if status == "unsupported":
+            raise ValueError(profile["reason"])
+        if status == "stock":
+            return read_stock(install, profile).limits
+        return self.pack.whitelist(profile["id"], ctx).limits
 
     def _prepare(self, ctx, profile, install, source, detail):
         status = profile.get("status", "historical")
-        if status == "unsupported":
-            return ydk.PreparedDeck(source, (), (profile["reason"],))
         try:
-            if status == "stock":
-                limits = read_stock(install, profile).limits
-            else:
-                limits = self.pack.whitelist(profile["id"], ctx).limits
+            limits = self._limits(ctx, profile, install)
         except (ValueError, OSError, RuntimeError) as exc:
             return ydk.PreparedDeck(source, (), (str(exc),))
         return ydk.prepare(install, limits, source, detail, stock_tcg=status == "stock", sizes=profile["host"])
@@ -243,6 +253,75 @@ class FormatsService:
             self._remember(install, {rel: whitelist.data})
         return f"{row['name']} banlist installed. Restart EDOPro and choose {row['display']}."
 
+    def install_all(self, ctx, install, confirmed_closed=False):
+        self._check_target(ctx, install, confirmed_closed)
+        lists = self.pack.historical_lists(ctx)
+        writes, edited = {}, 0
+        with self._write_lock:
+            for entry in lists:
+                row = entry.profile
+                state = self.status(ctx, row, install)
+                if state in ("available", "update"):
+                    writes[self._list_name(row)] = entry.data
+                elif state == "edited":
+                    edited += 1
+            self._check_target(ctx, install, confirmed_closed)
+            if writes:
+                with self.core.storage.changeset(
+                    install, "formats", "Install All Banlists", confirmed_closed=confirmed_closed
+                ) as change:
+                    for entry in lists:
+                        rel = self._list_name(entry.profile)
+                        if rel in writes:
+                            if self.status(ctx, entry.profile, install) not in ("available", "update"):
+                                raise ValueError("A banlist changed during installation. Try Install All Banlists again.")
+                            change.write(rel, writes[rel])
+                for rel, data in writes.items():
+                    versions = self._managed_versions(install, rel)
+                    digest = hashlib.sha256(data).hexdigest()
+                    if digest not in versions:
+                        self.core.settings.set("formats", self._setting(install, rel), [*versions, digest])
+                self._remember(install, writes)
+        existing = len(lists) - len(writes) - edited
+        return f"Installed {len(writes)} banlists · {existing} already installed · {edited} personal edits kept."
+
+    def export(self, ctx, path, extension, deck, preview, install=None, confirmed_closed=False):
+        if extension == "txt":
+            lines = []
+            for title, section in zip(("Main Deck", "Extra Deck", "Side Deck"), preview.detail.sections, strict=True):
+                lines.extend([f"{title} ({sum(n for _, n in section)})", *(f"{n} × {name}" for name, n in section), ""])
+            data = "\n".join(lines).encode()
+        else:
+            data = preview.detail.source or self.client.download(deck)
+        path = Path(path).resolve()
+        if install is not None and path.is_relative_to(install.root.resolve()):
+            self._check_target(ctx, install, confirmed_closed)
+            rel = path.relative_to(install.root.resolve()).as_posix()
+            with self._write_lock:
+                self._check_target(ctx, install, confirmed_closed)
+                with self.core.storage.changeset(
+                    install, "formats", f"Export {deck.name}", confirmed_closed=confirmed_closed
+                ) as change:
+                    change.write(rel, data)
+                self._remember(install, {rel: data})
+        else:
+            selected = self.core.installs.current()
+            for parent in path.parents:
+                if (selected and parent == selected.root.resolve()) or (
+                    (parent / "config").is_dir()
+                    and (parent / "pics").is_dir()
+                    and ((parent / "cards.cdb").is_file() or (parent / "expansions/cards.cdb").is_file())
+                ):
+                    raise ValueError("Select this EDOPro folder before exporting into it.")
+            fd, filename = tempfile.mkstemp(dir=path.parent)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(data)
+                os.replace(filename, path)
+            finally:
+                Path(filename).unlink(missing_ok=True)
+        return f"Saved {path.name}."
+
     def save(self, ctx, profile, install, event: Event, deck: Deck, detail: Preview, confirmed_closed=False):
         self._check_target(ctx, install, confirmed_closed)
         preview_source = False
@@ -301,7 +380,8 @@ class FormatsService:
             last = self.core.settings.get("formats", self._setting(install, "last-write"), {})
             if isinstance(self.core.storage, DirectStorage) and last.get("id") == receipt.id:
                 for rel, digest in last["digests"].items():
-                    if _file_digest(_game_path(install, rel)) != digest:
+                    target = install.path(rel)
+                    if target.resolve() != target or _file_digest(target) != digest:
                         raise ValueError(f"{rel} changed since download or installation. Your file was kept.")
             undo = self.core.storage.undo_last
             if confirmed_closed and "confirmed_closed" in inspect.signature(undo).parameters:

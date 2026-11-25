@@ -21,8 +21,8 @@ def test_registry_sorts_and_substitutes_missing_features(monkeypatch):
 
     monkeypatch.setattr(app.importlib, "import_module", load)
     specs = app.load_features(None)
-    assert [s.id for s in specs] == ["hdcards", "formats", "themes", "music"]
-    assert [s.label for s in specs[-2:]] == ["Themes", "Music"]
+    assert [s.id for s in specs] == ["hdcards", "formats", "themes", "music", "sounds"]
+    assert [s.label for s in specs[-3:-1]] == ["Themes", "Music"]
 
 
 def test_registry_exposes_missing_feature_dependencies(monkeypatch):

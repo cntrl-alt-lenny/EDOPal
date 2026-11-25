@@ -21,6 +21,8 @@ _PREVIEWS = {
 
 
 def load_features(core):
+    from edopal.ui.sounds_page import sounds_spec
+
     specs = []
     for order, name in enumerate(FEATURES):
         package = f"edopal.features.{name}"
@@ -37,7 +39,7 @@ def load_features(core):
 
         label, summary = _PREVIEWS[name]
         specs.append(FeatureSpec(name, label, name, (order + 1) * 10, unavailable_page(label, summary), summary))
-    return sorted(specs, key=lambda s: s.order)
+    return sorted([*specs, sounds_spec()], key=lambda s: s.order)
 
 
 def build_window(core, start=None):
@@ -57,7 +59,6 @@ def main() -> int:
 
     from edopal.core.wiring import make_core
     from edopal.ui import theme
-    from edopal.ui.settings_page import check_on_startup
 
     args = sys.argv[:]
     gamescope = os.environ.get("GAMESCOPE_WAYLAND_DISPLAY")
@@ -87,7 +88,7 @@ def main() -> int:
             return int(window.grab().isNull())
         finally:
             window.close()
-    check_on_startup(core)
+    window.check_updates()
     return app.exec()
 
 

@@ -21,6 +21,7 @@ from edopal.core.install import Install, RunState
 from edopal.core.jobs import JobContext
 from edopal.core.storage import GameRunningError
 
+from . import library
 from .artwork import (
     CONNECTIONS_PER_HOST,
     ArtworkClient,
@@ -33,6 +34,7 @@ from .artwork import (
 )
 from .catalog import Catalog, deck_ids
 from .coverage import Asset, ChangedArtworkError, Coverage, coverage
+from .sources import MAPPED, RUSH_BASE, RUSH_ORR
 
 
 @dataclass
@@ -75,6 +77,7 @@ def _open_index(core, install):
             db.execute("BEGIN IMMEDIATE")
             if needs_migration():
                 db.execute("ALTER TABLE art ADD COLUMN recheck_after REAL NOT NULL DEFAULT 0")
+    library.create_tables(db)
     return db
 
 
@@ -99,7 +102,7 @@ class Item:
     prior: Record | None
 
 
-def _digest_ids(catalog, previous, ids, pins):
+def _digest_ids(catalog, previous, ids, pins, rush=False):
     """Which existing HD faces need a content match to decide their printing?"""
     required = set()
     for (cid, kind), records in previous.items():
@@ -111,7 +114,7 @@ def _digest_ids(catalog, previous, ids, pins):
             continue
         # An unrecognized HD face is user artwork. When every owned digest also
         # has a settled ordinary-print policy, all possibilities lead to a skip.
-        policy = repr((False, candidates(card, catalog, False, pins)))
+        policy = repr((False, candidates(card, catalog, False, pins, rush)))
         if any(record.policy != policy or record.fallback for record in records.values()):
             required.add((cid, kind))
     return required
@@ -128,7 +131,7 @@ def plan(catalog, art, ids, previous, original, pins):
     )
 
 
-def _plan_batch(catalog, art, ids, previous, original, pins, donors, digest_ids):
+def _plan_batch(catalog, art, ids, previous, original, pins, donors, digest_ids, rush=False):
     work, shadowed = [], 0
     now = time.time()
     for cid in sorted(ids):
@@ -145,12 +148,17 @@ def _plan_batch(catalog, art, ids, previous, original, pins, donors, digest_ids)
                 ordinary_hd = current and current.is_hd and cid not in pins and not historical
                 if ordinary_hd and (cid, kind) not in digest_ids:
                     continue
-                policy = repr((original and historical, candidates(card, catalog, original, pins)))
+                policy = repr((original and historical, candidates(card, catalog, original, pins, rush)))
             else:
                 donor = donors.get(cid)
                 local_donor = art.fields.get(donor)
                 policy = repr((donor, local_donor.digest if local_donor else None, card.type, card.rush))
             prior = known.get(current.digest) if known and current else None
+            if kind == "face" and current and current.is_hd:
+                if cid in MAPPED and not prior:
+                    continue  # A reviewed donor can fill a gap without replacing a local HD override.
+                if prior and prior.source.startswith((RUSH_BASE, RUSH_ORR)):
+                    continue  # Disabling the source leaves installed community HD intact.
             if kind == "face" and ordinary_hd and not prior:
                 continue
             if prior and prior.policy == policy and (not prior.fallback or prior.recheck_after > now):
@@ -207,7 +215,7 @@ def _stage(item: Item, incoming: ImageAsset, folder: Path, game: Install) -> tup
 
 def _publish(core, game, catalog, staged, records, result, confirmed_closed):
     if not staged:
-        return
+        return []
     if not catalog.stable():
         raise RuntimeError("The card databases changed during sync. Check the game folder and sync again.")
     ids = {cid for cid, _ in staged}
@@ -225,20 +233,22 @@ def _publish(core, game, catalog, staged, records, result, confirmed_closed):
             continue
         del staged[cid, kind], records[cid, kind]
     if not staged:
-        return
+        return []
     if core.installs.current() != game:
         result.cancelled = True
         records.clear()
-        return
+        return []
     state = core.installs.run_state()
     if state == RunState.RUNNING or (state == RunState.UNKNOWN and not confirmed_closed):
         raise GameRunningError("Close EDOPro before saving artwork.")
+    pairs = library.prepare_pairs(staged, records)
     with core.storage.changeset(game, "hdcards", "Sync HD cards", confirmed_closed=confirmed_closed) as changes:
         for pending in staged.values():
             changes.copy_in(pending.file, pending.target.as_posix())
             if pending.target != pending.png and pending.stamps[1] is not None:
                 changes.remove(pending.png.as_posix())  # Otherwise this root PNG conceals our new JPEG.
     result.downloaded = len(staged)
+    return pairs
 
 
 async def sync(
@@ -252,6 +262,10 @@ async def sync(
     deck_only=False,
     only_ids=None,
     confirmed_closed=False,
+    rush=False,
+    only_failed=None,
+    run_type=None,
+    verify_faces=False,
 ) -> Result:
     """Sync a supplied coverage snapshot, or pass art=None to scan alongside downloads.
 
@@ -262,6 +276,8 @@ async def sync(
     ids = set(catalog.cards) if only_ids is None else catalog.cards.keys() & only_ids
     if deck_only:
         ids &= deck_ids(game)
+    if only_failed is not None:
+        ids &= {cid for cid, kind in only_failed}
     pins = load_pins(core.paths.config / "manual_map.json")
     core.paths.cache.mkdir(parents=True, exist_ok=True)
     with closing(_open_index(core, game)) as db, TemporaryDirectory(prefix="hdcards-", dir=core.paths.cache) as tmp:
@@ -270,12 +286,16 @@ async def sync(
             previous[cid, kind][digest] = Record(digest, *values)
 
         donors = field_donors(catalog)
-        digest_ids = _digest_ids(catalog, previous, ids, pins)
+        digest_ids = _digest_ids(catalog, previous, ids, pins, rush)
         records, staged = {}, {}
         queue = asyncio.Queue()
         ready = asyncio.Event()
         total = completed = 0
+        started_utc = time.time()
         started = time.monotonic()
+        retry = []
+        finished = set()
+        exhausted = set()
         last_progress = started
         stop = Event()
 
@@ -287,23 +307,27 @@ async def sync(
             if cancelled():
                 return
             result.shadowed += shadowed
+            previous_total = total
             for card, items in work:
-                queue.put_nowait((card, items, batch))
-            if work:
-                total += len(work)
+                if only_failed is not None:
+                    items = [item for item in items if (card.id, item.kind) in only_failed]
+                if items:
+                    queue.put_nowait((card, items, batch))
+                    total += 1
+            if total > previous_total:
                 ready.set()
 
         async def discover():
             try:
                 if art is not None:
                     if art.complete:
-                        enqueue(art, *_plan_batch(catalog, art, ids, previous, original, pins, donors, digest_ids))
+                        enqueue(art, *_plan_batch(catalog, art, ids, previous, original, pins, donors, digest_ids, rush))
                     return art.complete
                 loop = asyncio.get_running_loop()
 
                 def report(batch, resolved):
                     work, shadowed = _plan_batch(
-                        catalog, batch, ids.intersection(resolved), previous, original, pins, donors, digest_ids
+                        catalog, batch, ids.intersection(resolved), previous, original, pins, donors, digest_ids, rush
                     )
                     loop.call_soon_threadsafe(enqueue, batch, work, shadowed)
 
@@ -325,6 +349,7 @@ async def sync(
                             cancelled=cancelled,
                             on_batch=report,
                             digest_ids=digest_ids,
+                            verify_faces=verify_faces,
                         ).complete
                     except CancelledError:
                         if not cancelled():
@@ -368,6 +393,7 @@ async def sync(
                 for item in items:
                     if cancelled():
                         return
+                    key = card.id, item.kind
                     try:
                         if item.kind == "face":
                             incoming = await client.face(card, catalog, original)
@@ -378,14 +404,16 @@ async def sync(
                                 local_donor=lambda cid, b=batch: local(b, cid, "field"),
                                 face=lambda b=batch, cid=card.id: local(b, cid, "face"),
                             )
+                        finished.add(key)
                         if incoming is None:
                             result.unavailable += 1
                             continue
-                        key = card.id, item.kind
                         records[key], pending = _stage(item, incoming, Path(tmp), game)
                         if pending:
                             staged[key] = pending
-                    except (FetchError, ChangedArtworkError):
+                    except FetchError:
+                        retry.append((card, [item], batch))
+                    except ChangedArtworkError:
                         result.errors += 1
                     except InterruptedError:
                         if not cancelled():
@@ -404,10 +432,35 @@ async def sync(
             await ready.wait()
             if total and not cancelled():
                 ctx.progress(0, total, "Contacting artwork sources…")
-                async with ArtworkClient(core.paths.cache, game, cancelled=cancelled, pins=pins) as client:
+                async with ArtworkClient(
+                    core.paths.cache, game, cancelled=cancelled, pins=pins, rush=rush, attempts=1
+                ) as client:
                     async with asyncio.TaskGroup() as workers:
                         for _ in range(CONNECTIONS_PER_HOST + 4):
                             workers.create_task(worker(client))
+                    # Only transient download failures re-enter the queue. All-404 results keep their cooldown.
+                    for attempt, delay in enumerate((1, 2), 1):
+                        if not retry or cancelled() or not await scan:
+                            break
+                        ctx.progress(0, len(retry), f"Retrying failed downloads · pass {attempt} of 2")
+                        for _ in range(delay * 10):
+                            if cancelled():
+                                break
+                            await asyncio.sleep(0.1)
+                        if cancelled():
+                            break
+                        batch_retry, retry = retry, []
+                        queue = asyncio.Queue()
+                        for job in batch_retry:
+                            queue.put_nowait(job)
+                        queue.put_nowait(None)
+                        completed, total = 0, len(batch_retry)
+                        async with asyncio.TaskGroup() as workers:
+                            for _ in range(min(total, CONNECTIONS_PER_HOST + 4)):
+                                workers.create_task(worker(client))
+                        if attempt == 2 and not cancelled():
+                            exhausted = {(card.id, items[0].kind) for card, items, _ in retry}
+                    result.errors += len(exhausted)
 
         if not (scan.result() and catalog.stable()):
             raise ValueError("Could not read all of the selected game’s card databases and artwork.")
@@ -415,8 +468,30 @@ async def sync(
         if core.installs.current() != game:
             result.cancelled = True
             return result
-        _publish(core, game, catalog, staged, records, result, confirmed_closed)
+        pairs = _publish(core, game, catalog, staged, records, result, confirmed_closed)
+        kind = run_type or ("Deck-only" if deck_only else "Full")
+        outcome = (
+            "Cancelled"
+            if result.cancelled
+            else "Failed"
+            if result.errors
+            else (f"{result.unavailable:,} unavailable" if result.unavailable else "Complete")
+        )
+        cards = len({cid for cid, kind in staged if kind == "face"}) if result.downloaded else 0
         with db:
+            if not result.cancelled:
+                finished.update(
+                    (cid, k)
+                    for cid, k in db.execute("SELECT * FROM failed")
+                    if cid in ids and (only_failed is None or (cid, k) in only_failed)
+                )
+            db.executemany("DELETE FROM failed WHERE id=? AND kind=?", finished)
+            db.executemany("INSERT OR IGNORE INTO failed VALUES (?,?)", exhausted)
+            if pairs:
+                db.executemany("INSERT OR REPLACE INTO pairs VALUES(?,?,?,?)", pairs)
+            library.record_run(
+                db, library.Run(started_utc, kind, cards, result.errors, round(time.monotonic() - started), outcome)
+            )
             db.executemany(
                 "INSERT OR REPLACE INTO art VALUES (?,?,?,?,?,?,?,?,?,?)",
                 ((cid, kind, *record) for (cid, kind), record in records.items()),

@@ -1,0 +1,291 @@
+{
+  "id": 88767,
+  "display": true,
+  "ydk": "#created by ...\n#main\n49674183\n49674183\n48686504\n48686504\n51852507\n51852507\n11747708\n62434031\n25824484\n25824484\n25824484\n99641328\n99641328\n99641328\n36046926\n36046926\n36046926\n63257623\n20579538\n20579538\n10530913\n10530913\n10530913\n14087893\n44887817\n44887817\n44887817\n70222318\n70222318\n70222318\n54447022\n54447022\n54447022\n82016179\n82016179\n82016179\n73628505\n70368879\n70368879\n70368879\n#extra\n80321197\n8561192\n76774528\n44508094\n10406322\n1639384\n1639384\n46772449\n64332231\n22110647\n48739166\n80117527\n88120966\n95239444\n78156759\n!side\n24508238\n24508238\n24508238\n23434538\n23434538\n23434538\n10753491\n25789292\n25789292\n25789292\n5318639\n5318639\n5318639\n28529976\n28529976\n",
+  "main": [
+    {
+      "artworkId": "49674183",
+      "name": "Fallen Angel of Roses"
+    },
+    {
+      "artworkId": "49674183",
+      "name": "Fallen Angel of Roses"
+    },
+    {
+      "artworkId": "48686504",
+      "name": "Lonefire Blossom"
+    },
+    {
+      "artworkId": "48686504",
+      "name": "Lonefire Blossom"
+    },
+    {
+      "artworkId": "51852507",
+      "name": "Rose Archer"
+    },
+    {
+      "artworkId": "51852507",
+      "name": "Rose Archer"
+    },
+    {
+      "artworkId": "11747708",
+      "name": "Spore"
+    },
+    {
+      "artworkId": "62434031",
+      "name": "Sylvan Flowerknight"
+    },
+    {
+      "artworkId": "25824484",
+      "name": "Sylvan Hermitree"
+    },
+    {
+      "artworkId": "25824484",
+      "name": "Sylvan Hermitree"
+    },
+    {
+      "artworkId": "25824484",
+      "name": "Sylvan Hermitree"
+    },
+    {
+      "artworkId": "99641328",
+      "name": "Sylvan Komushroomo"
+    },
+    {
+      "artworkId": "99641328",
+      "name": "Sylvan Komushroomo"
+    },
+    {
+      "artworkId": "99641328",
+      "name": "Sylvan Komushroomo"
+    },
+    {
+      "artworkId": "36046926",
+      "name": "Sylvan Marshalleaf"
+    },
+    {
+      "artworkId": "36046926",
+      "name": "Sylvan Marshalleaf"
+    },
+    {
+      "artworkId": "36046926",
+      "name": "Sylvan Marshalleaf"
+    },
+    {
+      "artworkId": "63257623",
+      "name": "Sylvan Peaskeeper"
+    },
+    {
+      "artworkId": "20579538",
+      "name": "Sylvan Princessprout"
+    },
+    {
+      "artworkId": "20579538",
+      "name": "Sylvan Princessprout"
+    },
+    {
+      "artworkId": "10530913",
+      "name": "Sylvan Sagequoia"
+    },
+    {
+      "artworkId": "10530913",
+      "name": "Sylvan Sagequoia"
+    },
+    {
+      "artworkId": "10530913",
+      "name": "Sylvan Sagequoia"
+    },
+    {
+      "artworkId": "14087893",
+      "name": "Book of Moon"
+    },
+    {
+      "artworkId": "44887817",
+      "name": "Miracle Fertilizer"
+    },
+    {
+      "artworkId": "44887817",
+      "name": "Miracle Fertilizer"
+    },
+    {
+      "artworkId": "44887817",
+      "name": "Miracle Fertilizer"
+    },
+    {
+      "artworkId": "70222318",
+      "name": "Mount Sylvania"
+    },
+    {
+      "artworkId": "70222318",
+      "name": "Mount Sylvania"
+    },
+    {
+      "artworkId": "70222318",
+      "name": "Mount Sylvania"
+    },
+    {
+      "artworkId": "54447022",
+      "name": "Soul Charge"
+    },
+    {
+      "artworkId": "54447022",
+      "name": "Soul Charge"
+    },
+    {
+      "artworkId": "54447022",
+      "name": "Soul Charge"
+    },
+    {
+      "artworkId": "82016179",
+      "name": "Sylvan Charity"
+    },
+    {
+      "artworkId": "82016179",
+      "name": "Sylvan Charity"
+    },
+    {
+      "artworkId": "82016179",
+      "name": "Sylvan Charity"
+    },
+    {
+      "artworkId": "73628505",
+      "name": "Terraforming"
+    },
+    {
+      "artworkId": "70368879",
+      "name": "Upstart Goblin"
+    },
+    {
+      "artworkId": "70368879",
+      "name": "Upstart Goblin"
+    },
+    {
+      "artworkId": "70368879",
+      "name": "Upstart Goblin"
+    }
+  ],
+  "extra": [
+    {
+      "artworkId": "80321197",
+      "name": "Crimson Blader"
+    },
+    {
+      "artworkId": "8561192",
+      "name": "Leo, the Keeper of the Sacred Tree"
+    },
+    {
+      "artworkId": "76774528",
+      "name": "Scrap Dragon"
+    },
+    {
+      "artworkId": "44508094",
+      "name": "Stardust Dragon"
+    },
+    {
+      "artworkId": "10406322",
+      "name": "Alsei, the Sylvan High Protector"
+    },
+    {
+      "artworkId": "1639384",
+      "name": "Divine Dragon Knight Felgrand"
+    },
+    {
+      "artworkId": "1639384",
+      "name": "Divine Dragon Knight Felgrand"
+    },
+    {
+      "artworkId": "46772449",
+      "name": "Evilswarm Exciton Knight"
+    },
+    {
+      "artworkId": "64332231",
+      "name": "Hieratic Sun Dragon Overlord of Heliopolis"
+    },
+    {
+      "artworkId": "22110647",
+      "name": "Mecha Phantom Beast Dracossack"
+    },
+    {
+      "artworkId": "48739166",
+      "name": "Number 101: Silent Honor ARK"
+    },
+    {
+      "artworkId": "80117527",
+      "name": "Number 11: Big Eye"
+    },
+    {
+      "artworkId": "88120966",
+      "name": "Number 15: Gimmick Puppet Giant Grinder"
+    },
+    {
+      "artworkId": "95239444",
+      "name": "Orea, the Sylvan High Arbiter"
+    },
+    {
+      "artworkId": "78156759",
+      "name": "Wind-Up Zenmaines"
+    }
+  ],
+  "side": [
+    {
+      "artworkId": "24508238",
+      "name": "D.D. Crow"
+    },
+    {
+      "artworkId": "24508238",
+      "name": "D.D. Crow"
+    },
+    {
+      "artworkId": "24508238",
+      "name": "D.D. Crow"
+    },
+    {
+      "artworkId": "23434538",
+      "name": "Maxx \"C\""
+    },
+    {
+      "artworkId": "23434538",
+      "name": "Maxx \"C\""
+    },
+    {
+      "artworkId": "23434538",
+      "name": "Maxx \"C\""
+    },
+    {
+      "artworkId": "10753491",
+      "name": "Sylvan Cherubsprout"
+    },
+    {
+      "artworkId": "25789292",
+      "name": "Forbidden Chalice"
+    },
+    {
+      "artworkId": "25789292",
+      "name": "Forbidden Chalice"
+    },
+    {
+      "artworkId": "25789292",
+      "name": "Forbidden Chalice"
+    },
+    {
+      "artworkId": "5318639",
+      "name": "Mystical Space Typhoon"
+    },
+    {
+      "artworkId": "5318639",
+      "name": "Mystical Space Typhoon"
+    },
+    {
+      "artworkId": "5318639",
+      "name": "Mystical Space Typhoon"
+    },
+    {
+      "artworkId": "28529976",
+      "name": "Super Solar Nutrient"
+    },
+    {
+      "artworkId": "28529976",
+      "name": "Super Solar Nutrient"
+    }
+  ]
+}

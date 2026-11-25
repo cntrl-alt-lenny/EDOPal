@@ -383,3 +383,40 @@ def test_local_checkout_rejects_escape_before_ensure(service):
     with pytest.raises(ValueError, match="Unsafe pack path"):
         service.catalog(CTX)
     assert not service.core.installs.current().path("sound").exists()
+
+
+def test_setup_failure_leaves_all_scenes_intact(service):
+    install = service.core.installs.current()
+    (album,) = service.catalog(CTX)
+    first, second = album.tracks
+    before = service.assign(album, first, "menu", install, CTX)
+    collision = _put(install, "lose/edopal-test-night-tide.ogg")
+    with pytest.raises(FileExistsError):
+        service.apply_setup({"menu": [album.id, second.id], "lose": [album.id, second.id]}, (album,), install, CTX)
+    assert service.game_state().sources == before.sources
+    assert collision.read_bytes() == b"original"
+    assert install.path("sound/BGM/menu/edopal-test-morning-sun.ogg").exists()
+
+
+def test_legacy_registry_reopens_and_recalls_setup(service):
+    from edopal.features.music.library import MusicLibrary, bind_library
+
+    install = service.core.installs.current()
+    (album,) = service.catalog(CTX)
+    service.assign(album, album.tracks[1], "menu", install, CTX)
+    _put(install, "deck/test-local-track.ogg")
+    local = service.game_state().local
+    track = next(t for t in local.tracks if t.role == "deck")
+    service.assign(local, track, "win", install, CTX)
+    registry = install.path("sound/.edopal-music.json")
+    data = json.loads(registry.read_text())
+    for item in data["roles"].values():
+        del item["album_id"], item["track_id"]
+    registry.write_text(json.dumps(data))
+    state = service.game_state()
+    albums, defaults = bind_library((album,), state)
+    refs = MusicLibrary.snapshot(state, [*albums, defaults])
+    assert refs == {"menu": [album.id, "night-tide"], "win": [album.id, track.id]}
+    service.restore(install, CTX)
+    result = service.apply_setup(refs, [*albums, defaults], install, CTX)
+    assert result.sources == refs

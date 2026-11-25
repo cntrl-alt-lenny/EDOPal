@@ -40,8 +40,9 @@ def load_manifest(folder: Path) -> dict:
     return manifest
 
 
-def load_list(folder: Path, slug: str) -> Whitelist:
-    manifest = load_manifest(folder)
+def load_list(folder: Path, slug: str, manifest: dict | None = None) -> Whitelist:
+    if manifest is None:
+        manifest = load_manifest(folder)
     profile = next((row for row in manifest["formats"] if row["id"] == slug), None)
     if profile is None:
         raise ValueError("This format needs the full formats pack. Connect to update the cached banlists.")
@@ -99,13 +100,44 @@ class FormatPack:
             except (OSError, ValueError, RuntimeError):
                 folder = self.packs.cached("formats")
             rows = load_manifest(folder)["formats"] if folder else []
-            if len(rows) > len(LEGACY_IDS):
-                return rows
-            # Stock references, unsupported profiles and all host recipes remain
-            # browsable even on an offline upgrade from the original pack.
-            return profiles()
+            if len(rows) <= len(LEGACY_IDS):
+                rows = profiles()
+            if folder and (index := folder / "profiles/index.json").is_file():
+                metadata = {item["id"]: item for item in json.loads(index.read_bytes())}
+                for row in rows:
+                    info = metadata.get(row["id"], {})
+                    row.update(mechanics=info.get("mechanics", {}), hero_card_id=info.get("hero_card_id"))
+                    path = index.parent / (row["id"] + ".json")
+                    if path.is_file():
+                        overview = json.loads(path.read_bytes())
+                        for key in ("description", "defining_cards"):
+                            row[key] = overview.get(key)
+            for row in rows:
+                if not row.get("mechanics"):
+                    # The bundled host recipes remain browsable on a first offline visit.
+                    options = row.get("host", {}).get("options", ())
+                    row["mechanics"] = {m.lower(): f"No {m}" not in options for m in ("Synchro", "Xyz", "Pendulum", "Link")}
+                    if row["era"] in ("DM", "GX"):
+                        row["mechanics"]["synchro"] = False
+                    if row["id"] == "genesys":
+                        row["mechanics"].update(link=False, pendulum=False)
+            return rows
 
     def whitelist(self, slug: str, ctx: JobContext) -> Whitelist:
         with self._lock:
             folder = self.packs.cached("formats") or self._ensure(ctx)
             return load_list(folder, slug)
+
+    def historical_lists(self, ctx):
+        with self._lock:
+            folder = self.packs.cached("formats") or self._ensure(ctx)
+            manifest = load_manifest(folder)
+            if len(manifest["formats"]) <= len(LEGACY_IDS):
+                raise ValueError("Connect to download the full formats pack before installing all banlists.")
+            lists = []
+            for row in manifest["formats"]:
+                if ctx.cancelled:
+                    raise ValueError("Banlist installation cancelled.")
+                if row.get("status", "historical") == "historical":
+                    lists.append(load_list(folder, row["id"], manifest))
+            return lists

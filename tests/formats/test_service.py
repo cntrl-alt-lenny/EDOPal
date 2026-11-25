@@ -53,7 +53,7 @@ def test_recorded_event_to_converted_deck_preserves_source_and_personal_edits(fo
     assert (event.code, deck.builder) == ("PPAY25", "goodmorning")
     assert [sum(count for _, count in section) for section in preview.detail.sections] == [40, 15, 15]
     assert preview.changes and not preview.issues
-    assert preview.thumbnail.startswith(b"\x89PNG")
+    assert preview.composition == (40, 0, 0)
     source = (FIXTURES / "88769.ydk").read_bytes()
     directory = install.root / "deck"
     target = directory / "PPAY25-goodmorning.ydk"
@@ -199,3 +199,38 @@ def test_reopens_with_full_catalog_and_offline_legacy_pack(formats_service):
     (local.root / "formats/manifest.json").write_text(json.dumps(full_doc))
     assert len(service.profiles(ctx)) == 128
     assert len(json.loads((folder / "manifest.json").read_bytes())["formats"]) == 128
+
+
+def test_bulk_install_is_atomic_repeatable_and_undo_preserves_local_lists(formats_service):
+    import hashlib
+    import json
+
+    service, ctx = formats_service, JobContext()
+    install = service.core.installs.current()
+    folder = service.core.packs.cached("formats")
+    manifest_path = folder / "manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    historical = [r for r in manifest["formats"] if r.get("status") == "historical"]
+    for row in historical:
+        data = f"!{row['display']}\n$whitelist\n100 2\n".encode()
+        (folder / row["lflist"]).write_bytes(data)
+        row["sha256"] = manifest["files"][row["lflist"]] = hashlib.sha256(data).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    last = folder / historical[-1]["lflist"]
+    intact = last.read_bytes()
+    last.write_bytes(b"damaged")
+    with pytest.raises(ValueError, match="integrity"):
+        service.install_all(ctx, install)
+    assert not install.path("lflists").exists()
+    last.write_bytes(intact)
+    own = install.path(service._list_name(historical[0]))
+    own.parent.mkdir()
+    own.write_text("personal list")
+    assert "Installed 124 banlists" in service.install_all(ctx, install)
+    receipt = service.core.storage.last_receipt(install, "formats")
+    assert len(receipt.changed) == 124
+    assert "Installed 0 banlists" in service.install_all(ctx, install)
+    assert service.core.storage.last_receipt(install, "formats").id == receipt.id
+    assert not install.path("repositories/lflists").exists()
+    service.undo(ctx, install)
+    assert list(own.parent.iterdir()) == [own] and own.read_text() == "personal list"

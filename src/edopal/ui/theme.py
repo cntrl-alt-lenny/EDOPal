@@ -1,6 +1,5 @@
 """EDOPal design tokens, icons and Qt widget roles. Dimensions use logical pixels."""
 
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -10,11 +9,11 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication, QWidget
 
 ASSETS = Path(__file__).resolve().parents[1] / "assets"
-CANVAS, RAIL, PANEL, RAISED = "#191a1b", "#151618", "#232426", "#2c2d2e"
-EDGE, HOVER, ACTIVE = "#3e3e3d", "#343536", "#383328"
-INK, TEXT, MUTED = "#f5f1e9", "#d5d1c8", "#aaa9a6"
-GOLD, PALE, PRESSED, ON_GOLD = "#ebc987", "#f7dfac", "#d5af6a", "#251f15"
-GREEN, RED = "#99cfb2", "#f1a499"
+CANVAS, RAIL, PANEL, RAISED = "#202022", "#171719", "#29292c", "#323235"
+EDGE, RULE, HOVER, ACTIVE = "#404043", "#363639", "#343436", "#373128"
+INK, TEXT, MUTED = "#f4f3f0", "#c4c3c3", "#aaaaae"
+GOLD, PALE, PRESSED, ON_GOLD = "#ebc987", "#f7dfac", "#d5af6a", "#211d17"
+GREEN, RED = "#b6c9af", "#f1a499"
 HERO_DARK, HERO_LIGHT, BRONZE = "#272326", "#594539", "#af885a"
 FOIL = {
     "hdcards": (HERO_DARK, HERO_LIGHT),
@@ -33,22 +32,24 @@ FOIL = {
 CLEAR = "transparent"
 HAIR, FOCUS = 1, 2
 XS, SM, MD, LG, XL, XXL, HUGE = 4, 8, 12, 16, 24, 32, 48
-R_SMALL, R_PANEL = 6, 12
-CONTENT_MARGIN = XL
-PAGE_TITLE = 36
+R_SMALL, R_PANEL = 5, 6
+CONTENT_MARGIN = XXL
+PAGE_TITLE = 38
 CONTROL_H = 32
 CAPTION, SMALL, BODY, SUBTITLE, HEADING, DISPLAY = 10, 12, 14, 17, 23, 42
 ICON, ICON_BIG, BRAND_ICON = 20, 28, 38
-BUTTON_H, TILE_H, NAV_H = 40, 84, 44
-RAIL_WIDTH, RAIL_COMPACT, RAIL_ICONS = 218, 208, NAV_H + XL
+BUTTON_H, TILE_H, NAV_H = 34, 84, 38
+RAIL_WIDTH, RAIL_COMPACT, RAIL_ICONS = 218, 174, 75
 WIDE_CONTENT, TILE_LARGE = 1250, 144
 CONTENT_MAX, ROOMY_WIDTH, TALL_HEIGHT = 1920, 1750, 1000
 DEFAULT_SIZE, MIN_SIZE = (1280, 800), (1024, 640)
-COMPACT_WIDTH = 1100
+COMPACT_WIDTH, WIDE_WIDTH = 1100, 1400
 TILE_SIZE = (154, 176)
 MOTION_MS, NOTICE_MS = 150, 6500
 UI = "Inter"
-SERIF = "Georgia"
+DISPLAY_FACE = "Outfit"
+# Legacy name for the display font, retained for callers that use it.
+SERIF = DISPLAY_FACE
 
 
 @lru_cache(maxsize=96)
@@ -56,7 +57,7 @@ def icon(name: str, color: str = TEXT) -> QIcon:
     """Render a named asset in the requested ink at standard and high-DPI sizes."""
     if not name or Path(name).name != name:
         return QIcon()
-    path = ASSETS / "icons" / f"{name}.svg"
+    path = ASSETS / "logo.svg" if name == "logo" else ASSETS / "icons" / f"{name}.svg"
     try:
         svg = path.read_bytes().replace(b"currentColor", QColor(color).name().encode())
     except FileNotFoundError:
@@ -74,9 +75,9 @@ def icon(name: str, color: str = TEXT) -> QIcon:
 
 def font(size: int = BODY, *, bold: bool = False, serif: bool = False) -> QFont:
     f = QFont()
-    f.setFamilies([SERIF, "DejaVu Serif", "serif"] if serif else [UI, "Segoe UI", "sans-serif"])
+    f.setFamilies([DISPLAY_FACE, UI, "sans-serif"] if serif else [UI, "Segoe UI", "sans-serif"])
     f.setPixelSize(size)
-    f.setBold(bold)
+    f.setWeight(QFont.Weight.DemiBold if serif else QFont.Weight.Bold if bold else QFont.Weight.Medium)
     return f
 
 
@@ -126,11 +127,8 @@ class _KeyboardFocus(QObject):
 def apply(app: QApplication) -> None:
     global UI
     app.setStyle("Fusion")
-    # The Windows offscreen plugin has no system font catalogue. Register the OS
-    # display face for the renderer just as the native Windows plugin would.
-    if app.platformName() == "offscreen" and "WINDIR" in os.environ and SERIF not in QFontDatabase.families():
-        for filename in ("georgia.ttf", "georgiab.ttf", "georgiai.ttf", "georgiaz.ttf"):
-            QFontDatabase.addApplicationFont(str(Path(os.environ["WINDIR"]) / "Fonts" / filename))
+    if "SemiBold" not in QFontDatabase.styles(DISPLAY_FACE):
+        QFontDatabase.addApplicationFont(str(ASSETS / "fonts/Outfit-SemiBold.ttf"))
     face = QFontDatabase.addApplicationFont(str(ASSETS / "fonts/Inter-Medium.ttf"))
     if families := QFontDatabase.applicationFontFamilies(face):
         UI = families[0]
@@ -167,11 +165,11 @@ def apply(app: QApplication) -> None:
 
 def stylesheet() -> str:
     return f"""
-    QWidget {{ color: {INK}; font-family: "{UI}", "Segoe UI", sans-serif; font-size: {BODY}px; }}
+    QWidget {{ color: {INK}; font-family: "{UI}", "Segoe UI", sans-serif; font-size: {BODY}px; font-weight: 500; }}
     QMainWindow, QWidget#canvas, QScrollArea, QScrollArea > QWidget > QWidget {{ background: {CANVAS}; }}
     QWidget#rail {{ background: {RAIL}; border-right: 1px solid {EDGE}; }}
     QScrollArea#railScroll, QWidget#railItems {{ background: {RAIL}; }}
-    QWidget#installBar {{ background: {CANVAS}; border-bottom: 1px solid {EDGE}; }}
+    QWidget#installBar {{ background: #1c1c1e; border-bottom: 1px solid {RULE}; }}
     QLabel {{ background: transparent; border: none; }}
     QLabel[role="muted"] {{ color: {MUTED}; font-size: {SMALL}px; }}
     QLabel[role="body"] {{ color: {TEXT}; }}
@@ -180,14 +178,18 @@ def stylesheet() -> str:
         color: {MUTED}; font-size: {CAPTION}px; font-weight: 700; letter-spacing: 1.6px;
     }}
     QLabel[role="goldKicker"] {{ color: {GOLD}; }}
-    QLabel[role="heading"] {{ font-size: {HEADING}px; font-weight: 650; }}
-    QLabel[role="subheading"] {{ font-size: {SUBTITLE}px; font-weight: 650; }}
-    QLabel[role="display"], QLabel[role="metric"], QLabel[role="warnMetric"] {{
-        font-family: "{SERIF}", "DejaVu Serif", serif; font-size: {DISPLAY}px;
+    QLabel[role="heading"], QLabel[role="subheading"], QLabel[role="pageTitle"], QLabel[role="heroTitle"],
+    QLabel[role="brand"], QLabel[role="display"], QLabel[role="metric"], QLabel[role="warnMetric"] {{
+        font-family: "{DISPLAY_FACE}", "{UI}", sans-serif; font-weight: 600;
     }}
-    QLabel[role="brand"] {{ font-size: {HEADING}px; font-weight: 700; letter-spacing: 0.4px; }}
-    QLabel[role="pageTitle"] {{ font-family: "{SERIF}", "DejaVu Serif", serif; font-size: {PAGE_TITLE}px; }}
-    QLabel[role="heroTitle"] {{ font-family: "{SERIF}", "DejaVu Serif", serif; font-weight: bold; font-size: {HUGE}px; }}
+    QLabel[role="heading"] {{ font-size: {HEADING}px; }}
+    QLabel[role="subheading"] {{ font-size: {SUBTITLE}px; }}
+    QLabel[role="display"], QLabel[role="metric"], QLabel[role="warnMetric"] {{
+        font-size: {DISPLAY}px;
+    }}
+    QLabel[role="brand"] {{ font-size: 24px; }}
+    QLabel[role="pageTitle"] {{ font-size: {PAGE_TITLE}px; }}
+    QLabel[role="heroTitle"] {{ font-size: {HUGE}px; }}
     QLabel[role="heroTitle"][compact="true"] {{ font-size: {XXL}px; }}
     QLabel[role="metric"] {{ color: {GOLD}; }}
     QLabel[role="warnMetric"] {{ color: {RED}; }}
@@ -212,7 +214,7 @@ def stylesheet() -> str:
     QPushButton[role="primary"]:pressed {{ background: {PRESSED}; }}
     QPushButton[role="quiet"], QPushButton[role="nav"] {{ background: transparent; border-color: transparent; }}
     QPushButton[role="nav"] {{ text-align: left; color: {TEXT}; padding: {SM}px {MD}px; }}
-    QPushButton[role="nav"]:checked {{ color: {GOLD}; background: {ACTIVE}; border-left: 3px solid {GOLD}; }}
+    QPushButton[role="nav"]:checked {{ color: {GOLD}; background: {ACTIVE}; }}
     QPushButton[role="scope"], QPushButton[role="action"] {{ text-align: left; background: {PANEL};
         border-radius: {R_PANEL}px; padding: 0; }}
     QPushButton[role="scope"]:checked {{ background: {ACTIVE}; border-color: {GOLD}; }}
@@ -224,7 +226,7 @@ def stylesheet() -> str:
     QPushButton[role="tile"]:pressed {{ background: {HOVER}; }}
     QPushButton[role="quiet"]:pressed, QPushButton[role="nav"]:pressed,
     QPushButton[role="scope"]:pressed, QPushButton[role="action"]:pressed {{ background: {EDGE}; }}
-    QPushButton[role="scope"]:checked:hover, QPushButton[role="nav"]:checked:hover {{ border-color: {GOLD}; }}
+    QPushButton[role="scope"]:checked:hover {{ border-color: {GOLD}; }}
     QPushButton[keyboardFocus="true"]:focus, QPushButton[role][keyboardFocus="true"]:focus,
     QLineEdit[keyboardFocus="true"]:focus, QListView[keyboardFocus="true"]:focus {{
         border: {FOCUS}px solid {PALE}; }}

@@ -1,31 +1,55 @@
-from PySide6.QtCore import Qt
+from pathlib import Path
 
-from edopal.core.updates import UpdateCheck
+from PySide6.QtCore import QPoint, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QLabel, QPushButton
+
 from edopal.dev.preview import make_core
-from edopal.ui import settings_page
+from edopal.ui import theme
+from edopal.ui.settings_page import Mascot, SettingsPage
+from edopal.ui.shell import ShellWindow
 
 
-def test_manual_release_check_and_download_link(monkeypatch, tmp_path, qtbot):
+def test_settings_shows_on_launch_and_current_game(qapp, qtbot, tmp_path, monkeypatch):
+    theme.apply(qapp)
     core = make_core(None, tmp_path / "packs", tmp_path / "home")
-    responses = iter([UpdateCheck("v6.1.0", True, False), UpdateCheck("v6.1.0", True, True)])
-    monkeypatch.setattr(settings_page, "check_for_updates", lambda cache: next(responses))
-    page = settings_page.SettingsPage(core)
-    qtbot.addWidget(page)
-    qtbot.mouseClick(page._check, Qt.MouseButton.LeftButton)
-    assert "v6.1.0" in page._status.text() and page._check.isEnabled()
-    assert page._release_url.endswith("/releases/tag/v6.1.0")
-    qtbot.mouseClick(page._check, Qt.MouseButton.LeftButton)
-    assert "Couldn’t verify" in page._status.text() and "v6.1.0" in page._status.text()
+    window = ShellWindow(core, [], "settings")
+    qtbot.addWidget(window)
+    window.show()
+    page = window.pages["settings"]
+    assert isinstance(page, SettingsPage)
+    assert "On Launch" in [label.text() for label in page.findChildren(QLabel)]
+    folders = {button.accessibleName(): button for button in page.findChildren(QPushButton)}
+    qtbot.mouseClick(folders["Game Installation"], Qt.MouseButton.LeftButton)
+    assert window.picker is not None
+    window.picker.reject()
+    chosen = tmp_path / "game"
+    chosen.mkdir()
+    core.installs.select(chosen)
+    assert page._game_path.accessibleName() == str(chosen)
+
+    urls = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: urls.append(url) or True)
+    qtbot.mouseClick(folders["Game Installation"], Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(folders["Release Notes"], Qt.MouseButton.LeftButton)
+    assert urls[0] == QUrl.fromLocalFile(str(chosen))
+    assert urls[1].toString().endswith("/releases")
 
 
-def test_startup_notifies_only_about_verified_updates(monkeypatch, tmp_path):
-    core = make_core(None, tmp_path / "packs", tmp_path / "home")
-    notices = []
-    core.notify = lambda message, kind: notices.append(message)
-    results = iter(
-        [UpdateCheck("v6.1.0", True, False), UpdateCheck("v6.1.0", True, True), UpdateCheck("v5.9.0", False, False)]
-    )
-    monkeypatch.setattr(settings_page, "check_for_updates", lambda cache: next(results))
-    for _ in range(3):
-        settings_page.check_on_startup(core)
-    assert len(notices) == 1 and "v6.1.0" in notices[0]
+def test_mascot_glow_tracks_the_pointer(qapp, qtbot, tmp_path):
+    theme.apply(qapp)
+    core = make_core(Path("/game"), tmp_path / "packs", tmp_path / "home")
+    window = ShellWindow(core, [], "settings")
+    qtbot.addWidget(window)
+    window.show()
+    mascot = window.findChild(Mascot)
+    qtbot.mouseMove(window.pages["settings"], QPoint(20, 20))
+    neutral = mascot.grab().toImage()
+    qtbot.mouseMove(mascot, QPoint(43, 65))
+    first = mascot.grab().toImage()
+    qtbot.mouseMove(mascot, QPoint(70, 43))
+    second = mascot.grab().toImage()
+    assert first != neutral and second != first
+    assert mascot.pointer.toPoint() == QPoint(70, 43)
+    qtbot.mouseMove(window.pages["settings"], QPoint(20, 20))
+    assert mascot.pointer is None and mascot.grab().toImage() == neutral

@@ -29,6 +29,7 @@ class Card:
     type: int | None = None
     alias: int = 0
     rush: bool = False
+    unofficial: bool = False
 
 
 def file_stamp(path: Path) -> tuple[int, ...] | None:
@@ -114,8 +115,9 @@ def _rows(db, name):
     kind = "d.type" if "type" in columns else "NULL"
     alias = "d.alias" if "alias" in columns else "0"
     rush = "rush" in Path(name).name.casefold()
+    unofficial = "unofficial" in Path(name).name.casefold()
     return {
-        cid: Card(cid, title, typ if isinstance(typ, int) else None, alt if isinstance(alt, int) else 0, rush)
+        cid: Card(cid, title, typ if isinstance(typ, int) else None, alt if isinstance(alt, int) else 0, rush, unofficial)
         for cid, title, typ, alt in db.execute(f"SELECT d.id,t.name,{kind},{alias} FROM datas d JOIN texts t USING(id)")
         if type(cid) is int and 0 < cid <= 0xFFFFFFFF and isinstance(title, str)
     }

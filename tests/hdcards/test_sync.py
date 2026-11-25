@@ -198,7 +198,7 @@ def test_scope_empty_and_retryable_failures(core, cdn):
     cdn[0][face(DM)] = image()
     assert run(core, [DM, POT]).downloaded == 1
     assert cdn[1][face(POT)] == 1
-    assert cdn[1][face(DM)] == 2
+    assert cdn[1][face(DM)] == 4
 
 
 def test_freshly_running_game_keeps_entire_sync_out_of_game(core, cdn, monkeypatch):
@@ -249,7 +249,7 @@ def test_new_card_button_syncs_just_additions_in_real_job_runner(core, qtbot, mo
             db.execute("INSERT INTO texts(id,name) VALUES(101,'New card')")
         spec.on_game_exited(core)
         qtbot.waitUntil(lambda: spec.badge(core) == "1")
-        page.notice.action.click()
+        page.new_action.click()
         qtbot.waitUntil(lambda: page.state.phase == "done")
         assert requested == [face(101)]
         assert page.state.downloaded == 1 and page.state.hd == 1
@@ -343,3 +343,56 @@ def test_existing_index_recognizes_managed_preferred_printing_after_migration(co
         assert db.execute("SELECT printing,recheck_after FROM art").fetchall() == [(DM, 0)]
     assert not cdn[1]
     assert core.storage.last_receipt(game, "hdcards") is None
+
+
+def test_retry_recovers_during_last_pass_without_repeating_successes(core, cdn):
+    replies, calls = cdn
+    old = image(size=(177, 254), color="blue")
+    write(core.installs.current().path(f"pics/{DM}.jpg"), old)
+
+    def flaky():
+        if calls[face(DM)] < 3:
+            raise artwork.FetchError("Transient")
+        return image()
+
+    replies[face(DM)] = flaky
+    replies[face(POT)] = image()
+    # A low fallback cannot hide the transient HD failure.
+    replies[f"{artwork.IGNIS}/{DM}.jpg"] = old
+    result = run(core, [DM, POT])
+    assert result.downloaded == 2 and not result.errors
+    assert calls[face(DM)] == 3 and calls[face(POT)] == 1
+    controller = Controller(core)
+    controller.refresh()
+    state = controller.state
+    assert not state.failures and state.history[0].cards == 2 and state.history[0].result == "Complete"
+    name, original, hd = state.pairs[0]
+    assert name and original != hd
+    controller.undo()
+    assert not controller.state.pairs
+    assert controller.state.known == 2 and not controller.state.hd
+
+
+def test_retry_failed_is_per_install_kind_and_survives_restart(core, cdn):
+    replies, calls = cdn
+    replies[face(UMI)] = artwork.FetchError("Transient")
+    field = f"{artwork.CDN}/cards_cropped/{UMI}.jpg"
+    replies[field] = image(size=(261, 260))
+    first = run(core, [UMI])
+    assert (first.downloaded, first.errors) == (1, 1)
+    assert calls[face(UMI)] == 3 and calls[field] == 1
+    controller = Controller(core)
+    controller.refresh()
+    assert controller.state.failures == {(UMI, "face")}
+    assert (controller.state.history[0].cards, controller.state.history[0].failed) == (0, 1)
+    replies[face(UMI)] = image()
+    controller.start_sync(retry_failed=True)
+    assert controller.state.phase == "done"
+    assert not controller.state.failures
+    assert [(r.kind, r.cards) for r in controller.state.history] == [("Retry", 1), ("Full", 0)]
+    assert calls[face(UMI)] == 4 and calls[field] == 1
+    new_game = core.paths.cache / "another-game"
+    shutil.copytree(FIXTURE, new_game)
+    core.installs.select(new_game)
+    controller.refresh()
+    assert not controller.state.failures and not controller.state.history

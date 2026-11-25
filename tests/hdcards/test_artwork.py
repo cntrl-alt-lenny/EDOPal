@@ -403,3 +403,34 @@ def test_separate_clients_share_admission_times(tmp_path, server):
     asyncio.run(run())
     assert len(server.calls) == 2
     assert server.calls[1][1] - server.calls[0][1] >= 1 / art.CDN_RATE - 1e-6
+
+
+def test_shipped_donors_and_reviewed_community_prints(tmp_path, server, monkeypatch):
+    import hashlib
+
+    from edopal.features.hdcards.sources import MAPPED, RUSH_BASE, RUSH_ORR, rush_index
+
+    assert len(MAPPED) == 67 and MAPPED[300301001] == 300302021
+    mapped = card(101402084)
+    assert art.candidates(mapped, catalog(mapped))[0] == (52123534, f"{art.CDN}/cards/52123534.jpg")
+    cid = 160003043
+    standard = card(cid, rush=True)
+    source = art.candidates(standard, catalog(standard), rush=True)[0][1]
+    assert source == f"{RUSH_BASE}/pics/{cid}.png"
+    extra = next(i for i, (u, _) in rush_index().items() if u.startswith(RUSH_ORR))
+    extension = card(extra, rush=True)
+    assert art.candidates(extension, catalog(extension), rush=True)[0][1] == f"{RUSH_ORR}/pics/{extra}.png"
+    assert all("github" not in u for _, u in art.candidates(standard, catalog(standard)))
+    # Match an in-memory test commit tree, then verify that a different PNG cannot pass.
+    body = picture("PNG", (400, 580))
+    blob = hashlib.sha1(f"blob {len(body)}\0".encode() + body).hexdigest()
+    monkeypatch.setattr(art, "rush_index", lambda: {cid: (source, blob)})
+
+    async def get(folder, body):
+        server.responses[source] = [Response(200, body)]
+        async with art.ArtworkClient(tmp_path / folder, Install(tmp_path / "game"), rush=True) as client:
+            return await client.face(standard, catalog(standard))
+
+    assert asyncio.run(get("good", body)).printing == cid
+    with pytest.raises(art.FetchError):
+        asyncio.run(get("bad", picture("PNG", (401, 580))))

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QByteArray, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QByteArray, QEvent, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QAbstractButton, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QAbstractButton, QApplication, QFrame, QPushButton, QScrollArea, QSizePolicy, QToolTip, QWidget
 
 from edopal.ui import theme as t
+from edopal.ui.widgets.art import draw_cover
 
 _ICONS = {
     "left": '<path d="m14 6-6 6 6 6"/>',
@@ -20,18 +21,12 @@ _ICONS = {
     "volume": '<path d="M3 9h4l5-4v14l-5-4H3zM16 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
     "mute": '<path d="M3 9h4l5-4v14l-5-4H3zM16 9l5 6m0-6-5 6"/>',
     "search": '<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',
-    "menu": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18m-14 5h6"/>',
-    "deck": '<rect x="9" y="4" width="11" height="15" rx="1.5"/><path d="m6 7-3 1 3 13 9-1"/>',
-    "duel": '<path d="M4 3l4 1 11 13-2 2L5 7zM4 20l4-5m9-5 3-3 1-4-4 1-3 4M3 14l6 6m6-1 5-5"/>',
-    "win": '<path d="M7 4h10v5a5 5 0 0 1-10 0zM7 6H3v2a4 4 0 0 0 4 4m10-6h4v2a4 4 0 0 1-4 4m-5 2v5m-4 1h8"/>',
-    "lose": '<path d="M5 21V4c5-4 9 4 15 0v10c-6 4-10-4-15 0"/>',
 }
 
 
 def icon(name: str, color: str = t.TEXT) -> QIcon:
-    shared = {"music": "music", "local": "folder", "restore": "undo"}
-    if name in shared:
-        return t.icon(shared[name], color)
+    if name == "restore":
+        return t.icon("undo", color)
     body = _ICONS[name].replace("currentColor", color)
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" '
@@ -79,78 +74,121 @@ def mmss(seconds):
     return f"{minutes}:{seconds:02d}"
 
 
-def _mat(painter, rect):
-    gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
-    gradient.setColorAt(0, QColor(t.FOIL["music"][0]))
-    gradient.setColorAt(1, QColor(t.RAISED))
-    painter.fillRect(rect, gradient)
+class Carousel(QScrollArea):
+    """Horizontal scrolling also works over the covers, without activating a dragged cover."""
 
-
-def _draw_disc(p, rect):
-    """Grooves and a paper label, also used as the sleeve for tracks discovered on disk."""
-    s = rect.width()
-    p.setPen(QPen(QColor(t.EDGE), 1))
-    p.setBrush(QColor(t.RAIL))
-    p.drawEllipse(rect)
-    for i in range(4, 23, 2):
-        d = i * s / 90
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(QColor(t.RAISED if i % 4 else t.EDGE), 0.8))
-        p.drawEllipse(rect.adjusted(d, d, -d, -d))
-    d = s * 0.32
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor(t.BRONZE))
-    p.drawEllipse(rect.adjusted(d, d, -d, -d))
-    p.setBrush(QColor(t.RAIL))
-    p.drawEllipse(rect.center(), s * 0.023, s * 0.023)
-
-
-def _art(p, rect, pix, *, record=False):
-    _mat(p, rect)
-    if rect.height() < 6:
-        return
-    margin = min(16, max(4, rect.height() * 0.07))
-    box = rect.adjusted(margin, margin, -margin, -margin)
-    if pix.isNull():
-        side = min(box.height(), box.width()) * 0.86
-        _draw_disc(p, QRectF(box.center().x() - side / 2, box.center().y() - side / 2, side, side))
-        return
-    ratio = pix.width() / pix.height()
-    if record:
-        # The sleeve overlaps a partially exposed record.
-        h = min(box.height(), box.width() / (ratio + 0.32))
-        w = h * ratio
-        x = box.center().x() - (w + h * 0.32) / 2
-        y = box.center().y() - h / 2
-        _draw_disc(p, QRectF(x + w - h * 0.65, y + h * 0.018, h * 0.965, h * 0.965))
-    else:
-        h = min(box.height(), box.width() / ratio)
-        w = h * ratio
-        x, y = box.center().x() - w / 2, box.center().y() - h / 2
-    target = QRectF(x, y, w, h)
-    p.fillRect(target.translated(2, 3), QColor(t.RAIL))
-    p.drawPixmap(target, pix, QRectF(pix.rect()))
-
-
-class Sleeve(QWidget):
     def __init__(self):
         super().__init__()
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setStyleSheet("""
+            QScrollArea, QScrollArea > QWidget > QWidget {background:transparent;border:0}
+            QScrollBar:horizontal {background:#333336;height:5px;margin:0}
+            QScrollBar::handle:horizontal {background:#918366;min-width:24px;border-radius:2px}
+            QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal {width:0}
+            QScrollBar::add-page:horizontal,QScrollBar::sub-page:horizontal {background:transparent}
+        """)
+        self.origin = None
+        self.dragging = False
+        self.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        kind = event.type()
+        if kind == QEvent.Type.Wheel:
+            delta = event.pixelDelta()
+            if delta.isNull():
+                delta = event.angleDelta()
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() - (delta.x() or delta.y()))
+            event.accept()
+            return True
+        if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            self.origin = event.globalPosition().x()
+            self.start_value = self.horizontalScrollBar().value()
+            self.dragging = False
+        elif kind == QEvent.Type.MouseMove and self.origin is not None:
+            dx = event.globalPosition().x() - self.origin
+            if abs(dx) >= QApplication.startDragDistance():
+                self.dragging = True
+            if self.dragging:
+                self.horizontalScrollBar().setValue(self.start_value - round(dx))
+                return True
+        elif kind == QEvent.Type.MouseButtonRelease:
+            self.origin = None
+            if self.dragging:
+                self.dragging = False
+                if isinstance(obj, QAbstractButton):
+                    obj.setDown(False)
+                return True
+        return super().eventFilter(obj, event)
+
+
+class Banner(QWidget):
+    def __init__(self, *, favorite=False):
+        super().__init__()
+        self.favorite = favorite
         self.pix = QPixmap()
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        self.setMinimumHeight(56)
 
     def set_image(self, pix):
         self.pix = pix
         self.update()
 
     def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
-        r = QRectF(self.rect())
-        clip = QPainterPath()
-        clip.addRoundedRect(r, t.R_SMALL, t.R_SMALL)
-        p.setClipPath(clip)
-        _art(p, r, self.pix, record=True)
+        box = QRectF(self.rect())
+        with QPainter(self) as p:
+            p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
+            path = QPainterPath()
+            path.addRoundedRect(box, 4, 4)
+            p.setClipPath(path)
+            p.fillRect(box, QColor("#303033" if self.favorite else "#28272a"))
+            if self.pix.isNull():
+                return
+            if self.favorite:
+                p.setOpacity(0.085)
+                draw_cover(p, self.pix, box)
+                p.setOpacity(1)
+                lane = max(1, round(box.width() * 0.377))
+                overlay = QPixmap(lane, self.height())
+                overlay.fill(Qt.GlobalColor.transparent)
+                with QPainter(overlay) as layer:
+                    area = QRectF(overlay.rect())
+                    layer.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    self._crop(layer, area, 0.70, 0.44)
+                    layer.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+                    mask = QLinearGradient(area.topLeft(), area.topRight())
+                    for position, alpha in ((0, 12), (0.26, 19), (0.53, 55), (0.67, 105), (0.84, 118), (1, 0)):
+                        mask.setColorAt(position, QColor(0, 0, 0, alpha))
+                    layer.fillRect(area, mask)
+                p.drawPixmap(0, 0, overlay)
+                if self.property("selected"):
+                    p.fillRect(0, 8, 2, self.height() - 16, QColor(t.GOLD))
+                return
+            self._crop(p, box, 0.66, 0.45)
+            horizontal = QLinearGradient(box.topLeft(), box.topRight())
+            for offset, alpha in ((0, 235), (0.16, 202), (0.4, 122), (0.66, 35), (1, 8)):
+                horizontal.setColorAt(offset, QColor(38, 36, 38, alpha))
+            p.fillRect(box, horizontal)
+            shade = QLinearGradient(box.topLeft(), box.bottomLeft())
+            for position, alpha in ((0, 0), (0.44, 0), (0.58, 100), (0.72, 218), (1, 241)):
+                shade.setColorAt(position, QColor(38, 36, 38, alpha))
+            p.fillRect(box, shade)
+
+    def _crop(self, painter, area, x, y):
+        scale = max(area.width() / self.pix.width(), area.height() / self.pix.height())
+        w, h = area.width() / scale, area.height() / scale
+        source = QRectF((self.pix.width() - w) * x, (self.pix.height() - h) * y, w, h)
+        painter.drawPixmap(area, self.pix, source)
+
+
+_JACKET_TITLES = {
+    "world-championship-2004": "WC Tournament 2004",
+    "world-championship-2007": "WC 2007",
+    "world-championship-2008": "WC 2008",
+    "gx-beginning-of-destiny": "Beginning of Destiny",
+    "online-duel-evolution": "Duel Evolution",
+    "online-duel-accelerator": "Duel Accelerator",
+}
 
 
 class CoverTile(QAbstractButton):
@@ -158,112 +196,83 @@ class CoverTile(QAbstractButton):
 
     def __init__(self):
         super().__init__()
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self.setMinimumSize(0, 0)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.album = None
         self.pix = QPixmap()
-        self.selected = False
-        self.columns = 4
+        self.selected = self.wide = False
 
     def set_album(self, album, pix):
         self.album, self.pix = album, pix
-        state = self.availability()
-        self.setAccessibleName(f"{album.name}, {metadata(album)}, {state}")
-        self.setToolTip(f"{album.game}\n{metadata(album)}\n{state}")
+        self.setAccessibleName(album.game)
+        self.setToolTip(f"{album.game}\n{metadata(album)}")
         self.update()
 
-    def availability(self):
-        if self.album.pack is None:
-            return f"{self.album.track_count} local track" + ("s" if self.album.track_count != 1 else "")
-        if not self.album.track_count:
-            return "Cover only"
-        return "Cached" if self.album.cached else "Available"
-
-    def keyPressEvent(self, e):
-        directions = {
-            Qt.Key.Key_Left: -1,
-            Qt.Key.Key_Right: 1,
-            Qt.Key.Key_Up: -self.columns,
-            Qt.Key.Key_Down: self.columns,
-        }
-        if e.key() in directions:
-            self.moved.emit(directions[e.key()])
-        elif e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+    def keyPressEvent(self, event):
+        moves = {Qt.Key.Key_Left: -2, Qt.Key.Key_Right: 2, Qt.Key.Key_Up: -1, Qt.Key.Key_Down: 1}
+        if event.key() in moves:
+            self.moved.emit(moves[event.key()])
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.click()
         else:
-            super().keyPressEvent(e)
+            super().keyPressEvent(event)
 
-    def paintEvent(self, e):
-        if self.album is None:
+    def paintEvent(self, event):
+        if not self.album:
             return
-        p = QPainter(self)
-        p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
-        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        clip = QPainterPath()
-        clip.addRoundedRect(r, t.R_PANEL, t.R_PANEL)
-        p.setClipPath(clip)
-        p.fillRect(r, QColor(t.ACTIVE if self.selected else t.HOVER if self.underMouse() else t.PANEL))
-        large = r.height() >= 295
-        caption = 68 if large else 56
-        art = r.adjusted(0, 0, 0, -caption)
-        _art(p, art, self.pix)
-        state = self.availability()
-        font = t.font(10, bold=True)
-        badge_width = QFontMetrics(font).horizontalAdvance(state) + 14
-        badge = QRectF(art.right() - badge_width - 5, art.top() + 5, badge_width, 18)
-        p.setPen(Qt.PenStyle.NoPen)
-        fill = QColor(t.RAIL)
-        fill.setAlpha(232)
-        p.setBrush(fill)
-        p.drawRoundedRect(badge, 4, 4)
-        _text(
-            p, badge, state, 10, t.PALE if self.album.track_count else t.TEXT, bold=True, align=Qt.AlignmentFlag.AlignCenter
-        )
-        cap = QRectF(r.left() + 10, art.bottom() + 3, r.width() - 20, caption - 7)
-        meta_size = 13 if large else t.SMALL
-        meta_height = QFontMetrics(t.font(meta_size)).height()
-        name_box = cap.adjusted(0, 0, 0, -meta_height)
-        p.setFont(t.font(t.SUBTITLE if large else t.BODY, bold=True))
-        p.setPen(QColor(t.INK))
-        flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap
-        name = self.album.name
-        if p.boundingRect(name_box, flags, name).height() > name_box.height():
-            p.setFont(t.font(t.SMALL, bold=True))
-            if p.boundingRect(name_box, flags, name).height() > name_box.height():
-                name = p.fontMetrics().elidedText(name, Qt.TextElideMode.ElideMiddle, int(name_box.width()))
-        p.drawText(name_box, flags, name)
-        _text(p, QRectF(cap.left(), name_box.bottom(), cap.width(), meta_height), metadata(self.album), meta_size, t.MUTED)
-        p.setClipping(False)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        focused = self.property("keyboardFocus")
-        p.setPen(
-            QPen(QColor(t.PALE if focused else t.GOLD if self.selected else t.EDGE), 2 if self.selected or focused else 1)
-        )
-        p.drawRoundedRect(r, t.R_PANEL, t.R_PANEL)
+        with QPainter(self) as p:
+            p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
+            w = self.width()
+            h = self.height() - (57 if self.wide else 45)
+            rect = QRectF(1, 1, w - 2, h - 2)
+            focus = self.property("keyboardFocus")
+            p.setPen(QPen(QColor(t.GOLD if self.selected or focus else "#555456"), 2 if self.selected or focus else 1))
+            p.setBrush(QColor("#262629"))
+            p.drawRoundedRect(rect, 3, 3)
+            if not self.pix.isNull():
+                area = rect.adjusted(1, 1, -1, -1)
+                size = self.pix.deviceIndependentSize().scaled(area.size(), Qt.AspectRatioMode.KeepAspectRatio)
+                target = QRectF(area.topLeft(), size)
+                target.moveCenter(area.center())
+                p.drawPixmap(target, self.pix, QRectF(self.pix.rect()))
+            name = self.album.name.removeprefix("GX ").removeprefix("5D's ").removeprefix("ZEXAL ")
+            name = _JACKET_TITLES.get(self.album.id.removeprefix("music-"), name)
+            p.setFont(t.font(13 if self.wide else 12))
+            p.setPen(QColor(t.GOLD if self.selected else t.INK))
+            metrics = p.fontMetrics()
+            lines = name.split()
+            first = ""
+            while lines and (not first or metrics.horizontalAdvance(first + " " + lines[0]) <= w):
+                first = (first + " " + lines.pop(0)).strip()
+            for i, line in enumerate((first, " ".join(lines))):
+                text = metrics.elidedText(line, Qt.TextElideMode.ElideRight, w)
+                p.drawText(
+                    QRectF(0, h + 3 + i * (15 if self.wide else 12), w, metrics.height()), Qt.AlignmentFlag.AlignCenter, text
+                )
+            series = self.album.series.replace("SEVENS / Rush", "Rush Duel")
+            detail = " · ".join(str(s) for s in (series, self.album.year) if s)
+            _text(
+                p,
+                QRectF(0, self.height() - 16, w, 15),
+                detail,
+                11 if self.wide else 10,
+                t.MUTED,
+                align=Qt.AlignmentFlag.AlignCenter,
+            )
 
 
 class TrackRow(QPushButton):
-    """A single compact track with independently aligned number, title and duration."""
-
     def __init__(self):
         super().__init__()
         self.setCheckable(True)
-        self.setFixedHeight(33)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.number = self.title = self.time = ""
-        self.setStyleSheet(
-            "QPushButton {border:1px solid transparent; background:transparent;}"
-            f"QPushButton:checked {{background:{t.ACTIVE}; border-color:{t.EDGE};}}"
-            f"QPushButton:hover {{background:{t.HOVER};}} QPushButton[keyboardFocus=true]:focus {{border-color:{t.PALE};}}"
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.setStyleSheet("QPushButton {background:transparent;border:0;border-top:1px solid #514d50;border-radius:0}")
+        self.title = self.scene = ""
 
-    def set_track(self, index, track, selected):
-        self.number = f"{index + 1:02d}"
+    def set_track(self, track, selected, scene):
         self.title = track_label(track.title) if track.role else track.title
-        self.time = mmss(track.duration_seconds) if track.duration_seconds else ""
+        self.scene = scene
         self.setToolTip(self.title)
         self.setAccessibleName(f"Preview {self.title}")
         self.setChecked(selected)
@@ -271,57 +280,115 @@ class TrackRow(QPushButton):
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        p = QPainter(self)
-        w, h = self.width(), self.height()
-        ink = t.PALE if self.isChecked() else t.TEXT
-        _text(p, QRectF(9, 0, 24, h), self.number, 11, t.GOLD if self.isChecked() else t.MUTED)
-        _text(p, QRectF(35, 0, w - 82, h), self.title, 14, ink)
-        _text(p, QRectF(w - 45, 0, 35, h), self.time, 12, t.MUTED, align=Qt.AlignmentFlag.AlignRight)
+        with QPainter(self) as p:
+            w, h = self.width(), self.height()
+            ink = t.GOLD if self.isChecked() else t.TEXT
+            _text(p, QRectF(1, 0, 18, h), "▶", 11, ink)
+            _text(p, QRectF(23, 0, w - 124, h), self.title, 13, ink)
+            _text(p, QRectF(w - 101, 0, 100, h), self.scene, 11, t.MUTED, align=Qt.AlignmentFlag.AlignRight)
 
 
-class RoleButton(QAbstractButton):
-    def __init__(self, role, title):
+SCENE_TIPS = {
+    "menu": "Plays on the main menu.",
+    "deck": "Plays while building or editing a deck.",
+    "duel": "Plays during a duel.",
+    "win": "Plays after winning a duel.",
+    "lose": "Plays after losing a duel.",
+}
+
+
+class SceneRow(QAbstractButton):
+    """Shared column positions keep the heading, tooltips and all five actions aligned."""
+
+    def __init__(self, role="", title="Scene"):
         super().__init__()
         self.role, self.title = role, title
-        self.assignment = ""
+        self.assignment = "Assigned Track"
+        self.game, self.year = "Game", "Year"
         self.active = False
-        self.glyph = icon(role, t.GOLD)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(65)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus if role else Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor if role else Qt.CursorShape.ArrowCursor)
+        if not role:
+            self.setToolTip("Hover over a scene’s information icon to see where its music plays.")
 
-    def set_assignment(self, name, pool, selected, active):
+    def set_assignment(self, name, pool, selected, active, game, year):
         self.assignment = name if active else track_label(name)
         if len(pool) > 1:
-            self.assignment = f"{self.assignment}  +{len(pool) - 1}" if active else f"{len(pool)} local tracks"
-        self.active = active
+            self.assignment = f"{self.assignment} +{len(pool) - 1}" if active else f"{len(pool)} local tracks"
+        self.game, self.year, self.active = game, str(year or "—"), active
         tracks = "\n".join(track_label(track) for track in pool)
-        tip = f"{self.title} · sound/BGM/{self.role}\n" + (tracks or "No tracks in this folder.")
+        tip = f"{SCENE_TIPS[self.role]}\n{tracks or 'No tracks in this folder.'}"
         if len(pool) > 1:
             tip += "\nEDOPro picks randomly from these tracks."
         if selected:
-            tip += f"\nAssign {selected} to this role."
+            tip += f"\nAssign {selected} to {self.title}."
         self.setToolTip(tip)
         self.setAccessibleName(f"{self.title}, {self.assignment}")
         self.setAccessibleDescription(tip)
         self.update()
 
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.click()
-        else:
-            super().keyPressEvent(event)
+    def event(self, event):
+        if self.role and event.type() == QEvent.Type.ToolTip and abs(event.pos().x() - self.width() * 0.224) < 16:
+            QToolTip.showText(event.globalPos(), SCENE_TIPS[self.role], self)
+            return True
+        return super().event(event)
 
     def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        focused = self.property("keyboardFocus")
-        p.setPen(QPen(QColor(t.PALE if focused else t.GOLD if self.active else t.EDGE), 2 if focused else 1))
-        p.setBrush(QColor(t.ACTIVE if self.active else t.HOVER if self.underMouse() and self.isEnabled() else t.PANEL))
-        p.drawRoundedRect(r, t.R_PANEL, t.R_PANEL)
-        gap = 12 if r.width() > 145 else 8
-        self.glyph.paint(p, gap, 12, 16, 16)
-        _text(p, QRectF(gap + 22, 6, r.width() - gap - 24, 27), self.title, 14, t.INK, bold=True)
-        _text(p, QRectF(gap, 32, r.width() - gap * 2, 23), self.assignment, 13, t.PALE if self.active else t.MUTED)
+        with QPainter(self) as p:
+            w, h = self.width(), self.height()
+            wide = w > 710
+            ink = t.MUTED if not self.role else t.INK
+            if self.role:
+                if self.active or self.property("keyboardFocus") or (self.underMouse() and self.isEnabled()):
+                    p.fillRect(self.rect(), QColor(t.ACTIVE if self.active else t.HOVER))
+                p.fillRect(0, 0, w, 1, QColor("#424144"))
+                if self.active:
+                    p.fillRect(0, 6, 2, h - 12, QColor(t.GOLD))
+            starts = [5, 0.215 * w, 0.276 * w, 0.575 * w, 0.836 * w, 0.955 * w]
+            labels = [self.title, "ⓘ", self.assignment, self.game, self.year]
+            for i, text in enumerate(labels):
+                if i == 1:
+                    cx, cy = round(starts[i] + 6), h // 2
+                    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    p.setPen(QPen(QColor(t.GOLD if self.active else t.MUTED), 1))
+                    p.drawEllipse(QRectF(cx - 5.5, cy - 5.5, 11, 11))
+                    p.drawLine(cx, cy, cx, cy + 3)
+                    p.drawPoint(cx, cy - 3)
+                    continue
+                color = t.GOLD if self.active and i == 2 else ink if i < 3 else t.MUTED
+                _text(
+                    p,
+                    QRectF(starts[i], 0, starts[i + 1] - starts[i] - 3, h),
+                    text,
+                    (14 if wide else 12) if self.role else (12 if wide else 11),
+                    color,
+                )
+            if self.role and self.isEnabled():
+                _text(
+                    p,
+                    QRectF(starts[-1], 0, w - starts[-1], h),
+                    "✓" if self.active else "⊞",
+                    15,
+                    t.GOLD if self.active else t.MUTED,
+                )
+
+
+class Waveform(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.values = ()
+        self.fraction = 0
+        self.setMinimumHeight(19)
+        self.setAccessibleName("Preview progress")
+
+    def paintEvent(self, event):
+        with QPainter(self) as p:
+            w, h = self.width(), self.height()
+            count = max(1, w // 4)
+            for i in range(count):
+                amp = self.values[i * len(self.values) // count] if self.values else 0
+                height = max(2, round((h - 2) * amp))
+                p.fillRect(
+                    i * w // count, (h - height) // 2, 2, height, QColor(t.GOLD if i / count < self.fraction else "#847d79")
+                )

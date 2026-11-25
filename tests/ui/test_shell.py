@@ -2,12 +2,14 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QLabel
 
 from edopal import app
 from edopal.core.feature import FeatureSpec
 from edopal.core.install import RunState
+from edopal.core.updates import RELEASES, UpdateCheck
 from edopal.dev.preview import make_core
 from edopal.ui import theme
 
@@ -89,7 +91,7 @@ def test_window_sizes_and_compact_navigation(shell):
     assert window.nav["themes"].accessibleName() == "Themes"
     window.resize(1920, 1080)
     assert window.nav["themes"].title.isVisible()
-    assert window.nav["settings"].geometry().top() > 980
+    assert window.nav["settings"].mapTo(window, QPoint()).y() == 1023
 
 
 def test_launch_toast_duplicate_guard_and_exit_hooks(shell, monkeypatch):
@@ -151,7 +153,7 @@ def test_database_bootstrap_refreshes_waiting_install(shell, monkeypatch):
     waiting = replace(core.installs.current(), ready=False)
     core.installs._install = waiting
     window.install_changed.emit(waiting)
-    assert "Waiting for databases" in window.folder_state.text()
+    assert "Waiting for Databases" in window.folder_state.text()
     assert window.launch.isEnabled()
     monkeypatch.setattr(core.installs, "run_state", lambda: RunState.RUNNING)
     window._poll()
@@ -179,3 +181,37 @@ def test_launch_failure_and_shutdown(shell, monkeypatch):
     assert not window.poll_timer.isActive()
     core.notify("after close")
     assert "after close" not in window.toast.message.text()
+
+
+def test_brand_release_states_and_links(shell, monkeypatch, qtbot):
+    core, window, _, _ = shell
+    results = iter([UpdateCheck("v6.0.0", False, False), UpdateCheck("v6.1.0", True, False), UpdateCheck(None, False, True)])
+    requests = []
+    urls = []
+
+    def check(cache):
+        requests.append(cache)
+        return next(results)
+
+    monkeypatch.setattr("edopal.core.updates.check_for_updates", check)
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: urls.append(url.toString()) or True)
+    pill = window.release
+    window.check_updates()
+    assert pill.title.text() == "Up to Date" and pill.mark.isVisible()
+    qtbot.mouseMove(pill, pill.rect().center())
+    assert pill.arrow.isVisible()
+    qtbot.mouseClick(pill, Qt.MouseButton.LeftButton)
+    assert urls == [RELEASES]
+    qtbot.mouseMove(window.pages["music"], QPoint(15, 15))
+    assert not pill.arrow.isVisible()
+
+    window.check_updates()
+    assert pill.title.text() == "Update to v6.1.0"
+    assert pill.property("updateAvailable") and not pill.mark.isVisible()
+    pill.click()
+    assert urls[-1].endswith("/releases/tag/v6.1.0")
+
+    window.check_updates()
+    assert pill.title.text() == "Check Unavailable"
+    assert not pill.property("updateAvailable")
+    assert requests == [core.paths.cache] * 3

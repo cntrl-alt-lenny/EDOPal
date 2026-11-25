@@ -1,4 +1,4 @@
-"""Downloadable packs (themes, card backs, music) from the edopal-packs repo (Qt-free).
+"""Downloadable content packs from the edopal-packs repo (Qt-free).
 
 Catalog: ``catalog.json`` attached to the newest ``catalog`` release of PACKS_REPO, listing
 :class:`PackInfo` rows. Each pack is a ZIP release asset containing ``manifest.json`` at its
@@ -11,9 +11,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, get_args
 
-PackKind = Literal["theme", "cardback", "music", "format"]
+PackKind = Literal["theme", "cardback", "music", "format", "art", "icons"]
+PACK_KINDS = get_args(PackKind)
 Progress = Callable[[int, int], None]  # (done_bytes, total_bytes)
 
 

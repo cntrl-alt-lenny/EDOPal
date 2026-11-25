@@ -178,3 +178,18 @@ class PreviewPlayer:
         self._muted = muted
         if self._current:
             self._current.progress.muted = muted
+
+
+def audio_profile(path: Path) -> tuple[float, tuple[float, ...]]:
+    """Read a low-rate mono overview for the preview's waveform on its worker."""
+    try:
+        samples = miniaudio.decode_file(str(path), nchannels=1, sample_rate=2000).samples
+    except (OSError, ValueError, miniaudio.MiniaudioError):
+        return 0.0, ()
+    step = max(1, (len(samples) + 191) // 192)
+    levels = []
+    for start in range(0, len(samples), step):
+        section = samples[start : start + step : 4]
+        levels.append((sum(v * v for v in section) / len(section)) ** 0.5)
+    peak = max(levels, default=0) or 1
+    return len(samples) / 2000, tuple((v / peak) ** 0.84 for v in levels)

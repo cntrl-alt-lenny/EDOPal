@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from edopal.core import Core
@@ -27,3 +27,5 @@ class FeatureSpec:
     on_install_changed: Callable[[Core], None] | None = None
     on_game_exited: Callable[[Core], None] | None = None  # e.g. HD Cards re-checks for new cards
     badge: Callable[[Core], str | None] | None = field(default=None)  # sidebar badge text, e.g. "12"
+    kind: Literal["feature", "plugin"] = "feature"
+    section: str | None = None  # custom library heading for features; plugins use the Plugins section

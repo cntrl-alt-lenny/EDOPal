@@ -132,7 +132,7 @@ class _Card:
     kind: int | None
 
 
-def _cards(root: Path) -> tuple[dict[int, _Card], list[str]]:
+def read_cards(root: Path) -> tuple[dict[int, _Card], list[str]]:
     cards, unreadable = {}, []
     for path in database_paths(root, unreadable):
         try:
@@ -217,12 +217,13 @@ def prepare(
     *,
     stock_tcg: bool = False,
     sizes: dict | None = None,
+    card_data: tuple[dict[int, _Card], list[str]] | None = None,
 ) -> PreparedDeck:
     """Return the candidate YDK and every substitution or unresolved legality issue; leave all writes to storage."""
     sections = read_ydk(source)
     if preview and preview.original and preview.original != sections:
         raise DeckChanged("Format Library changed this deck. Reload the preview before downloading.")
-    cards, unreadable = _cards(install.root)
+    cards, unreadable = read_cards(install.root) if card_data is None else card_data
     if not cards or unreadable:
         issue = "Couldn’t verify card versions because the selected game's card databases are missing or unreadable."
         return PreparedDeck(source, (), (issue,))
@@ -282,3 +283,21 @@ def prepare(
         return PreparedDeck(source, (), tuple(issues))
     revised = tuple(tuple(replacements.get(int(code), code) for code in section) for section in sections)
     return PreparedDeck(encode_ydk(revised), tuple(changes), tuple(issues))
+
+
+def preview_metadata(detail: DeckPreview, limits, cards):
+    versions = _versions(limits, cards)
+    caps = {}
+    for section in detail.printings:
+        for code, name in section:
+            card = cards.get(code)
+            family = (card.alias or code) if card else code
+            cap = limits.get(code, limits.get(family))
+            if cap is None and len(matches := versions.get((family, _identity(name)), [])) == 1:
+                cap = limits[matches[0]]
+            if cap in (0, 1, 2):
+                caps[code] = cap
+    main = Counter(code for code, _ in detail.printings[0]) if detail.printings else {}
+    if not main or any(not (card := cards.get(code)) or not card.kind for code in main):
+        return caps, ()
+    return caps, tuple(sum(n for code, n in main.items() if cards[code].kind & bit) for bit in (1, 2, 4))

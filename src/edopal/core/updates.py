@@ -1,4 +1,4 @@
-"""Daily, conditional checks of the latest stable EDOPal release. Call from a job."""
+"""Conditional checks of the latest stable EDOPal release. Call from a job."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 import re
 import sqlite3
 import ssl
-import time
 from contextlib import closing
 from dataclasses import dataclass
 from http.client import HTTPException
@@ -21,7 +20,6 @@ from edopal import REPO, __version__
 
 RELEASES = f"https://github.com/{REPO}/releases"
 _API = f"https://api.github.com/repos/{REPO}/releases/latest"
-_DAY = 24 * 60 * 60
 _NUMBER = r"(0|[1-9][0-9]*)"
 _IDENTIFIERS = r"[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*"
 _VERSION = re.compile(rf"v?{_NUMBER}\.{_NUMBER}\.{_NUMBER}(?:-({_IDENTIFIERS}))?(?:\+{_IDENTIFIERS})?")
@@ -92,24 +90,26 @@ def _fetch_release(tag: str | None, etag: str | None) -> tuple[str, str | None]:
 
 
 def check_for_updates(cache: Path, current: str = __version__) -> UpdateCheck:
-    """Even simultaneous application instances share one GitHub request per rolling day."""
+    """Revalidate the last known release with GitHub on each application launch."""
     installed = _installed_key(current)
     cache.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(cache / "releases.sqlite3", timeout=12)) as db, db:
-        # Serialize the read, refresh and write. An interrupted refresh rolls back cleanly.
-        db.execute("BEGIN IMMEDIATE")
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS latest (id INTEGER PRIMARY KEY, checked REAL, tag TEXT, etag TEXT, failed INT)"
-        )
-        row = db.execute("SELECT checked, tag, etag, failed FROM latest WHERE id = 1").fetchone()
-        now = time.time()
-        checked, tag, etag, failed = row or (None, None, None, False)
-        if checked is None or not 0 <= now - checked < _DAY:
-            try:
-                tag, etag = _fetch_release(tag, etag)
-            except (OSError, HTTPException, ValueError):
-                failed = True
-            else:
-                failed = False
-            db.execute("INSERT OR REPLACE INTO latest VALUES (1, ?, ?, ?, ?)", (now, tag, etag, failed))
-    return UpdateCheck(tag, bool(tag and _version_key(tag) > installed), bool(failed))
+    with closing(sqlite3.connect(cache / "releases.sqlite3", timeout=12)) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS latest (id INTEGER PRIMARY KEY, tag TEXT, etag TEXT)")
+        previous = db.execute("SELECT tag, etag FROM latest WHERE id = 1").fetchone() or (None, None)
+        try:
+            tag, etag = _fetch_release(*previous)
+        except (OSError, HTTPException, ValueError):
+            tag, _ = previous
+            failed = True
+        else:
+            failed = False
+            if (tag, etag) != previous:
+                # A different instance might have refreshed the cache while this request was in flight.
+                with db:
+                    db.execute(
+                        "INSERT INTO latest (id, tag, etag) VALUES (1, ?, ?) "
+                        "ON CONFLICT(id) DO UPDATE SET tag = excluded.tag, etag = excluded.etag "
+                        "WHERE latest.tag IS ? AND latest.etag IS ?",
+                        (tag, etag, *previous),
+                    )
+    return UpdateCheck(tag, bool(tag and _version_key(tag) > installed), failed)

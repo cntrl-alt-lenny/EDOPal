@@ -24,6 +24,9 @@ import aiohttp
 import certifi
 from PIL import Image
 
+from .reviewed import MEASURED_RUSH
+from .sources import DIRECT, MAPPED, RAW_HOST, is_hd, rush_index
+
 if TYPE_CHECKING:
     from edopal.core.install import Install
 
@@ -39,6 +42,7 @@ CDN_RATE = 15
 CONNECTIONS_PER_HOST = 12
 IGNIS_HOST = "pics.projectignis.org"
 PINS = {
+    **MAPPED,
     504700040: 23401840,
     504700142: 83011278,
     511000824: 83555667,
@@ -84,8 +88,10 @@ def load_pins(path: Path) -> dict[int, int]:
     return pins
 
 
-def candidates(card: Card, catalog: Catalog, original: bool = False, pins=None) -> list[tuple[int, str]]:
+def candidates(card: Card, catalog: Catalog, original: bool = False, pins=None, rush=False) -> list[tuple[int, str]]:
     own = [(card.id, f"{CDN}/cards/{card.id}.jpg"), (card.id, f"{IGNIS}/{card.id}.jpg")]
+    if rush and card.rush and (entry := rush_index().get(card.id)):
+        own.insert(0, (card.id, entry[0]))
     match = ERA.search(card.name)
     prints = []
     if pin := (PINS if pins is None else pins).get(card.id):
@@ -176,6 +182,23 @@ def _asset(data: bytes, printing: int, source: str) -> ImageAsset:
     return ImageAsset(data, width, height, "png" if data.startswith(b"\x89PNG") else "jpg", printing, source)
 
 
+def _downloaded(data: bytes, printing: int, url: str) -> ImageAsset:
+    asset = _asset(data, printing, url)
+    community = urlsplit(url).hostname == RAW_HOST
+    if community:
+        entry = rush_index().get(printing)
+        blob = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+        if entry != (url, blob) or asset.extension != "png" or not is_hd(asset.width, asset.height):
+            raise ValueError("Rush artwork differs from the reviewed HD print")
+    elif url.endswith(".jpg") and asset.extension != "jpg":
+        raise ValueError("Expected a JPEG from the artwork host")
+    with Image.open(BytesIO(data), formats=("JPEG", "PNG")) as image:
+        if not community:
+            image.draft("L", (1, 1))
+        image.load()
+    return asset
+
+
 def _crop(data: bytes, card: Card) -> ImageAsset:
     bounds = (0.117, 0.182, 0.883, 0.707)
     if card.rush:
@@ -208,16 +231,28 @@ def _retry_after(value: str | None) -> float:
 
 
 class ArtworkClient:
-    def __init__(self, cache: Path, install: Install, cancelled: Callable[[], bool] = lambda: False, *, pins=None):
+    def __init__(
+        self,
+        cache: Path,
+        install: Install,
+        cancelled: Callable[[], bool] = lambda: False,
+        *,
+        pins=None,
+        rush=False,
+        attempts=2,
+    ):
         self.cache = cache / "hdcards"
         self.install_key = os.path.normcase(str(install.root.resolve()))
         self.cancelled = cancelled
         self.pins = pins
+        self.rush = rush
+        self.attempts = attempts
         self._hits: OrderedDict[str, ImageAsset | None] = OrderedDict()
         self._hit_bytes = 0
         self._inflight = {}
         self._gates = defaultdict(asyncio.Lock)
         self._connections = defaultdict(lambda: asyncio.Semaphore(CONNECTIONS_PER_HOST))
+        self._connections[RAW_HOST] = asyncio.Semaphore(1)
         self._next = defaultdict(float)
         self._catalog = None
 
@@ -272,7 +307,7 @@ class ArtworkClient:
                 now = time.time()
                 delay = self._next[host] - time.monotonic()
                 if delay <= 0:
-                    interval = 1.0 if host == IGNIS_HOST else 1 / CDN_RATE
+                    interval = 1.0 if host in (IGNIS_HOST, RAW_HOST) else 1 / CDN_RATE
                     # A conditional write shares the start limit (and Retry-After)
                     # with any other EDOPal instance using this cache directory.
                     admitted = self._cache_db.execute(
@@ -315,7 +350,7 @@ class ArtworkClient:
         result = None
         if row and hashlib.sha256(row[1]).digest() == row[0]:
             try:
-                result = _asset(row[1], printing, url)
+                result = _downloaded(row[1], printing, url)
             except (ValueError, OSError):
                 pass
         if result is None:
@@ -334,12 +369,20 @@ class ArtworkClient:
 
     async def _request(self, printing: int, url: str) -> ImageAsset | None:
         host = urlsplit(url).hostname
-        for attempt in range(2):
+        for attempt in range(self.attempts):
             # Admit a start only once a connection slot is available.
             async with self._connections[host]:
                 await self._pace(host)
                 try:
                     async with self.session.get(url, allow_redirects=False) as response:
+                        if host == RAW_HOST and response.headers.get("X-RateLimit-Remaining") == "0":
+                            reset = response.headers.get("X-RateLimit-Reset", "")
+                            if re.fullmatch(r"[0-9]{1,12}", reset):
+                                self.db.execute(
+                                    "INSERT INTO cooldowns VALUES (?,?) ON CONFLICT(host) DO UPDATE SET "
+                                    "until=max(until,excluded.until)",
+                                    (host, int(reset)),
+                                )
                         if response.status == 404:
                             return None
                         if response.status == 200:
@@ -351,11 +394,8 @@ class ArtworkClient:
                                 if len(data) + len(chunk) > MAX_BYTES:
                                     raise FetchError("Artwork exceeds 25 MiB")
                                 data.extend(chunk)
-                            asset = _asset(bytes(data), printing, url)
-                            if url.endswith(".jpg") and asset.extension != "jpg":
-                                raise FetchError("Expected a JPEG from the artwork host")
-                            return asset
-                        if response.status != 429 and response.status < 500:
+                            return _downloaded(bytes(data), printing, url)
+                        if response.status not in (403, 429) and response.status < 500:
                             raise FetchError(f"Artwork host returned HTTP {response.status}")
                         retry = response.headers.get("Retry-After")
                         delay = _retry_after(retry)
@@ -369,7 +409,7 @@ class ArtworkClient:
                 except InterruptedError:
                     raise
                 except (aiohttp.ClientError, OSError, ValueError) as exc:
-                    if attempt:
+                    if attempt + 1 == self.attempts:
                         raise FetchError("Could not read artwork") from exc
                     self._next[host] = max(self._next[host], time.monotonic() + 1.0)
         raise FetchError("Artwork host unavailable")
@@ -386,14 +426,20 @@ class ArtworkClient:
 
     async def face(self, card: Card, catalog: Catalog, original: bool = False) -> ImageAsset | None:
         self._check()
-        sources = candidates(card, catalog, original, self.pins)
+        sources = candidates(card, catalog, original, self.pins, self.rush)
         key = self._miss_key(card.id, "face", sources)
-        if self._miss(key):
+        expects_hd = card.id in DIRECT or (self.rush and card.rush and card.id in MEASURED_RUSH)
+        if not expects_hd and self._miss(key):
             return None
         transient = None
         for rank, (printing, url) in enumerate(sources):
             try:
                 if result := await self._fetch(printing, url):
+                    if expects_hd and not is_hd(result.width, result.height):
+                        transient = FetchError("The known HD print is unavailable at its source")
+                        continue
+                    if transient and self.attempts == 1 and not is_hd(result.width, result.height):
+                        continue
                     return replace(
                         result,
                         fallback=bool(rank),
@@ -403,6 +449,11 @@ class ArtworkClient:
                 transient = exc
         if transient:
             raise transient
+        if expects_hd:
+            for _, url in sources:
+                if self._hits.get(url) is None:
+                    self._hits.pop(url, None)
+            raise FetchError("The reviewed HD print could not be downloaded")
         self._remember(key)
         return None
 

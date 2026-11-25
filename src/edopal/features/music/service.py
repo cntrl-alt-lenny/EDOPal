@@ -20,7 +20,7 @@ from edopal.core.locks import file_lock
 from edopal.core.packs import PackInfo
 from edopal.core.storage import GameRunningError
 
-ROLES = {"menu": "Main menu", "deck": "Deck building", "duel": "Duel", "win": "Victory", "lose": "Defeat"}
+ROLES = {"menu": "Main Menu", "deck": "Deck Building", "duel": "Duel", "win": "Victory", "lose": "Defeat"}
 YOUR_MUSIC = "your-music"
 AUDIO = frozenset({".mp3", ".ogg", ".flac", ".wav"})
 _BGM = "sound/BGM"
@@ -54,6 +54,8 @@ class Album:
     track_count: int = 0
     cached: bool = False
     install_root: Path | None = None
+    series: str = ""
+    builtin_titles: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,8 @@ class GameState:
     pools: dict[str, tuple[str, ...]] = field(default_factory=dict)
     conflicts: tuple[str, ...] = ()
     managed_roles: tuple[str, ...] = ()
+    sources: dict[str, list[str]] = field(default_factory=dict)
+    managed_paths: dict[str, str] = field(default_factory=dict)
 
 
 class ConfirmClosedError(GameRunningError):
@@ -77,6 +81,8 @@ class _Owned:
     filename: str
     title: str
     sha256: str
+    album_id: str = ""
+    track_id: str = ""
 
 
 def _digest(path: Path) -> str:
@@ -165,6 +171,9 @@ def _registry(install: Install) -> dict[str, _Owned]:
             raise ValueError
         owned = {role: _Owned(**row) for role, row in record["roles"].items()}
         for role, item in owned.items():
+            if item.album_id or item.track_id:
+                _slug(item.album_id)
+                _slug(item.track_id)
             if (
                 role not in ROLES
                 or not re.fullmatch(r"edopal-[a-z0-9-]+\.(ogg|wav|mp3|flac)", item.filename)
@@ -222,21 +231,43 @@ class MusicService:
                 cover = None
             meta = pack.meta
             tracks = _tracks(meta.get("tracks", ()))
-            albums.append(
-                Album(
-                    pack.id,
-                    pack.name,
-                    meta.get("game", pack.name),
-                    meta.get("year"),
-                    meta.get("platform", ""),
-                    cover,
-                    tracks,
-                    pack,
-                    meta.get("track_count", len(tracks)),
-                    bool(self.core.packs.cached(pack.id)),
-                )
+            album = Album(
+                pack.id,
+                pack.name,
+                meta.get("game", pack.name),
+                meta.get("year"),
+                meta.get("platform", ""),
+                cover,
+                tracks,
+                pack,
+                meta.get("track_count", len(tracks)),
+                bool(self.core.packs.cached(pack.id)),
+                series=meta.get("series", ""),
             )
+            if album.id == "music-edopro-default":
+                try:
+                    data = _manifest(pack, self._ensure(pack, ctx))
+                    titles = {row["path"]: row["title"] for rows in data.get("builtin_tracks", {}).values() for row in rows}
+                    album = replace(album, builtin_titles=titles)
+                except (ValueError, OSError, RuntimeError, KeyError):
+                    _check_cancel(ctx)
+            if album.cached and not tracks and album.track_count:
+                album = self.load_album(album, ctx)
+            albums.append(album)
         return tuple(albums)
+
+    def banners(self, ctx):
+        pack = next((p for p in self.core.packs.catalog("art") if p.id == "art-music-banners"), None)
+        if pack is None:
+            return {}
+        folder = self._ensure(pack, ctx)
+        files = json.loads(_path(folder, "manifest.json").read_text(encoding="utf-8"))["files"]
+        banners = {}
+        for relative in files:
+            path = Path(relative)
+            if path.parent == Path("banners") and path.suffix.lower() in {".jpg", ".jpeg", ".webp", ".png"}:
+                banners["music-" + path.stem.removeprefix("music-")] = _path(folder, relative)
+        return banners
 
     def _ensure(self, pack: PackInfo, ctx: JobContext) -> Path:
         with self._pack_lock:
@@ -255,7 +286,7 @@ class MusicService:
         if pack is None:
             return album
         if (
-            (album.tracks or pack.meta.get("track_count") == 0)
+            (any(not t.role for t in album.tracks) or pack.meta.get("track_count") == 0)
             and not album.cached
             and self.core.packs.cached(pack.id) is None
         ):
@@ -275,6 +306,7 @@ class MusicService:
             game=data.get("game", album.game),
             year=data.get("year", album.year),
             platform=data.get("platform", album.platform),
+            series=data.get("series", album.series),
         )
 
     def game_state(self) -> GameState:
@@ -304,12 +336,20 @@ class MusicService:
             except FileNotFoundError:
                 pass
         return GameState(
-            install, local, assignments, bool(flags and flags[-1] == "0"), bool(owned), pools, managed_roles=tuple(owned)
+            install,
+            local,
+            assignments,
+            bool(flags and flags[-1] == "0"),
+            bool(owned),
+            pools,
+            managed_roles=tuple(owned),
+            sources={k: [v.album_id, v.track_id] for k, v in owned.items() if v.album_id and v.track_id},
+            managed_paths={k: f"{_BGM}/{k}/{v.filename}" for k, v in owned.items()},
         )
 
     def _source(self, album: Album, track: Track, ctx: JobContext) -> tuple[Path, Track]:
         _check_cancel(ctx)
-        if album.pack:
+        if album.pack and not track.role:
             pack = album.pack
             folder = self._ensure(pack, ctx)
             data = _manifest(pack, folder)
@@ -328,13 +368,13 @@ class MusicService:
         path = _path(install.root, parent) / name
         if path.is_symlink() or not path.resolve(strict=True).is_relative_to(install.root.resolve()):
             raise ValueError("The selected music file moved outside this game folder.")
-        return path, local
+        return path, replace(local, title=track.title)
 
     def preview(self, album: Album, track: Track, ctx: JobContext) -> tuple[Path, bool]:
         """Return the preview source and whether the full pack is available offline."""
         _check_cancel(ctx)
         pack = album.pack
-        if pack and pack.preview and album.tracks and not album.cached:
+        if not track.role and pack and pack.preview and album.tracks and not album.cached:
             preview_id = pack.meta.get("preview_track", album.tracks[0].id)
             if track.id == preview_id and self.core.packs.cached(pack.id) is None:
                 # PackService exposes one lightweight cached media fetcher. Give the clip its
@@ -349,7 +389,7 @@ class MusicService:
                         raise ValueError("Music preview verification failed.")
                     _check_cancel(ctx)
                     return clip, False
-        return self._source(album, track, ctx)[0], pack is not None
+        return self._source(album, track, ctx)[0], pack is not None and not track.role
 
     def _require_closed(self, install: Install | None, confirmed: bool) -> None:
         current = self.core.installs.current()
@@ -373,88 +413,91 @@ class MusicService:
     def assign(
         self, album: Album, track: Track, role: str, install: Install, ctx: JobContext, *, confirmed_closed: bool = False
     ) -> GameState:
-        if role not in ROLES:
-            raise ValueError("Choose one of the five music roles.")
-        self._require_closed(install, confirmed_closed)
-        source, track = self._source(album, track, ctx)
-        already_in_pool = album.pack is None and track.role == role
-        slug = _slug(album.id.removeprefix("music-"))
-        filename = f"edopal-{slug}-{_slug(track.id)}{source.suffix.lower()}"
-        digest = _digest(source)
-        relative = f"{_BGM}/{role}/{filename}"
-        conflicts = []
-        with self._edit(install, confirmed_closed, ctx):
-            owned = _registry(install)
-            target = _path(install.root, relative)
-            previous = owned.get(role)
-            old_relative = f"{_BGM}/{role}/{previous.filename}" if previous else None
-            if already_in_pool and (previous is None or source == install.path(old_relative)):
-                return self.game_state()
-            # Refuse collisions with originals, dangling links, or a differently cased copy.
-            if (
-                not already_in_pool
-                and target.parent.is_dir()
-                and any(
-                    item.name.casefold() == filename.casefold() and item.name != filename for item in target.parent.iterdir()
-                )
-            ):
-                raise FileExistsError(f"A track already uses the name {filename}.")
-            old_unchanged = False
-            if old_relative:
-                old = install.path(old_relative)
-                if old.is_file() and not old.is_symlink():
-                    old_unchanged = _digest(old) == previous.sha256
-                if not old_unchanged and (old.is_symlink() or old.exists()):
-                    conflicts.append(old_relative)
-            if not already_in_pool and target.exists():
-                if old_relative != relative or not old_unchanged:
-                    raise FileExistsError(f"An existing track already uses the name {filename}.")
-                if digest == previous.sha256:
-                    return self.game_state()
-            _check_cancel(ctx)
-            self._require_closed(install, confirmed_closed)
-            with self.core.storage.changeset(
-                install, "music", f"Assign {track.title} to {ROLES[role]}", confirmed_closed=confirmed_closed
-            ) as changes:
-                if already_in_pool:
-                    owned.pop(role)
-                else:
-                    changes.copy_in(source, relative)
-                    owned[role] = _Owned(filename, track.title, digest)
-                if old_unchanged and old_relative != relative:
-                    changes.remove(old_relative)
-                _persist(changes, owned)
-        return replace(self.game_state(), conflicts=tuple(conflicts))
+        return self._apply({role: (album, track)}, install, ctx, confirmed_closed, f"Assign {track.title}")
 
-    def restore(
-        self, install: Install, ctx: JobContext, *, role: str | None = None, confirmed_closed: bool = False
-    ) -> GameState:
-        if role is not None and role not in ROLES:
-            raise ValueError("Choose one of the five music roles.")
+    def restore(self, install, ctx, *, role=None, confirmed_closed=False):
+        roles = (role,) if role is not None else ROLES
+        return self._apply(dict.fromkeys(roles), install, ctx, confirmed_closed, "Restore Original Music")
+
+    def apply_setup(self, refs, albums, install, ctx, *, confirmed_closed=False):
+        """Resolve every source before publishing the entire setup in one changeset."""
+        library = {album.id: album for album in albums}
+        choices = dict.fromkeys(ROLES)
+        self._require_closed(install, confirmed_closed)
+        for role, (album_id, track_id) in refs.items():
+            album = library.get(album_id)
+            track = next((t for t in album.tracks if t.id == track_id), None) if album else None
+            if track is None and album and album.pack:
+                album = self.load_album(album, ctx)
+                track = next((t for t in album.tracks if t.id == track_id), None)
+            if not album or not track:
+                raise ValueError(f"The saved track for {ROLES.get(role, role)} is unavailable.")
+            choices[role] = (album, track)
+        return self._apply(choices, install, ctx, confirmed_closed, "Apply Music Setup")
+
+    def _apply(self, choices, install, ctx, confirmed, title):
+        self._require_closed(install, confirmed)
+        desired = {}
+        for role, selection in choices.items():
+            if role not in ROLES:
+                raise ValueError("Choose one of the five music roles.")
+            desired[role] = None
+            if selection:
+                album, track = selection
+                source, track = self._source(album, track, ctx)
+                slug = _slug(album.id.removeprefix("music-"))
+                filename = f"edopal-{slug}-{_slug(track.id)}{source.suffix.lower()}"
+                desired[role] = (
+                    source,
+                    _Owned(filename, track.title, _digest(source), album.id, track.id),
+                    track.role == role,
+                )
+
         conflicts = []
-        with self._edit(install, confirmed_closed, ctx):
+        with self._edit(install, confirmed, ctx):
             owned = _registry(install)
-            roles = tuple(owned) if role is None else (role,) if role in owned else ()
-            if roles:
-                remove = []
-                for key in roles:
-                    item = owned.pop(key)
-                    relative = f"{_BGM}/{key}/{item.filename}"
+            initial = dict(owned)
+            copies, removals = {}, []
+            for role, choice in desired.items():
+                previous = owned.get(role)
+                base = f"{_BGM}/{role}/"
+                old_rel = base + previous.filename if previous else None
+                old = None
+                unchanged = False
+                if old_rel:
                     try:
-                        path = _path(install.root, relative)
-                        if not path.exists():
-                            continue
-                        if path.is_file() and _digest(path) == item.sha256:
-                            remove.append(relative)
-                            continue
-                    except ValueError:  # Preserve a file/folder that became a symlink.
-                        pass
-                    conflicts.append(relative)
+                        old = _path(install.root, old_rel)
+                        unchanged = old.is_file() and _digest(old) == previous.sha256
+                        if old.exists() and not unchanged:
+                            conflicts.append(old_rel)
+                    except ValueError:
+                        conflicts.append(old_rel)
+                if choice and choice[2] and choice[0] == old:
+                    continue
+                owned.pop(role, None)
+                if choice and not choice[2]:
+                    source, item, _ = choice
+                    relative = base + item.filename
+                    target = _path(install.root, relative)
+                    if target.parent.is_dir() and any(
+                        p.name.casefold() == item.filename.casefold() and p.name != item.filename
+                        for p in target.parent.iterdir()
+                    ):
+                        raise FileExistsError(f"A track already uses the name {item.filename}.")
+                    if target.exists() and (old_rel != relative or not unchanged):
+                        raise FileExistsError(f"An existing track already uses the name {item.filename}.")
+                    if old_rel != relative or not unchanged or previous.sha256 != item.sha256:
+                        copies[relative] = source
+                    owned[role] = item
+                if unchanged and (role not in owned or owned[role].filename != previous.filename):
+                    removals.append(old_rel)
+            if copies or removals or owned != initial:
                 _check_cancel(ctx)
-                self._require_closed(install, confirmed_closed)
-                title = f"Restore original music for {ROLES[role]}" if role else "Restore original music"
-                with self.core.storage.changeset(install, "music", title, confirmed_closed=confirmed_closed) as changes:
-                    for relative in remove:
+                self._require_closed(install, confirmed)
+                with self.core.storage.changeset(install, "music", title, confirmed_closed=confirmed) as changes:
+                    for relative, source in copies.items():
+                        changes.copy_in(source, relative)
+                    for relative in removals:
                         changes.remove(relative)
                     _persist(changes, owned)
         return replace(self.game_state(), conflicts=tuple(conflicts))

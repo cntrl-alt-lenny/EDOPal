@@ -350,3 +350,17 @@ def test_adjacent_scans_revalidate_visible_files_and_directories(game, tmp_path,
     assert not coverage(game, cat, cache=cache, on_batch=change_while_streaming).complete
     with pytest.raises(CancelledError):
         coverage(game, cat, cache=cache, cancelled=lambda: True)
+
+
+def test_validated_hd_requires_decodable_portrait_and_reuses_stamp(game, tmp_path, monkeypatch):
+    good = picture((407, 593), "JPEG")
+    sos = good.index(b"\xff\xda")
+    corrupt = good[: sos + 5] + b"\xff" * 4 + good[sos + 9 :]
+    save(game.path("pics/1.jpg"), corrupt)
+    save(game.path("pics/2.jpg"), good)
+    save(game.path("pics/3.jpg"), picture((600, 600), "JPEG"))
+    cat = read_catalog(game)
+    first = coverage(game, cat, cache=tmp_path / "cache", verify_faces=True)
+    assert first.complete and first.hd_faces == {2}
+    monkeypatch.setattr(Image.Image, "load", lambda *_: pytest.fail("re-decoded unchanged pixels"))
+    assert coverage(game, cat, cache=tmp_path / "cache", verify_faces=True).hd_faces == {2}

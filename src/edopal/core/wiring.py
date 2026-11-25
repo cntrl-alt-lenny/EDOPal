@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from edopal.core import Core
 from edopal.core.fakes import DirectStorage, LocalPacks, StaticInstalls
+from edopal.core.packs import PACK_KINDS
 from edopal.core.paths import Paths
 from edopal.core.settings import Settings
 
@@ -34,21 +36,19 @@ def make_core() -> Core:
     else:
         storage = SafeStorage(paths, installs.run_state)
 
-    if override := os.environ.get("EDOPAL_PACKS_DIR"):
-        try:
-            from edopal.core.pack_client import GitHubPacks
-
-            packs = GitHubPacks(paths, local_dir=Path(override).expanduser())
-        except ImportError:
-            packs = LocalPacks(Path(override).expanduser(), paths.cache)
+    override = os.environ.get("EDOPAL_PACKS_DIR")
+    local = Path(override).expanduser() if override else None
+    try:
+        from edopal.core.pack_client import GitHubPacks
+    except ImportError as exc:
+        if exc.name != "edopal.core.pack_client":
+            raise
+        packs = LocalPacks(local or Path(__file__).resolve().parents[3] / "packs", paths.cache)
     else:
-        try:
-            from edopal.core.pack_client import GitHubPacks
-        except ImportError as exc:
-            if exc.name != "edopal.core.pack_client":
-                raise
-            packs = LocalPacks(Path(__file__).resolve().parents[3] / "packs", paths.cache)
-        else:
-            packs = GitHubPacks(paths)
+        # Bridge the client's legacy validator until it imports the shared contract.
+        pack_client = sys.modules["edopal.core.pack_client"]
+        if hasattr(pack_client, "_KINDS"):
+            pack_client._KINDS = PACK_KINDS
+        packs = GitHubPacks(paths, local_dir=local)
 
     return Core(paths, settings, installs, storage, packs, QtJobRunner())

@@ -11,6 +11,7 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field, replace
 from functools import cached_property, lru_cache, partial
+from io import BytesIO
 from pathlib import Path
 from stat import S_ISREG
 from zipfile import BadZipFile, ZipFile
@@ -21,6 +22,7 @@ from edopal.core.install import Install
 
 from .artwork import MAX_BYTES, MAX_PIXELS, image_dimensions
 from .catalog import Catalog
+from .sources import is_hd
 
 
 def _identity(stat):
@@ -50,7 +52,7 @@ class Asset:
     @property
     def is_hd(self):
         # Both the older ~421×614 images and current 813×1185 prints qualify.
-        return self.width >= 400 and self.height >= 600
+        return is_hd(self.width, self.height)
 
     @cached_property
     def digest(self):
@@ -114,8 +116,10 @@ _DECODER_VERSION = 2
 
 
 @contextmanager
-def _measurements(cache, root):
+def _measurements(cache, root, verify_faces):
     db, known, changed = None, {}, []
+    verified, checked = {}, []
+    decoded_files = set()
     if cache is not None:
         try:
             key = hashlib.sha256(os.fsencode(os.path.normcase(str(root)))).hexdigest()
@@ -127,6 +131,12 @@ def _measurements(cache, root):
                     "CREATE TABLE IF NOT EXISTS images (path BLOB, member TEXT, stamp TEXT, width INTEGER, "
                     "height INTEGER, digest TEXT, PRIMARY KEY(path, member)) WITHOUT ROWID"
                 )
+                if verify_faces:
+                    db.execute(
+                        "CREATE TABLE IF NOT EXISTS decoded (path BLOB, member TEXT, stamp TEXT, "
+                        "PRIMARY KEY(path, member)) WITHOUT ROWID"
+                    )
+                    verified = {(p, m): stamp for p, m, stamp in db.execute("SELECT * FROM decoded")}
                 rows = db.execute("SELECT path, member, stamp, width, height, digest FROM images")
                 known = {(p, m): (s, w, h, d) for p, m, s, w, h, d in rows if isinstance(w, int) and isinstance(h, int)}
         except (OSError, sqlite3.Error):
@@ -134,7 +144,7 @@ def _measurements(cache, root):
                 db.close()
             db = None
 
-    def measure(path, member, stamp, load, need_digest):
+    def measure(path, member, stamp, load, need_digest, face):
         if db is not None:
             # Each database already belongs to one canonical install root.
             key = os.fsencode(path), member or ""
@@ -147,10 +157,27 @@ def _measurements(cache, root):
             if not width:
                 return None
             asset = Asset(path, member, width, height, stamp, digest)
-            if digest or not need_digest:
+            if (digest or not need_digest) and (
+                not verify_faces or not face or not asset.is_hd or verified.get(key) == fingerprint
+            ):
                 return asset
         else:
             asset = load()
+        if asset and verify_faces and face and asset.is_hd and (member is not None or stamp not in decoded_files):
+            try:
+                with Image.open(BytesIO(asset.read_bytes()), formats=("JPEG", "PNG")) as im:
+                    # Validate the compressed scan once. libjpeg can decode entropy at 1/8 scale.
+                    im.draft("L", (1, 1))
+                    im.load()
+            except ChangedArtworkError:
+                raise
+            except (OSError, SyntaxError, ValueError):
+                asset = None
+            if asset and member is None:
+                decoded_files.add(stamp)
+        if asset and verify_faces and face and asset.is_hd:
+            if db is not None:
+                checked.append((*key, fingerprint))
         if asset and not asset._digest and (need_digest or not asset.is_hd):
             asset = replace(asset, _digest=asset.digest)
         if db is not None:
@@ -158,14 +185,21 @@ def _measurements(cache, root):
             changed.append((*key, fingerprint, *values))
         return asset
 
+    def flush():
+        if db is None or not changed:
+            return
+        with suppress(sqlite3.Error), db:
+            if checked:
+                db.executemany("INSERT OR REPLACE INTO decoded VALUES (?,?,?)", checked)
+            db.executemany("INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?)", changed)
+        checked.clear()
+        changed.clear()
+
     try:
-        yield measure
+        yield measure, flush
     finally:
+        flush()
         if db is not None:
-            with suppress(sqlite3.Error):
-                if changed:
-                    db.executemany("INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?)", changed)
-                    db.commit()
             db.close()
 
 
@@ -191,6 +225,7 @@ class _Snapshot:
     scope: tuple
     art: Coverage
     stamps: tuple
+    verified: bool
 
 
 # Refresh, Sync and its final inspection often check the same install back-to-back.
@@ -206,6 +241,7 @@ def coverage(
     cancelled: Callable[[], bool] = lambda: False,
     on_batch: Callable[[Coverage, tuple[int, ...]], None] | None = None,
     digest_ids: Container[tuple[int, str]] = (),
+    verify_faces: bool = False,
 ) -> Coverage:
     """Emit resolved IDs, including absent faces, while remaining local files are inspected.
 
@@ -263,8 +299,8 @@ def coverage(
             for start in range(0, len(ready), _BATCH):
                 emit(ready[start : start + _BATCH])
 
-        ready = []
-        for cid, choices in paths.items():
+        def resolve(pair):
+            cid, choices = pair
             check_cancel()
             if len(choices) > 1:
                 choices.sort(key=lambda entry: not entry.name.lower().endswith(".png"))
@@ -284,7 +320,7 @@ def coverage(
                     measured[path] = stamp
                     if S_ISREG(stat.st_mode):
                         need_digest = kind == "field" or (cid, kind) in digest_ids
-                        asset = measure(path, None, stamp, partial(_local, path, stamp), need_digest)
+                        asset = measure(path, None, stamp, partial(_local, path, stamp), need_digest, kind == "face")
                         if asset:
                             images[cid] = asset
                             if not managed:
@@ -292,8 +328,30 @@ def coverage(
                             break
                 except FileNotFoundError:
                     result.complete = False
+
+        # On first inspection a genuine entropy decode is needed for each HD face.
+        # Bound live image buffers and checkpoint verified stamps between batches.
+        entries = list(paths.items())
+
+        def resolve_chunk(chunk):
+            for pair in chunk:
+                resolve(pair)
+
+        if verify_faces and kind == "face" and len(entries) >= _BATCH:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                for start in range(0, len(entries), _BATCH):
+                    batch = entries[start : start + _BATCH]
+                    list(pool.map(resolve_chunk, (batch[i : i + 32] for i in range(0, len(batch), 32))))
+                    flush()
+                    if last_faces:
+                        emit([cid for cid, _ in batch])
+            return
+
+        ready = []
+        for pair in entries:
+            resolve(pair)
             if last_faces:
-                ready.append(cid)
+                ready.append(pair[0])
                 if len(ready) == _BATCH:
                     emit(ready)
                     ready.clear()
@@ -316,7 +374,7 @@ def coverage(
                 def load(path=path, stamp=stamp, z=z, info=info):
                     return _decode(path, info.filename, stamp, z.read(info))
 
-                if asset := measure(path, info.filename, stamp, load, True):
+                if asset := measure(path, info.filename, stamp, load, True, kind == "face"):
                     images[cid] = asset
                     result.blocked.add((kind, cid))
 
@@ -334,7 +392,7 @@ def coverage(
                 tuple(catalog.repo_pics),
                 tuple(catalog.archives),
             )
-        if snapshot and snapshot.scope == scope and catalog.stable():
+        if snapshot and snapshot.scope == scope and (not verify_faces or snapshot.verified) and catalog.stable():
             has_digests = not digest_ids or all(
                 asset._digest or (cid, "face") not in digest_ids for cid, asset in snapshot.art.faces.items()
             )
@@ -349,7 +407,7 @@ def coverage(
                 return result
 
         with ExitStack() as stack:
-            measure = stack.enter_context(_measurements(cache, root))
+            measure, flush = stack.enter_context(_measurements(cache, root, verify_faces))
             archives = [(p, _identity(p.stat()), stack.enter_context(ZipFile(p))) for p in catalog.archives]
             measured.update((p, stamp) for p, stamp, _ in archives)
             # Fields are few and a face batch may need a field donor from another batch.
@@ -364,7 +422,7 @@ def coverage(
         stamps = tuple(measured.items())
         result.complete &= catalog.stable() and _stable(stamps, cancelled)
         if scope and result.complete:
-            _last_scan = _Snapshot(scope, result.copy(), stamps)
+            _last_scan = _Snapshot(scope, result.copy(), stamps, verify_faces)
     except (BadZipFile, OSError, RuntimeError):
         result.complete = False
     check_cancel()

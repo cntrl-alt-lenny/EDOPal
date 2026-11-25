@@ -1,25 +1,21 @@
-"""Qt widgets for the historical format picker and tournament browser."""
+"""Responsive Qt surfaces for format profiles and tournament lists."""
 
 from __future__ import annotations
 
 import weakref
 from datetime import date
 from functools import partial
-from math import cos, pi, sin
-from zlib import crc32
 
-from PySide6.QtCore import QAbstractListModel, QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QListView,
     QPushButton,
-    QStyle,
-    QStyledItemDelegate,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -28,39 +24,6 @@ from PySide6.QtWidgets import (
 from shiboken6 import isValid
 
 from edopal.ui import theme as t
-
-# Each format has a foil colour and its own engraved rosette.
-FOILS = {
-    "goat": ("backup", 6),
-    "edison": ("replays", 8),
-    "hat": ("decks", 4),
-    "tengu": ("health", 5),
-    "wind-up": ("music", 7),
-    "cat": ("sleeves", 5),
-    "trooper": ("skins", 6),
-    "chaos": ("brand", 8),
-}
-
-
-# Format Library's event anchors for the eight TCG snapshots.
-ANCHORS = {
-    "goat": "SJC Indianapolis",
-    "edison": "SJC Edison",
-    "hat": "North American WCQ",
-    "tengu": "YCS Toronto",
-    "wind-up": "YCS Providence",
-    "cat": "SJC Indianapolis",
-    "trooper": "SJC Indianapolis",
-    "chaos": "U.S. National Championship",
-}
-
-
-def _foil(format_id):
-    if format_id in FOILS:
-        return FOILS[format_id]
-    seed = crc32(format_id.encode("utf-8"))
-    colours = tuple(FOILS.values())
-    return colours[seed % len(colours)][0], 3 + (seed // len(colours)) % 6
 
 
 def pretty_date(value, fmt="%d %b %Y"):
@@ -108,281 +71,9 @@ def button(text, role, callback, name):
                 getattr(target, name)(*args)
 
         widget.clicked.connect(clicked)
-    else:
+    elif callback is not None:
         widget.clicked.connect(callback)
     return widget
-
-
-def _tint(colour, alpha):
-    result = QColor(colour)
-    result.setAlpha(alpha)
-    return result
-
-
-def _sleeve(painter, format_id, *, small=False):
-    """Draw in a shared 68×96 coordinate system with the origin at the card centre."""
-    foil, petals = _foil(format_id)
-    low, high = t.FOIL[foil]
-    grad = QLinearGradient(-30, -44, 28, 46)
-    for pos, colour in ((0, high), (0.47, low), (0.84, high), (1, low)):
-        grad.setColorAt(pos, QColor(colour))
-    painter.setBrush(QBrush(grad))
-    painter.setPen(QPen(_tint(t.GOLD, 154), 1.1))
-    painter.drawRoundedRect(QRectF(-33, -47, 66, 94), 3, 3)
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.setPen(QPen(_tint(t.GOLD, 150), 1.5 if small else 0.6))
-    painter.drawRect(QRectF(-28, -41, 56, 82))
-    if not small:
-        painter.drawRect(QRectF(-26.5, -39.5, 53, 79))
-        for x, y in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-            painter.save()
-            painter.scale(x, y)
-            for d in (0, 2, 4):
-                painter.drawLine(QPointF(12 + d, 38), QPointF(25, 25 + d))
-            painter.drawEllipse(QPointF(21.5, 34.5), 1.4, 1.4)
-            painter.restore()
-    painter.setPen(QPen(_tint(t.PALE, 190), 1.3 if small else 0.65))
-    painter.drawEllipse(QPointF(0, 0), 21, 21)
-    painter.drawEllipse(QPointF(0, 0), 17.5, 17.5)
-    for i in range(petals):
-        painter.save()
-        painter.rotate(i * 360 / petals)
-        petal = QPainterPath(QPointF(0, -3))
-        petal.quadTo(-8.3, -12.5, 0, -24.5)
-        petal.quadTo(7.6, -13, 0, -3)
-        painter.drawPath(petal)
-        painter.restore()
-    points = [QPointF(6.6 * sin(i * pi / 4), 6.6 * cos(i * pi / 4)) for i in range(8)]
-    painter.setBrush(QColor(low))
-    painter.drawPolygon(QPolygonF(points))
-    painter.setBrush(_tint(t.GOLD, 200))
-    painter.drawPolygon(QPolygonF([QPointF(0, -4), QPointF(2.6, 0), QPointF(0, 4), QPointF(-2.6, 0)]))
-
-
-ID_ROLE = Qt.ItemDataRole.UserRole
-META_ROLE = int(ID_ROLE) + 1
-
-
-class _ProfileDelegate(QStyledItemDelegate):
-    def paint(self, painter, option, index):
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = option.rect.adjusted(1, 1, -2, -1)
-        slug = index.data(ID_ROLE)
-        title = index.data(Qt.ItemDataRole.DisplayRole)
-        if slug is None:
-            painter.setFont(t.font(10, bold=True))
-            painter.setPen(QColor(t.GOLD))
-            painter.drawText(rect.adjusted(5, 4, 0, 0), Qt.AlignmentFlag.AlignVCenter, title.upper())
-            painter.restore()
-            return
-        selected = option.state & QStyle.StateFlag.State_Selected
-        if selected or option.state & QStyle.StateFlag.State_MouseOver:
-            painter.setBrush(QColor(t.ACTIVE if selected else t.RAISED))
-            painter.setPen(QPen(QColor(t.BRONZE), 1) if selected else Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(rect, 6, 6)
-        painter.save()
-        painter.translate(rect.left() + 19, rect.center().y() + 0.5)
-        painter.rotate(-7)
-        painter.scale(0.30, 0.30)
-        _sleeve(painter, slug, small=True)
-        painter.restore()
-        x, width = rect.left() + 38, max(4, rect.width() - 43)
-        painter.setFont(t.font(14, bold=True))
-        painter.setPen(QColor(t.INK))
-        painter.drawText(x, rect.top() + 17, painter.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, width))
-        painter.setFont(t.font(11))
-        painter.setPen(QColor(t.TEXT if selected else t.MUTED))
-        painter.drawText(x, rect.top() + 32, index.data(META_ROLE))
-        painter.restore()
-
-
-class _CatalogModel(QAbstractListModel):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.entries = []
-
-    def set_rows(self, rows):
-        entries = []
-        previous = None
-        for group, profile in rows:
-            if group != previous:
-                entries.append((group, None, ""))
-                previous = group
-            date_label = pretty_date(profile["date"]) if profile.get("date") else "Rolling"
-            entries.append((profile["name"], profile["id"], f"{profile['region']}  ·  {date_label}"))
-        self.beginResetModel()
-        self.entries = entries
-        self.endResetModel()
-
-    def rowCount(self, parent=None):
-        return 0 if parent is not None and parent.isValid() else len(self.entries)
-
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid() or not 0 <= index.row() < len(self.entries):
-            return None
-        title, slug, meta = self.entries[index.row()]
-        if role == Qt.ItemDataRole.DisplayRole:
-            return title
-        if role == ID_ROLE:
-            return slug
-        if role == META_ROLE:
-            return meta
-        if role == Qt.ItemDataRole.SizeHintRole:
-            return QSize(0, 41 if slug else 24)
-        if role in (Qt.ItemDataRole.ToolTipRole, Qt.ItemDataRole.AccessibleTextRole):
-            return f"{title}, {meta}" if slug else title
-        return None
-
-    def flags(self, index):
-        if not index.data(ID_ROLE):
-            return Qt.ItemFlag.NoItemFlags
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-
-
-class ProfilePicker(QListView):
-    def __init__(self):
-        super().__init__()
-        self.setObjectName("formatPicker")
-        self.setAccessibleName("Format catalog")
-        self.setMouseTracking(True)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.setModel(_CatalogModel(self))
-        self.setItemDelegate(_ProfileDelegate(self))
-
-    def populate(self, rows, current):
-        model = self.model()
-        model.set_rows(rows)
-        first = None
-        for i, (_, slug, _) in enumerate(model.entries):
-            if slug and first is None:
-                first = i
-            if slug == current:
-                first = i
-                break
-        if first is not None:
-            index = model.index(first, 0)
-            self.setCurrentIndex(index)
-            self.scrollTo(index)
-            return index.data(ID_ROLE)
-        return None
-
-
-class Hero(QFrame):
-    def __init__(self):
-        super().__init__()
-        self.profile = None
-        self.setMinimumHeight(162)
-        self.setMaximumHeight(220)
-        self.setObjectName("formatHero")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(t.XL, t.MD, t.LG, t.MD)
-        layout.setSpacing(0)
-        self.era = label("", "goldKicker")
-        self.title = label("Formats", "heroTitle")
-        self.title.setStyleSheet(f"font-size: {t.PAGE_TITLE}px;")
-        self.title.setObjectName("selectedFormatTitle")
-        layout.addWidget(self.era)
-        layout.addWidget(self.title)
-        self.description = label("", "body")
-        layout.addWidget(self.description)
-        layout.addStretch()
-        self.meta = QHBoxLayout()
-        self.meta.setSpacing(26)
-        self.values = []
-        self.headings = []
-        for heading in ("SNAPSHOT", "BANLIST", "CARD POOL", "DECK CHECKS"):
-            col = QVBoxLayout()
-            col.setSpacing(3)
-            title = label(heading, "kicker")
-            self.headings.append(title)
-            col.addWidget(title)
-            value = label("—", "profileValue")
-            col.addWidget(value)
-            self.values.append(value)
-            self.meta.addLayout(col)
-        self.meta.addStretch()
-        layout.addLayout(self.meta)
-
-    def set_profile(self, profile):
-        self.profile = profile
-        self.title.setText(profile["name"])
-        region = profile.get("region") or profile.get("category") or "TCG"
-        self.era.setText("   /   ".join(x.upper() for x in (region, profile.get("era", "")) if x))
-        event_name = profile.get("event") or ANCHORS.get(profile["id"], "")
-        self.description.setText("Hand, Artifact & Traptrix · North American WCQ" if profile["id"] == "hat" else event_name)
-        self.description.setVisible(bool(self.description.text()))
-        self.values[0].setText(pretty_date(profile["date"]) if profile.get("date") else "Rolling")
-        self.values[1].setText(pretty_date(profile["banlist_date"]) if profile.get("banlist_date") else profile["banlist"])
-        count = profile.get("pool")
-        historical = profile.get("status", "historical") == "historical"
-        self.headings[2].setVisible(historical)
-        self.values[2].setVisible(historical)
-        self.values[2].setText(f"{count:,} cards" if isinstance(count, int) else "Unmeasured")
-        self.headings[3].setVisible(historical)
-        self.values[3].setVisible(historical)
-        self.values[3].setText(validation_summary(profile.get("validation", {})))
-        self.update()
-
-    def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        frame = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        clip = QPainterPath()
-        clip.addRoundedRect(frame, t.R_PANEL, t.R_PANEL)
-        painter.setClipPath(clip)
-        format_id = self.profile["id"] if self.profile else "hat"
-        foil, _ = _foil(format_id)
-        low, high = t.FOIL[foil]
-        gradient = QLinearGradient(0, 0, frame.width(), frame.height() * 0.6)
-        for pos, colour in ((0, t.PANEL), (0.4, low), (1, high)):
-            gradient.setColorAt(pos, QColor(colour))
-        painter.fillPath(clip, gradient)
-        w, h = frame.width(), frame.height()
-        # A set of etched concentric arcs sits behind the full-size foil cards.
-        painter.setPen(QPen(_tint(t.GOLD, 28), 0.8))
-        center = QPointF(w - 32, 0.75 * h)
-        for radius in (0.56, 0.62, 0.68, 1.16, 1.2, 1.42):
-            painter.drawEllipse(center, h * radius, h * radius)
-        compact = w < 780
-        x = w - (39 if compact else 106)
-        scale = h / 101
-        for dx, dy, angle in ((-55, -5, -24), (-17, 11, -6), (29, 26, 14)):
-            painter.save()
-            painter.translate(x + dx * scale, h * 0.48 + dy * scale)
-            painter.rotate(angle)
-            painter.scale(scale, scale)
-            _sleeve(painter, format_id)
-            painter.restore()
-        # Fade the print under the text on narrow windows.
-        shade = QLinearGradient(0, 0, w, 0)
-        for pos, alpha in ((0, 242), (min(0.69, 450 / max(w, 1)), 238), (0.84, 0)):
-            shade.setColorAt(pos, _tint(low, alpha))
-        painter.fillPath(clip, shade)
-        painter.setClipping(False)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(_tint(t.GOLD, 62), 1))
-        painter.drawPath(clip)
-
-
-class DeckThumbnail(QWidget):
-    """Display the FL image proportionally as the surrounding window changes size."""
-
-    def __init__(self, pixmap):
-        super().__init__()
-        self.pixmap = pixmap
-        self.setMaximumWidth(430)
-        self.setAccessibleName("Main deck thumbnail from Format Library")
-
-    def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        size = self.pixmap.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
-        painter.drawPixmap(0, 0, size.width(), size.height(), self.pixmap)
 
 
 class BrowserTable(QTableWidget):
@@ -390,7 +81,7 @@ class BrowserTable(QTableWidget):
 
     def __init__(self, headings, fixed):
         super().__init__(0, len(headings))
-        self.event_columns = headings[0] == "EVENT"
+        self.section = headings[0]
         self.setObjectName("tournamentRows")
         self.setColumnCount(len(headings))
         self.setHorizontalHeaderLabels(headings)
@@ -421,10 +112,15 @@ class BrowserTable(QTableWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self.event_columns:
+        if self.section == "Event":
             width = self.viewport().width()
             self.setColumnWidth(1, max(98, round(width * 0.23)))
             self.setColumnWidth(2, max(65, round(width * 0.14)))
+        elif self.section == "Format":
+            width = self.viewport().width()
+            self.setColumnWidth(1, max(113, round(width * 0.22)))
+            self.setColumnWidth(2, max(58, round(width * 0.16)))
+            self.setColumnWidth(3, max(64, round(width * 0.14)))
 
     def fill(self, rows):
         self.setRowCount(len(rows))
@@ -432,7 +128,7 @@ class BrowserTable(QTableWidget):
             for col, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 item.setToolTip(str(value) if value != "›" else "")
-                if col == len(values) - 1:
+                if value == "›":
                     item.setForeground(QColor(t.GOLD))
                 self.setItem(row, col, item)
 
@@ -443,33 +139,276 @@ class BrowserTable(QTableWidget):
         super().keyPressEvent(event)
 
 
+def layout(parent, kind=QVBoxLayout, margin=0, spacing=8):
+    result = kind(parent)
+    result.setContentsMargins(margin, margin, margin, margin)
+    result.setSpacing(spacing)
+    return result
+
+
+def image(source):
+    if isinstance(source, QPixmap):
+        return source
+    if isinstance(source, bytes):
+        pix = QPixmap()
+        if source:
+            pix.loadFromData(source)
+        return pix
+    return QPixmap(str(source)) if source else QPixmap()
+
+
+def cover(painter, rect, pix, focus=0.25):
+    if pix.isNull() or rect.isEmpty():
+        return
+    ratio = max(rect.width() / pix.width(), rect.height() / pix.height())
+    w, h = rect.width() / ratio, rect.height() / ratio
+    painter.drawPixmap(rect, pix, QRectF((pix.width() - w) / 2, (pix.height() - h) * focus, w, h))
+
+
+def search_icon():
+    pix = QPixmap(32, 32)
+    pix.fill(Qt.GlobalColor.transparent)
+    with QPainter(pix) as p:
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(QColor(t.MUTED), 2))
+        p.drawEllipse(QRectF(5, 5, 15, 15))
+        p.drawLine(18, 18, 27, 27)
+    pix.setDevicePixelRatio(2)
+    return QIcon(pix)
+
+
+def catalog_icon(data):
+    pix = image(data)
+    if pix.isNull():
+        return QIcon()
+    thumb = pix.scaled(96, 64, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+    return QIcon(thumb.copy((thumb.width() - 96) // 2, round((thumb.height() - 64) * 0.25), 96, 64))
+
+
+def fade(painter, rect, stops, vertical=False, color="#28282b"):
+    gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft() if vertical else rect.topRight())
+    for stop, alpha in stops:
+        ink = QColor(color)
+        ink.setAlpha(alpha)
+        gradient.setColorAt(stop, ink)
+    painter.fillRect(rect, gradient)
+
+
+class ArtPanel(QFrame):
+    def __init__(self, deck=False):
+        super().__init__()
+        self.pix = QPixmap()
+        self.deck = deck
+
+    def set_art(self, source):
+        self.pix = image(source)
+        self.update()
+
+    def paintEvent(self, event):
+        with QPainter(self) as p:
+            p.setRenderHints(QPainter.RenderHint.SmoothPixmapTransform | QPainter.RenderHint.Antialiasing)
+            area = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            clip = QPainterPath()
+            clip.addRoundedRect(area, 6, 6)
+            p.setClipPath(clip)
+            p.fillRect(area, QColor("#28282b"))
+            width = min(550, area.width() * 0.49) if self.deck else area.width() * 0.58
+            left = area.width() * 0.52 - width / 2 if self.deck else area.width() - width
+            rect = QRectF(left, 0, width, area.height())
+            cover(p, rect, self.pix, 0 if self.deck else 0.10)
+            stops = (
+                ((0, 255), (0.17, 205), (0.38, 49), (0.62, 38), (0.79, 100), (1, 255))
+                if self.deck
+                else ((0, 255), (0.08, 250), (0.26, 193), (0.43, 76), (0.63, 9), (1, 0))
+            )
+            fade(p, rect, stops)
+            if not self.deck:
+                fade(p, rect, ((0, 0), (0.54, 0), (0.72, 65), (0.79, 150), (0.92, 215), (1, 230)), True)
+            else:
+                p.setPen(QPen(QColor("#414044"), 1))
+                p.drawPath(clip)
+
+
+class MetricIcon(QWidget):
+    def __init__(self, index):
+        super().__init__()
+        self.index = index
+        self.setFixedSize(16, 16)
+
+    def paintEvent(self, event):
+        with QPainter(self) as p:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(QPen(QColor(t.MUTED), 1.3))
+            if self.index == 0:
+                p.drawRoundedRect(QRectF(2, 3.5, 12, 10), 1.5, 1.5)
+                p.drawLine(2, 7, 14, 7)
+                p.drawLine(5, 2, 5, 5)
+                p.drawLine(11, 2, 11, 5)
+            elif self.index == 1:
+                p.drawRoundedRect(QRectF(3, 1.5, 10, 13), 1, 1)
+                p.drawLine(5, 6, 10, 6)
+                p.drawLine(5, 9, 11, 9)
+            else:
+                p.drawPolygon([QPointF(1, 5), QPointF(8, 1.5), QPointF(15, 5), QPointF(8, 8.5)])
+                for y in (8, 11):
+                    p.drawPolyline([QPointF(1, y), QPointF(8, y + 3.5), QPointF(15, y)])
+
+
+class Hero(ArtPanel):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("formatHero")
+        body = layout(self, margin=20, spacing=4)
+        top = QHBoxLayout()
+        self.title = label("Formats", "heroTitle")
+        self.title.setObjectName("selectedFormatTitle")
+        self.title.setStyleSheet("font-size:38px;")
+        top.addWidget(self.title)
+        self.era = label("", "eraTag")
+        top.addWidget(self.era, 0, Qt.AlignmentFlag.AlignVCenter)
+        top.addStretch()
+        body.addLayout(top)
+        self.description = label("", "body")
+        self.description.setWordWrap(True)
+        self.description.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.description.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        body.addWidget(self.description, 1)
+        meta = QHBoxLayout()
+        meta.setSpacing(4)
+        self.values = []
+        self.fields = []
+        for i, name in enumerate(("Snapshot", "Banlist", "Card Pool")):
+            field = QWidget()
+            field.setFixedWidth(134)
+            self.fields.append(field)
+            col = layout(field, spacing=4)
+            row = QHBoxLayout()
+            row.setSpacing(5)
+            row.addWidget(MetricIcon(i))
+            row.addWidget(label(name, "muted"))
+            row.addStretch()
+            col.addLayout(row)
+            value = label("—", "profileValue")
+            col.addWidget(value)
+            self.values.append(value)
+            meta.addWidget(field)
+        meta.addStretch()
+        body.addLayout(meta)
+        body.addSpacing(6)
+        self.actions = QHBoxLayout()
+        self.actions.setSpacing(8)
+        body.addLayout(self.actions)
+        self.caption = label("", "captionTitle")
+        self.caption.setParent(self)
+        self.set_name = label("", "captionSet")
+        self.set_name.setParent(self)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        wide = self.width() >= 1350
+        self.title.setStyleSheet("font-size:46px;" if wide else "font-size:38px;")
+        self.layout().setContentsMargins(28 if wide else 22, 12 if wide else 10, 20, 16)
+        self.layout().setSpacing(4)
+        self.description.setMaximumWidth(min(640, round(self.width() * 0.49)))
+        for field in self.fields:
+            field.setFixedWidth(151 if wide else 134)
+        self._caption_geometry()
+
+    def _caption_geometry(self):
+        for item, y, h in ((self.caption, self.height() - 56, 26), (self.set_name, self.height() - 30, 20)):
+            item.setGeometry(self.width() // 2, y, self.width() // 2 - 20, h)
+            item.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def set_profile(self, row):
+        self.title.setText(row["name"])
+        self.era.setText(f"{row['region']} / {row['era']}")
+        desc = row.get("description") or row.get("event") or row.get("reason") or ""
+        sentences = desc.split(". ")
+        excerpt = (
+            ". ".join([sentences[1], sentences[-1]])
+            if row["id"] == "hat" and len(sentences) > 2
+            else ". ".join(sentences[:1])
+        )
+        self.description.setText(excerpt.rstrip(".") + "." if excerpt else "")
+        self.description.setToolTip(desc)
+        self.values[0].setText(pretty_date(row.get("snapshot_date") or row.get("date")) if row.get("date") else "Rolling")
+        self.values[1].setText(row.get("banlist") or "—")
+        pool = row.get("pool")
+        self.values[2].setText(f"{pool:,} Cards" if isinstance(pool, int) else "—")
+
+    def set_illustration(self, source, caption):
+        self.set_art(source)
+        self.caption.setText(caption[0])
+        self.caption.setToolTip(caption[0])
+        self.set_name.setToolTip(caption[1])
+        self.set_name.setText(caption[1])
+        self._caption_geometry()
+
+
+class FormatTile(QPushButton):
+    def __init__(self, row):
+        super().__init__()
+        self.row = row
+        self.pix = QPixmap()
+        self.setText(row["name"])
+        self.setAccessibleName(f"{row['name']}, {pretty_date(row['date'])}")
+        self.setObjectName("tile-" + row["id"])
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(82)
+
+    def paintEvent(self, event):
+        with QPainter(self) as p:
+            p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
+            rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+            clip = QPainterPath()
+            clip.addRoundedRect(rect, 4, 4)
+            p.setClipPath(clip)
+            p.fillPath(clip, QColor(t.PANEL))
+            cover(p, rect, self.pix, 0.21)
+            shade = "#302d28" if self.isChecked() else "#28282b"
+            fade(p, rect, ((0, 2), (0.26, 5), (0.45, 65), (0.64, 205), (0.86, 248), (1, 255)), True, shade)
+            edge = t.GOLD if self.isChecked() or self.hasFocus() else t.MUTED if self.underMouse() else t.EDGE
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(edge), 2 if self.isChecked() else 1))
+            p.drawPath(clip)
+            p.setPen(QColor(t.GOLD if self.isChecked() else t.INK))
+            font = t.font(15, bold=True)
+            font.setFamilies(["Outfit", t.UI])
+            p.setFont(font)
+            p.drawText(9, 62, p.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, self.width() - 16))
+            p.setFont(t.font(10))
+            p.setPen(QColor(t.TEXT))
+            p.drawText(9, 76, pretty_date(self.row["date"], "%b %Y"))
+
+
 STYLE = f"""
-    QListView#formatPicker {{ background: {t.CANVAS}; border: 1px solid transparent; border-radius: 6px; padding: 0; }}
-    QListView#formatPicker[keyboardFocus=true]:focus {{ border-color: {t.PALE}; }}
-    QLineEdit#formatSearch {{ padding: 7px 8px; background: {t.PANEL}; }}
-    QPushButton[role="region"] {{ background: {t.PANEL}; color: {t.MUTED}; padding: 4px 2px; border: 1px solid {t.EDGE}; }}
-    QPushButton[role="region"]:checked {{ background: {t.ACTIVE}; color: {t.GOLD}; border-color: {t.BRONZE}; }}
-    QPushButton[role="region"][keyboardFocus=true]:focus {{ border-color: {t.PALE}; }}
-    QLabel[role="profileValue"] {{ color: {t.INK}; font-size: 15px; font-weight: 650; }}
-    QPushButton[role="deckSection"] {{ background: transparent; border: 0; border-bottom: 2px solid {t.EDGE};
-        padding: 5px 8px; text-align: left; color: {t.MUTED}; border-radius: 0; font-size: 12px; }}
-    QPushButton[role="deckSection"]:checked {{ color: {t.GOLD}; border-bottom-color: {t.GOLD}; }}
-    QLabel[role="quantity"] {{ color: {t.GOLD}; font-size: 13px; }}
-    QLabel[role="ok"] {{ color: {t.GREEN}; font-size: 13px; }}
-    QLabel[role="warning"] {{ color: {t.RED}; font-size: 13px; }}
-    QPushButton[role="source"], QPushButton[role="back"] {{ background: transparent; color: {t.GOLD};
-        padding: 4px; border: 0px; font-size: 12px; text-align: left; }}
-    QPushButton[role="source"]:hover, QPushButton[role="back"]:hover {{ color: {t.PALE}; }}
-    QPushButton[role="sectionTab"] {{ border: 1px solid transparent; border-radius: 6px; padding: 6px 12px;
-        color: {t.MUTED}; background: transparent; }}
-    QPushButton[role="sectionTab"]:checked {{ background: {t.RAISED}; color: {t.INK}; border-color: {t.EDGE}; }}
-    QPushButton[role="sectionTab"]:hover {{ color: {t.INK}; }}
-    QTableWidget#tournamentRows {{ background: {t.PANEL}; color: {t.TEXT}; border: 0; padding: 0;
-        selection-color: {t.PALE}; selection-background-color: {t.ACTIVE}; outline: none; }}
-    QTableWidget#tournamentRows::item {{ border-bottom: 1px solid {t.EDGE}; padding: 0 8px; }}
-    QTableWidget#tournamentRows::item:hover {{ background: {t.HOVER}; }}
-    QHeaderView {{ background: {t.PANEL}; }}
-    QHeaderView::section {{ background: {t.PANEL}; color: {t.MUTED}; font-size: 11px; letter-spacing: 1.1px;
-        border: 0; border-bottom: 1px solid {t.EDGE}; padding: 4px 8px 8px 8px; }}
-    QScrollArea#readArea, QScrollArea#readArea > QWidget > QWidget {{ background: {t.PANEL}; }}
+QLabel[role="eraTag"] {{color:{t.GOLD};background:#38342d;border:1px solid #4f4737;border-radius:4px;padding:3px 9px;
+    font-size:12px;}}
+QLabel[role="captionTitle"] {{font-family:Outfit,Inter;font-weight:600;font-size:19px;color:#fff;}}
+QLabel[role="captionSet"] {{font-size:12px;color:#e1ded9;}}
+QLabel[role="profileValue"] {{font-size:14px;font-weight:600;color:{t.INK};}}
+QLabel[role="warning"] {{color:{t.RED};}}
+QLabel[role="ok"] {{color:{t.GREEN};}}
+QPushButton[role="source"], QPushButton[role="back"] {{background:transparent;border:0;color:{t.GOLD};padding:3px;
+    font-size:12px;}}
+QPushButton[role="source"]:hover,QPushButton[role="back"]:hover {{color:{t.PALE};}}
+QPushButton[role="segment"] {{border-radius:3px;padding:5px 12px;font-size:13px;background:{t.CANVAS};}}
+QPushButton[role="segment"]:checked {{background:{t.ACTIVE};color:{t.GOLD};border-color:#706046;}}
+QTableWidget {{background:{t.CANVAS};border:0;color:{t.TEXT};
+    selection-color:{t.GOLD};selection-background-color:#363127;outline:none;}}
+QTableWidget::item {{padding:0px 7px;border-bottom:1px solid #333335;}}
+QTableWidget::item:hover {{background:#302e2b;}}
+QHeaderView::section {{background:{t.CANVAS};color:{t.MUTED};border:0;border-bottom:1px solid {t.EDGE};padding:4px 7px;
+    font-size:12px;}}
+QFrame#deckSummary {{ background:#252527; border:1px solid #414044;border-radius:6px; }}
+QPushButton#saveAs::menu-indicator {{ image:none;width:0; }}
+QComboBox {{padding:4px 8px;background:{t.PANEL};border:1px solid {t.EDGE};border-radius:4px;color:{t.TEXT};}}
+QComboBox::drop-down {{border:none;width:20px;}}
+QCheckBox {{font-size:12px;spacing:5px;}}
+QCheckBox::indicator {{width:12px;height:12px;border:1px solid #77777b;border-radius:2px;background:{t.CANVAS};}}
+QCheckBox::indicator:checked {{background:{t.GOLD};border-color:{t.GOLD};
+    image:url("{(t.ASSETS / "icons/check.svg").as_posix()}");}}
 """

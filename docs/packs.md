@@ -12,6 +12,8 @@ themes/<slug>/               # source folder of a theme pack  -> theme-<slug>.zi
 cardbacks/<slug>/            # one card back per pack          -> cardback-<slug>.zip
 music/<slug>/                # one game soundtrack per pack    -> music-<slug>.zip
 formats/                     # generated era banlists          -> formats.zip (single pack)
+art/<slug>/                  # artwork collection              -> art-<slug>.zip
+icons/<slug>/                # game icon set                   -> icons-<slug>.zip
 thumbs/<pack-id>.webp        # small tile images (<= 480 px long side, < 60 KB), served raw
 previews/<pack-id>.*         # optional larger preview (theme: 1280x800 webp; music: 20 s ogg clip)
 tools/                       # build_catalog.py, build_zips.py, checks
@@ -41,8 +43,9 @@ can point directly to a pack directory, where the same manifest hashes verify th
 - theme: `accent`, `tagline`, `previews` (list of 3 preview image URLs: menu, deck, duel)
 - cardback: `label` (e.g. "Yu-Gi-Oh! ZEXAL anime"), `era` (e.g. "2011"), `group` (one of
   `tcg-ocg`, `anime`, `manga`, `video-games`, `other-tcgs`), `default_for` (`"you"` | `"opponent"` | absent)
-- music: `game`, `year`, `platform`, `track_count`, `duration_seconds`
+- music: `game`, `series` (when present in the manifest), `year`, `platform`, `track_count`, `duration_seconds`
 - format: `formats` (count)
+- art and icons use an empty `meta` object.
 
 ## manifest.json (at the root of every pack ZIP)
 
@@ -78,15 +81,43 @@ active EDOPal skin's `textures/` if an EDOPal theme is active, else the base `te
 ### music
 ```json
 {"schema": 1, "id": "music-dawn-of-destiny", "kind": "music", "name": "The Dawn of Destiny",
- "version": "1.0.0", "game": "Yu-Gi-Oh! The Dawn of Destiny", "year": 2004, "platform": "Xbox",
+ "version": "1.0.0", "game": "Yu-Gi-Oh! The Dawn of Destiny", "series": "Duel Monsters",
+ "year": 2004, "platform": "Xbox",
  "cover": "cover.webp",
  "tracks": [{"id": "deck-1", "title": "Deck Construction", "path": "audio/deck-1.ogg",
              "duration_seconds": 142, "suggested_roles": ["deck"]}],
  "credits": [...], "files": {...}}
 ```
+
 Roles map to EDOPro folders: menu -> `sound/BGM/menu`, deck -> `sound/BGM/deck`,
 duel -> `sound/BGM/duel`, win -> `sound/BGM/win`, lose -> `sound/BGM/lose`. EDOPal writes its files
 as `edopal-<pack>-<track>.<ext>`; it never deletes files it did not create without asking.
+
+### Art
+
+Art packs use `kind: "art"` and IDs starting with `art-`. The app fetches each collection on demand
+and reads its images from the verified pack folder.
+
+| Pack ID | Payload |
+| --- | --- |
+| `art-card-of-the-day` | `banners/<card-id>.jpg` at 1600×460 (JPEG quality 86), `thumbs/<card-id>.jpg` at 800×230, and `banners.json` with card IDs, first English TCG release details, source crops, and normalized focus points |
+| `art-music-banners` | `banners/<music-slug>.jpg` at 1600×500, transparent `logos/<music-slug>.png`, and `credits.json` with per-game artwork sources |
+| `art-archetypes` | `thumbs/<archetype-slug>.jpg` at 160×160, `wide/<archetype-slug>.jpg` at 480×270, and `archetypes.json` with deck names, representative card IDs, and single or split layouts |
+| `art-format-heroes` | `<format-id>.jpg` at 1600×560 and a `cards` map in the manifest from format ID to hero card ID |
+
+Derive archetype slugs by lowercasing the deck name, replacing runs outside `a–z` and `0–9` with a
+hyphen, and removing leading and trailing hyphens. Each art pack with a separate JSON index points
+to it in the manifest's `index` field.
+
+Run `.venv/bin/python packs/tools/package_art.py` from the app checkout to regenerate the art packs.
+Use `--pics /path/to/EDOPro/pics` to select a local scan directory. Then run
+`.venv/bin/python packs/tools/build_catalog.py` to generate the archives and local catalog.
+
+### Icons
+
+Icon packs use `kind: "icons"` and IDs starting with `icons-`. A game icon set
+can store its PNGs under `textures/`. The builder inventories and hashes the payload like every
+other pack. Icon manifests may omit `credits` for compatibility with the original icon exports.
 
 ### format
 ```json
