@@ -73,7 +73,9 @@ class PluginRegistry:
         self.specs = {spec.id: spec for spec in specs if spec.kind == "plugin"}
         entries = {entry.id: entry for entry in _CONCEPTS}
         for spec in self.specs.values():
-            if spec.id not in entries:
+            if bundled_entry := getattr(spec, "gallery_entry", None):
+                entries[spec.id] = bundled_entry()
+            elif spec.id not in entries:
                 entries[spec.id] = PluginEntry(spec.id, spec.label, spec.summary)
         self.entries = tuple(entries.values())
         self.packages = {entry.id: entry.pack_id for entry in self.entries if entry.pack_id and entry.id in self.specs}

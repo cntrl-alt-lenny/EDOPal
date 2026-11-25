@@ -11,7 +11,7 @@ from PySide6.QtGui import QHelpEvent
 from PySide6.QtWidgets import QApplication, QPushButton, QToolTip
 
 from edopal.core.jobs import JobContext
-from edopal.features.formats.deck import read_cards
+from edopal.features.formats.deck import CardRecord, read_cards
 from edopal.features.formats.deck_shape import DeckShape
 from edopal.features.formats.media import load_faces
 
@@ -43,19 +43,29 @@ def test_shape_uses_cdb_fields_for_each_copy_and_hover(qtbot, tmp_path):
         QApplication.sendEvent(plot, QHelpEvent(QEvent.Type.ToolTip, pos, plot.mapToGlobal(pos)))
         return QToolTip.text()
 
-    assert Counter(mark[3].splitlines()[-1] for mark in plot.marks) == {"Monster": 4, "Spell": 1, "Trap": 1, "Unknown": 1}
-    assert "Pendulum" in hover(0)
+    assert [text for _, text, _ in plot.legend] == [
+        "Xyz 1",
+        "Pendulum 2",
+        "Link 1",
+        "Quick-Play Spell 1",
+        "Trap 1",
+        "Unknown 1",
+    ]
+    assert hover(4) == "Book of Moon\nQuick-Play Spell"
     qtbot.mouseClick(shape.findChild(QPushButton, "shapeLevel"), Qt.MouseButton.LeftButton)
-    assert len(plot.marks) == 12 and sum(group.total() for group in plot.bins) == 3
+    assert not plot.legend and len(plot.marks) == 12 and sum(group.total() for group in plot.bins) == 3
     assert hover(3).splitlines() == ["Level / Rank 4 · 3", "Pendulum ×2", "Xyz"]
+    assert hover(0) == "Level / Rank 1 · 0"
     qtbot.mouseClick(shape.findChild(QPushButton, "shapeAttribute"), Qt.MouseButton.LeftButton)
     assert Counter(mark[3].splitlines()[-1] for mark in plot.marks) == {
         "Light": 2,
         "Dark": 1,
         "Fire": 1,
-        "No Attribute": 2,
+        "Spell": 1,
+        "Trap": 1,
         "Unknown": 1,
     }
+    assert [text for _, text, _ in plot.legend] == ["Dark 1", "Light 2", "Fire 1", "Spell 1", "Trap 1", "Unknown 1"]
     light = next(i for i, mark in enumerate(plot.marks) if mark[3].endswith("Light"))
     assert "Light" in hover(light)
     QToolTip.hideText()
@@ -68,6 +78,43 @@ def test_sixty_copy_shape_fits_the_compact_header(qtbot):
     shape.show()
     assert len(shape.plot.marks) == 60
     assert all(shape.plot.rect().contains(dot.toRect()) for _, dot, _, _ in shape.plot.marks)
+
+
+def test_type_frames_are_ordered_and_match_the_wrapped_legend(qtbot):
+    frames = (
+        (0x11, "Normal"),
+        (0x1021, "Effect"),
+        (0xA1, "Ritual Monster"),
+        (0x61, "Fusion"),
+        (0x2021, "Synchro"),
+        (0x800021, "Xyz"),
+        (0x1000011, "Pendulum"),
+        (0x4000021, "Link"),
+        (0x2, "Spell"),
+        (0x10002, "Quick-Play Spell"),
+        (0x20002, "Continuous Spell"),
+        (0x40002, "Equip Spell"),
+        (0x80002, "Field Spell"),
+        (0x82, "Ritual Spell"),
+        (0x4, "Trap"),
+        (0x20004, "Continuous Trap"),
+        (0x100004, "Counter Trap"),
+    )
+    records = {i: CardRecord(name, None, None, flags) for i, (flags, name) in enumerate(frames)}
+    main = [(i, card.name) for i, card in reversed(records.items()) for _ in range(3)] + [(0, "Another Normal")] * 9
+    shape = DeckShape(main, records)
+    qtbot.addWidget(shape)
+    plot = shape.plot
+    shape.resize(plot.minimumWidth(), 72)
+    shape.show()
+    groups = {tip.splitlines()[-1]: color for _, _, color, tip in plot.marks}
+    assert list(groups) == [name for _, name in frames]
+    assert len(set(groups.values())) == len(frames)
+    assert [text for _, text, _ in plot.legend] == ["Normal 12", *(f"{name} 3" for _, name in frames[1:])]
+    assert [color for _, _, color in plot.legend] == list(groups.values())
+    assert len(plot.marks) == 60
+    assert max(dot.bottom() for _, dot, _, _ in plot.marks) < plot.legend[0][0].top()
+    assert all(plot.rect().contains(item.toAlignedRect()) for item, _, _ in plot.legend)
 
 
 def test_remote_face_is_available_to_click_details_for_lifetime_of_preview(tmp_path):

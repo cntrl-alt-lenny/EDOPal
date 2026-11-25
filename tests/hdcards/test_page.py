@@ -1,12 +1,12 @@
-import sqlite3
-from contextlib import closing
 from dataclasses import replace
+from io import BytesIO
 from unittest.mock import Mock
 
 import pytest
 from PIL import Image
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from edopal.core.install import RunState
 from edopal.dev.preview import make_core
@@ -112,9 +112,9 @@ def test_retry_and_scrolling_accessibility(page, qtbot):
     page.controller.start_sync.assert_called_once_with(retry_failed=True, confirmed_closed=False)
     page.rush.click()
     page.controller.set_options.assert_called_with(False, True, True)
-    top, bottom = page.rows
-    initial = (top.offset, bottom.offset)
-    qtbot.waitUntil(lambda: top.offset > initial[0] and bottom.offset < initial[1])
+    top, middle, bottom = page.rows
+    a, b, c = (row.offset for row in page.rows)
+    qtbot.waitUntil(lambda: top.offset > a and middle.offset < b and bottom.offset > c)
     before = top.offset
     qtbot.keyClick(top, Qt.Key.Key_Right)
     assert top.offset >= before + 0.24
@@ -122,45 +122,77 @@ def test_retry_and_scrolling_accessibility(page, qtbot):
     assert page.headline.summary.text() == "HD installed for 20,384 of 20,668"
 
 
-def test_banner_and_dice_are_distinct_actions(page, qtbot, monkeypatch):
-    root = page.core.installs.current().root
-    expansions = root / "expansions"
-    expansions.mkdir()
-    code = 14087893
-    with closing(sqlite3.connect(expansions / "cards.cdb")) as db, db:
-        db.execute("CREATE TABLE datas (id INTEGER PRIMARY KEY, type INTEGER)")
-        db.execute("CREATE TABLE texts (id INTEGER PRIMARY KEY, name TEXT, desc TEXT)")
-        db.execute("INSERT INTO datas VALUES (?, ?)", (code, 0x10002))
-        db.execute("INSERT INTO texts VALUES (?, ?, ?)", (code, "Book of Moon", "Flip a monster face-down."))
-    image = root / "pics" / f"{code}.jpg"
-    image.parent.mkdir()
-    Image.new("RGB", (421, 614)).save(image)
+def test_sync_panel_facts_and_grid(page):
+    page.preview_state("idle")
+    metric, groups, sync = page.headline, page.groups, page.sync_panel
+    assert len({panel.geometry().top() for panel in (metric, groups, sync)}) == 1
+    assert len({panel.height() for panel in (metric, groups, sync)}) == 1
+    assert [count.text() for count in sync.counts.values()] == ["87", "197", "4,398"]
+    info = [button for button in sync.findChildren(QPushButton) if button.accessibleName().startswith("About ")]
+    assert len({button.toolTip() for button in info if button.toolTip()}) == 3
+    switches = (page.deck, page.original, page.rush)
+    assert len({(switch.geometry().left(), switch.geometry().right(), switch.height()) for switch in switches}) == 1
 
-    first = {"id": 55144522, "name": "Pot of Greed", "set_name": "Legend of Blue Eyes White Dragon", "set_code": "LOB-119"}
-    next_card = {"id": code, "name": "Banner Name", "set_name": "Pharaonic Guardian", "set_code": "PGD-035"}
-    page.banner.display((first, b""))
-    open_detail = Mock()
-    monkeypatch.setattr("edopal.features.hdcards.page.show_card_detail", open_detail)
-    reroll = Mock(return_value=(next_card, b""))
-    monkeypatch.setattr("edopal.features.hdcards.page.load_banner", reroll)
 
-    qtbot.mouseClick(page.banner.reroll, Qt.MouseButton.LeftButton)
-    assert reroll.call_args.kwargs["previous"] == first["id"]
-    open_detail.assert_not_called()
-    assert page.banner.record == next_card
-
-    qtbot.mouseClick(page.banner, Qt.MouseButton.LeftButton)
-    parent, detail = open_detail.call_args.args
-    assert parent is page.banner
-    assert (detail.code, detail.name, detail.kind, detail.text, detail.image) == (
-        code,
-        "Book of Moon",
-        "Spell · Quick-Play",
-        "Flip a monster face-down.",
-        image,
+def test_showcase_pause_and_shift_wheel(page, qtbot):
+    row = page.rows[0]
+    qtbot.mouseMove(row, row.rect().center())
+    qtbot.waitUntil(row.underMouse)
+    before = row.offset
+    qtbot.wait(row.timer.interval() * 2)
+    assert row.offset == before
+    local = row.rect().center()
+    wheel = QWheelEvent(
+        QPointF(local),
+        QPointF(row.mapToGlobal(local)),
+        QPoint(),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.ShiftModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
     )
-    assert dict(detail.facts) == {
-        "First Set": "Pharaonic Guardian (PGD-035)",
-        "Card ID": str(code),
-        "HD Status": "HD Installed",
-    }
+    QApplication.sendEvent(row, wheel)
+    assert wheel.isAccepted()
+    assert row.offset == pytest.approx(before - 40 / row.stride)
+    before = row.offset
+    qtbot.mouseMove(page.headline, page.headline.rect().center())
+    qtbot.waitUntil(lambda: row.offset > before)
+
+
+def test_showcase_distinct_at_each_phase_and_width(page):
+    pool = [item[0] for row in page.rows for item in row.items]
+    assert len(set(pool)) == len(pool) == 18
+    assert all(not pixmap.isNull() for row in page.rows for _, *pair in row.items for pixmap in pair)
+    for width in (1280, 1920, 3440):
+        page.resize(width, 1080)
+        QApplication.processEvents()
+        for row in page.rows:
+            for step in range(8 * len(row.items)):
+                row.offset = step / 8
+                tiles = list(row.visible_tiles())
+                visible = [item[0] for _, item in tiles]
+                assert len(set(visible)) == len(visible)
+                row.offset += len(row.items)
+                assert list(row.visible_tiles()) == tiles
+
+
+def test_showcase_merges_synced_cards_without_repeating_prints(page):
+    output = BytesIO()
+    Image.new("RGB", (8, 8)).save(output, "JPEG")
+    sample = output.getvalue()
+    page.render_state(
+        replace(
+            page.state,
+            pairs=(
+                ("Pot of Greed", sample, sample),
+                ("Pot of greed", sample, sample),
+                ("Mirror Force", sample, sample),
+                ("Invalid Data", b"", sample),
+            ),
+        )
+    )
+    pool = [item[0] for row in page.rows for item in row.items]
+    assert len(pool) == 19
+    assert pool.count("Pot of Greed") == pool.count("Mirror Force") == 1
+    assert "Pot of greed" not in pool and "Invalid Data" not in pool

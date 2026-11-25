@@ -134,7 +134,7 @@ def test_status_change_resets_run_state_and_updates_hooks(shell, tmp_path, monke
     monkeypatch.setattr(core.installs, "run_state", lambda: RunState.CLOSED)
     core.installs.select(tmp_path / "other")
     assert "Ready" in window.folder_state.text()
-    assert Path(window.folder_path.full_text) == tmp_path / "other"
+    assert Path(window.folder_path.full_text).expanduser() == tmp_path / "other"
     assert window.launch.isEnabled()
     assert ("music", "exited") not in trace
     assert ("themes", "selected") in trace

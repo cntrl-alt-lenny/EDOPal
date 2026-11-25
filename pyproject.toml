@@ -28,6 +28,7 @@ version = { attr = "edopal.__version__" }
 
 [tool.setuptools.package-data]
 edopal = ["assets/**/*"]
+"edopal.plugins.decktracker" = ["*.webp"]
 "edopal.features.formats.builder" = ["inputs/*.json", "inputs/*.json.gz"]
 
 [tool.ruff]

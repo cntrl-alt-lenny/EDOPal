@@ -6,7 +6,6 @@ from PySide6.QtGui import QColor, QPainter, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton
 
 from edopal.features.themes import register
-from edopal.features.themes.gallery import PreviewCanvas
 from edopal.features.themes.service import ThemeService
 
 
@@ -63,7 +62,6 @@ def test_horizontal_library_overflow_wheel_and_arrow_navigation(page, qtbot, mod
     qtbot.keyClick(page.tiles[keys[-1]], Qt.Key.Key_Left)
     assert page.selected == keys[-2]
     assert page.shelf.geometry().bottom() < page.canvas.geometry().top()
-    assert abs(page.canvas._frame().width() / page.canvas._frame().height() - 1.6) < 0.001
 
 
 def test_customize_active_theme_from_inline_drawer(core, page, qtbot):
@@ -85,22 +83,30 @@ def test_customize_active_theme_from_inline_drawer(core, page, qtbot):
     assert not state.theme_font
 
 
-def test_preview_keeps_capture_edges_and_fills_both_margins(qtbot):
-    preview = PreviewCanvas()
-    qtbot.addWidget(preview)
-    preview.resize(720, 300)
+@pytest.mark.parametrize(("width", "height"), [(1702, 1012), (1106, 742)])
+def test_preview_fills_column_and_scrolls_to_capture_edges(page, qtbot, width, height):
+    # Page dimensions after subtracting the shell rail and header at the two target resolutions.
+    page.resize(width, height)
+    QApplication.processEvents()
+    preview = page.canvas
+    assert preview.x() == page.shelf.x()
+    assert preview.width() == page.shelf.width()
+    assert preview.height() == round(preview.width() * 10 / 16)
+    assert page.shelf.geometry().bottom() < page.apply_button.geometry().top() < preview.y()
+    assert page.modes["deck"].mapTo(preview.parentWidget(), QPoint()).y() < preview.y()
+
+    # Distinct corners expose both cropping and any fill painted outside the original capture.
     capture = QPixmap(480, 300)
-    left, right = QColor("#299eb1"), QColor("#d49629")
-    capture.fill(left)
+    capture.fill(QColor("black"))
     with QPainter(capture) as painter:
-        painter.fillRect(240, 0, 240, 300, right)
+        for x, y, color in ((0, 0, "red"), (470, 0, "green"), (0, 290, "blue"), (470, 290, "yellow")):
+            painter.fillRect(x, y, 10, 10, QColor(color))
     preview.set_preview(capture, animate=False)
     image = preview.grab().toImage()
-    frame = preview._frame()
-    left_edge, right_edge = round(frame.left()), round(frame.right())
-    assert image.pixelColor(left_edge + 2, 150) == left
-    assert image.pixelColor(right_edge - 2, 150) == right
-    for margin, original in ((45, left), (675, right)):
-        tinted = image.pixelColor(margin, 150)
-        assert 0.58 < tinted.value() / original.value() < 0.68
-        assert abs(tinted.hue() - original.hue()) <= 2
+    for x, y, color in ((0, 0, "red"), (-1, 0, "green"), (0, -1, "blue"), (-1, -1, "yellow")):
+        assert image.pixelColor(x % image.width(), y % image.height()) == QColor(color)
+    bar = page.scroll.verticalScrollBar()
+    assert bar.maximum() > 0
+    bar.setValue(bar.maximum())
+    bottom = preview.mapTo(page.scroll.viewport(), preview.rect().bottomRight())
+    assert page.scroll.viewport().rect().contains(bottom)

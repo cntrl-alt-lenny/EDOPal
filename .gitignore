@@ -12,3 +12,5 @@ dist/
 /packs/
 /shots/
 /logs/
+/.tmp/
+/EDOPal.desktop

@@ -143,7 +143,7 @@ class CosmeticsPage(ShellPage):
 
         def error(exc):
             if self.museum.selected == key:
-                self.museum.credits.setPlainText(str(exc))
+                self.core.notify(str(exc), "error")
 
         self.core.jobs.run(load, key="cosmetics-focused-back", on_done=done, on_error=error)
 

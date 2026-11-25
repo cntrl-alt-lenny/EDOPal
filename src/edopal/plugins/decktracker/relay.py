@@ -166,6 +166,8 @@ class RelayService:
 
     def __init__(self):
         self.stop_requested = threading.Event()
+        self.retired = threading.Event()
+        self.ready = threading.Event()
         self.latest = ("Relay stopped", None)
         self.thread = None
 
@@ -178,7 +180,12 @@ class RelayService:
             try:
                 await relay.start(sock)
                 publish("Listening · choose EDOPal Relay in EDOPro", None)
+                self.ready.set()
                 while not self.stop_requested.is_set():
+                    if self.retired.is_set():
+                        relay.server.close()
+                        if not relay.clients:
+                            break
                     await asyncio.sleep(0.05)
             finally:
                 await relay.close()
@@ -196,3 +203,7 @@ class RelayService:
 
     def stop(self):
         self.stop_requested.set()
+
+    def retire(self):
+        """Stop accepting new clients and let an already-connected duel finish."""
+        self.retired.set()

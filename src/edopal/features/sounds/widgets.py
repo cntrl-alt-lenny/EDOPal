@@ -49,8 +49,8 @@ _PICKER_STYLE = f"""
 """
 
 
-@lru_cache(maxsize=80)
-def _banner(path):
+@lru_cache(maxsize=160)
+def _artwork(path):
     reader = QImageReader(str(path))
     size = reader.size()
     if size.width() > 480:
@@ -64,10 +64,13 @@ class GameCover(QWidget):
         self.tint = tint or "#242426"
         self.symbol = symbol
         self.cover = QPixmap()
+        self.logo = QPixmap()
         self.focus = 0.60
 
     def set_cover(self, slug, path):
-        self.cover = _banner(path) if path else QPixmap()
+        # MusicService resolves the banner inside the verified art-music-banners pack.
+        self.cover = _artwork(path) if path else QPixmap()
+        self.logo = _artwork(path.parent.parent / "logos" / (path.stem + ".png")) if path else QPixmap()
         self.focus = _FOCUS.get(slug, 0.60)
         self.update()
 
@@ -84,6 +87,11 @@ class GameCover(QWidget):
                 width, height = box.width() / scale, box.height() / scale
                 source = QRectF((self.cover.width() - width) * self.focus, (self.cover.height() - height) / 2, width, height)
                 painter.drawPixmap(box, self.cover, source)
+                if not self.logo.isNull():
+                    inset = box.width() * 0.04
+                    scale = min(box.width() * 0.45 / self.logo.width(), box.height() * 0.78 / self.logo.height())
+                    w, h = self.logo.width() * scale, self.logo.height() * scale
+                    painter.drawPixmap(QRectF(inset, (box.height() - h) / 2, w, h), self.logo, QRectF(self.logo.rect()))
             elif self.symbol:
                 size = round(min(box.width(), box.height()) * 0.68)
                 t.icon(self.symbol, t.GOLD if self.symbol == "logo" else t.MUTED).paint(
@@ -284,8 +292,7 @@ class GamePicker(QDialog):
 
     def set_banners(self, banners):
         for slug, cover in self.covers.items():
-            if path := banners.get("music-" + slug):
-                cover.set_cover(slug, path)
+            cover.set_cover(slug, banners.get("music-" + slug))
 
     def showEvent(self, event):
         super().showEvent(event)

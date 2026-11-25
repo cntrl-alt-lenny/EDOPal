@@ -249,3 +249,74 @@ def test_client_version_and_seat_gate():
     s.feed(True, submit())
     s.feed(False, frame(0x15) + start() + draw(0, 11))
     assert s.deck is None and "Unsupported" in s.status
+
+
+@pytest.mark.parametrize("seat", [0, 1])
+def test_follow_own_main_cards_through_all_zones_and_control_changes(seat):
+    other = 1 - seat
+    s = session(seat)
+    s.feed(False, draw(seat, 11, 11, 22) + draw(other, 22))
+    assert s.deck.zones["Hand"] == {11: 2, 22: 1}
+    s.feed(False, move(11, (seat, 2, 1, 0), (seat, 4, 3, 1)))
+    s.feed(False, move(11, (seat, 4, 3, 1), (other, 4, 0, 1)))
+    # An opponent's same-name copy in a neighboring slot never enters the tally.
+    s.feed(False, move(11, (other, 2, 0, 0), (other, 4, 1, 1)))
+    s.feed(False, move(11, (other, 4, 1, 1), (other, 16, 0, 1)))
+    assert s.deck.zones["Field"] == {11: 1} and not s.deck.zones["GY"]
+    s.feed(False, move(11, (other, 4, 0, 1), (seat, 16, 0, 1)))
+    s.feed(False, move(22, (seat, 2, 1, 0), (seat, 32, 0, 1)))
+    assert s.deck.zones == {"Hand": {11: 1}, "Field": {}, "GY": {11: 1}, "Banished": {22: 1}}
+    s.feed(False, move(11, (seat, 16, 0, 1), (seat, 1, 1, 10)))
+    assert s.deck.remaining == {11: 1, 33: 1} and s.deck.probability(11) == 1
+    assert not s.deck.zones["GY"]
+
+
+def test_hand_shuffle_remove_and_siding_clear_locations():
+    s = session()
+    s.feed(False, draw(0, 11, 22))
+    s.feed(False, game(33, struct.pack("<BIII", 0, 2, 22, 11)))
+    s.feed(False, move(22, (0, 2, 0, 0), (0, 8, 2, 1)))
+    s.feed(False, game(190, struct.pack("<IBBII", 1, 0, 8, 2, 1)))
+    assert s.deck.zones["Hand"] == {11: 1} and not s.deck.zones["Field"]
+    s.feed(False, frame(7))
+    s.feed(True, submit())
+    s.feed(False, frame(0x15) + start() + draw(0, 33))
+    assert s.deck.zones["Hand"] == {33: 1} and not s.deck.zones["GY"]
+
+
+def test_materials_follow_the_host_then_detach_to_grave():
+    s = session()
+    s.feed(False, draw(0, 11, 22))
+    s.feed(False, move(11, (0, 2, 0, 0), (0, 4, 1, 1)))
+    s.feed(False, move(22, (0, 2, 0, 0), (0, 132, 1, 0)))
+    assert s.deck.zones["Material"] == {22: 1} and s.deck.zones["Field"] == {11: 1}
+    s.feed(False, move(11, (0, 4, 1, 1), (1, 4, 4, 1)))
+    s.feed(False, move(22, (1, 132, 4, 0), (0, 16, 0, 1)))
+    assert s.deck.zones["GY"] == {22: 1} and "Material" not in s.deck.zones
+
+
+def test_foreign_inserted_card_has_draw_odds_but_is_never_reported_as_ours():
+    s = session()
+    s.feed(False, move(77, (1, 16, 0, 1), (0, 1, 4, 10)))
+    assert s.deck.probability(77) == 1
+    s.feed(False, draw(0, 77))
+    assert not s.deck.zones["Hand"]
+
+
+def test_private_field_shuffle_keeps_aggregate_until_a_public_departure():
+    s = session()
+    a, b = (0, 8, 1, 8), (0, 8, 2, 8)
+    s.feed(False, draw(0, 11, 22) + move(11, (0, 2, 0, 0), a) + move(22, (0, 2, 0, 0), b))
+    s.feed(False, game(36, bytes([8, 2]) + p.LOCATION.pack(*a) + p.LOCATION.pack(*b) + bytes(20)))
+    assert s.deck.zones["Field"] == {11: 1, 22: 1}
+    s.feed(False, move(22, a, (0, 16, 0, 1)))
+    assert s.deck.zones["GY"] == {22: 1} and s.deck.zones["Field"] == {11: 1}
+
+
+def test_own_facedown_banishment_is_inspectable_in_edopro_pile_view():
+    s = session()
+    s.feed(False, move(11, (0, 1, 0, 10), (0, 32, 0, 8)))
+    assert s.deck.zones["Banished"] == {11: 1}
+    hidden = session()
+    hidden.feed(False, move(11, (0, 1, 0, 10), (1, 32, 0, 8)))
+    assert hidden.deck is None

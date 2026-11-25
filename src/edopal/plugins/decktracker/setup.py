@@ -76,3 +76,13 @@ def install_entry(storage, install, server, port=DEFAULT_PORT, *, confirmed_clos
         entries.append(desired)
     with storage.changeset(install, PLUGIN_ID, "Set up EDOPal Relay", confirmed_closed=confirmed_closed) as cs:
         cs.write(USER_CONFIG, (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode())
+
+
+def route_info(storage, install, preferred=None):
+    """Resolve the existing route, including a server selected in an earlier version."""
+    choices = servers(install)
+    entries = _config(install.path(USER_CONFIG)).get("servers", [])
+    matching = [s for s in choices if s.entry(DEFAULT_PORT) in entries]
+    current = next((s for s in matching if s.name == preferred), None) or next(iter(matching), None)
+    chosen = next((s for s in choices if s.name == preferred), None) or current or next(iter(choices), None)
+    return choices, chosen, current, bool(storage.last_receipt(install, PLUGIN_ID))

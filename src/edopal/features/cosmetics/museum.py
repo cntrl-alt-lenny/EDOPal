@@ -1,16 +1,16 @@
 """The grouped card-back collection, equipped slots, and focused design."""
 
 from functools import partial
-from html import escape
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
-    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -28,7 +28,6 @@ GROUPS = {
     "video-games": "Video Games",
     "other-tcgs": "Other TCGs",
 }
-GROUP_ROWS = (("tcg-ocg",), ("anime", "manga"), ("video-games", "other-tcgs"))
 CURRENT_GAME_BACK = "Current Game Back"
 # Short historical source labels for designs whose printed name does not identify the product.
 SOURCES = {
@@ -107,6 +106,60 @@ class MuseumTile(QPushButton):
             self.focused.emit(self.pack.id)
 
 
+class MuseumGrid(QScrollArea):
+    """All collection sections share the same tile dimensions and column positions."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        self.grid = QGridLayout(content)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(8)
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.setWidget(content)
+        self.sections = []
+        self.columns = 0
+
+    def add_section(self, name, tiles):
+        heading = QWidget()
+        row = QHBoxLayout(heading)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(label(name, "subheading"))
+        row.addWidget(rule(), 1)
+        heading.setFixedHeight(row.sizeHint().height())
+        self.sections.append((heading, tiles))
+        self.columns = 0
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.reflow()
+
+    def reflow(self):
+        width = self.viewport().width()
+        gap = self.grid.spacing()
+        columns = max(1, min(6, (width + gap) // (168 + gap)))
+        tile_width = max(1, (width - gap * (columns - 1)) // columns)
+        tile_height = round(tile_width * 1.25) + 54
+        if columns != self.columns:
+            while self.grid.count():
+                self.grid.takeAt(0)
+            self.columns = columns
+            row = 0
+            for heading, tiles in self.sections:
+                self.grid.addWidget(heading, row, 0, 1, columns)
+                row += 1
+                for index, tile in enumerate(tiles):
+                    self.grid.addWidget(tile, row + index // columns, index % columns)
+                row += (len(tiles) + columns - 1) // columns
+        for heading, tiles in self.sections:
+            heading.setFixedWidth(width)
+            for tile in tiles:
+                tile.setFixedSize(tile_width, tile_height)
+        self.widget().setMinimumHeight(self.grid.minimumSize().height())
+
+
 class Museum(QWidget):
     focused = Signal(str)
     equip = Signal(str, str)
@@ -143,9 +196,8 @@ class Museum(QWidget):
         self.count = label("", "small")
         heading.addWidget(self.count)
         left.addLayout(heading)
-        self.rows = QVBoxLayout()
-        self.rows.setSpacing(8)
-        left.addLayout(self.rows, 1)
+        self.collection = MuseumGrid()
+        left.addWidget(self.collection, 1)
 
         panel = QFrame()
         panel.setObjectName("backDetails")
@@ -166,14 +218,6 @@ class Museum(QWidget):
         self.source.setWordWrap(True)
         details.addWidget(self.source)
         details.addWidget(rule())
-        details.addWidget(label("Credits", "subheading"))
-        self.credits = QTextBrowser()
-        self.credits.setAccessibleName("Card back credits")
-        self.credits.setOpenExternalLinks(True)
-        self.credits.setStyleSheet(f"background: transparent; border: 0; color: {t.TEXT}; font-size: 12px;")
-        self.credits.document().setDocumentMargin(0)
-        self.credits.setFixedHeight(64)
-        details.addWidget(self.credits)
         for slot in self.slots:
             button = QPushButton(f"Use For {slot.title()}")
             if slot == "you":
@@ -187,33 +231,18 @@ class Museum(QWidget):
         self.images = images
         self.packs = {p.id: p for p in packs}
         self.count.setText(f"{len(packs)} designs")
-        for groups in GROUP_ROWS:
-            row = QHBoxLayout()
-            row.setSpacing(8)
-            for group in groups:
-                items = sorted(
-                    (p for p in packs if p.meta.get("group") == group), key=lambda p: (p.meta.get("era", ""), p.name)
-                )
-                if not items:
-                    continue
-                section = QVBoxLayout()
-                section.setSpacing(4)
-                head = QHBoxLayout()
-                head.addWidget(label(GROUPS[group], "subheading"))
-                head.addWidget(rule(), 1)
-                section.addLayout(head)
-                strip = QHBoxLayout()
-                strip.setSpacing(5)
+        for group, name in GROUPS.items():
+            items = sorted((p for p in packs if p.meta.get("group") == group), key=lambda p: (p.meta.get("era", ""), p.name))
+            if items:
+                tiles = []
                 for pack in items:
                     button = MuseumTile(pack, images.get(pack.id))
                     button.clicked.connect(partial(self.select, pack.id))
                     button.focused.connect(self.select)
                     self.tiles[pack.id] = button
-                    strip.addWidget(button, 1)
-                section.addLayout(strip, 1)
-                row.addLayout(section, len(items))
-            if row.count():
-                self.rows.addLayout(row, 1)
+                    tiles.append(button)
+                self.collection.add_section(name, tiles)
+        self.collection.reflow()
         if packs:
             initial = self.state.cardbacks["you"] if self.state else "cardback-vortex-classic"
             self.select(initial if initial in self.packs else packs[0].id)
@@ -240,7 +269,6 @@ class Museum(QWidget):
             self.source.setText(pack.meta.get("label", ""))
             self.category.setText("   ·   ".join(filter(None, (GROUPS.get(pack.meta.get("group")), pack.meta.get("era")))))
             self.art.set_art(self.images.get(key))
-            self.credits.setPlainText("Loading credits…")
             self.focused.emit(key)
         self.refresh_slots()
 
@@ -249,14 +277,6 @@ class Museum(QWidget):
             return
         self.name.setText(manifest["name"])
         self.art.set_art(path, 708)
-        credits = []
-        for credit in manifest.get("credits", []):
-            source = escape(credit["source"])
-            url = credit.get("url", "")
-            if url.startswith(("https://", "http://")):
-                source = f'<a style="color:{t.TEXT}" href="{escape(url, quote=True)}">{source}</a>'
-            credits.append(source)
-        self.credits.setHtml("<br>".join(dict.fromkeys(credits)) or "No credits supplied.")
 
     def refresh_slots(self):
         for slot, button in self.slots.items():
@@ -275,7 +295,10 @@ class Museum(QWidget):
         if not self.state:
             return
         if slot not in self.state.unknown_back_slots:
-            self.select(self.state.cardbacks.get(slot))
+            key = self.state.cardbacks.get(slot)
+            self.select(key)
+            if key in self.tiles:
+                self.collection.ensureWidgetVisible(self.tiles[key], 0, 8)
             return
         path = self.state.back_images.get(slot)
         if path:
@@ -286,7 +309,6 @@ class Museum(QWidget):
             self.name.setText(CURRENT_GAME_BACK)
             self.source.setText(path.name)
             self.art.set_art(path, 708)
-            self.credits.setPlainText("This image comes from your EDOPro game folder.")
             self.refresh_slots()
 
     def _equip(self, slot):

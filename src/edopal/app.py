@@ -62,17 +62,20 @@ def main() -> int:
     from edopal.ui import theme
 
     args = sys.argv[:]
-    gamescope = os.environ.get("GAMESCOPE_WAYLAND_DISPLAY")
     if (
         sys.platform.startswith("linux")
-        and gamescope
-        and os.environ.get("WAYLAND_DISPLAY") == gamescope
         and os.environ.get("DISPLAY")
         and not os.environ.get("QT_QPA_PLATFORM")
         and "-platform" not in args
     ):
-        # Gamescope can retain the first native Wayland frame. Prefer its XWayland display.
+        # X11 supports positioning the tracker over EDOPro on desktop and in Gamescope.
         args.extend(["-platform", "xcb;wayland"])
+    if sys.platform.startswith("linux") and os.environ.get("GAMESCOPE_WAYLAND_DISPLAY") and "-display" not in args:
+        from edopal.plugins.decktracker.windows import gamescope_root_display
+
+        display = gamescope_root_display()
+        if display and display != os.environ.get("DISPLAY"):
+            args.extend(["-display", display])
     app = QApplication.instance() or QApplication(args)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)

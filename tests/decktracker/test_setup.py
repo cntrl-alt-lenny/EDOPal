@@ -3,15 +3,13 @@ import shutil
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
 
 from edopal.core.install import Install, RunState
 from edopal.core.safe_storage import SafeStorage
 from edopal.core.storage import GameRunningError
 from edopal.dev.preview import make_core
-from edopal.plugins.decktracker import register
+from edopal.plugins.decktracker import before_launch, get_runtime, on_enabled_changed, register
 from edopal.plugins.decktracker.setup import PLUGIN_ID, USER_CONFIG, Server, install_entry, servers
-from edopal.ui.shell import ShellWindow
 
 EU = Server("EU Casual", "example.test", 7912, "rooms.example.test", 443, "https")
 
@@ -65,46 +63,43 @@ def test_invalid_config_and_name_collision_are_preserved(tmp_path):
         assert install.path(USER_CONFIG).read_text() == doc
 
 
-def test_gallery_sidebar_setup_compact_stop_and_undo(tmp_path, qtbot, monkeypatch):
-    from edopal.plugins.decktracker import page
+def test_enable_launch_without_visiting_page_and_undo(tmp_path, qtbot, monkeypatch):
+    import importlib
 
-    # An ephemeral port avoids interfering with EDOPal running on the developer's desktop.
     from edopal.plugins.decktracker.relay import bind_loopback
 
-    sock = bind_loopback(0)
-    port = sock.getsockname()[1]
-    monkeypatch.setattr(page, "bind_loopback", lambda: sock)
+    tracker_module = importlib.import_module("edopal.plugins.decktracker.runtime")
     game = tmp_path / "game"
     shutil.copytree(Path(__file__).resolve().parents[1] / "fixtures/game", game)
     (game / "config/configs.json").write_text(json.dumps({"servers": [EU.__dict__]}))
-    packs = tmp_path / "packs"
-    from edopal.plugins.decktracker.bundle import build
-
-    build(packs)
-    core = make_core(game, packs, tmp_path / "profile")
+    core = make_core(game, tmp_path / "packs", tmp_path / "profile")
     core.storage = SafeStorage(core.paths, lambda: RunState.CLOSED)
-    assert servers(core.installs.current()) == [EU]
-    window = ShellWindow(core, [register(core)], "plugins")
-    qtbot.addWidget(window)
-    window.show()
-    gallery = window.pages["plugins"]
-    assert gallery.cards[PLUGIN_ID].status.text() == "Available"
-    gallery.cards[PLUGIN_ID].details.click()
-    gallery.drawer.install.click()
-    gallery.drawer.enable.click()
-    window.navigate(PLUGIN_ID)
-    tracker = window.pages[PLUGIN_ID]
-    assert tracker.preview[0] == "Fixture"
-    assert tracker.view.table.rowCount() > 0
-    tracker.start.click()
-    qtbot.waitUntil(lambda: "Listening" in tracker.status.text())
-    assert json.loads((game / USER_CONFIG).read_text())["servers"][0]["duelport"] == port
-    tracker._open_compact()
-    assert tracker.compact.isVisible() and tracker.compact.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
-    tracker.start.click()
-    qtbot.waitUntil(lambda: tracker.service is None)
-    tracker.undo.click()
+    sock = bind_loopback(0)
+    monkeypatch.setattr(tracker_module, "bind_loopback", lambda: sock)
+    spec = register(core)
+    assert not spec.gallery_entry().pack_id
+    assert "server list" in spec.gallery_entry().detail
+    before_launch(core, core.installs.launch, pytest.fail)
+    assert core.installs.launched == 1 and not (game / USER_CONFIG).exists()
+    core.settings.set("plugins", PLUGIN_ID, True)
+    on_enabled_changed(core, True)
+    tracker = get_runtime(core)
+    assert (game / USER_CONFIG).exists() and tracker.service is None
+    assert tracker.info[2] == EU
+    before_launch(core, core.installs.launch, pytest.fail)
+    qtbot.waitUntil(lambda: core.installs.launched == 2)
+    assert tracker.service.ready.is_set() and not tracker.overlay.isVisible()
+    assert len(tuple(core.storage.history(core.installs.current()))) == 1
+    service = tracker.service
+    spec.on_game_exited(core)
+    qtbot.waitUntil(lambda: not service.thread.is_alive())
+    assert tracker.service is None
+    page = spec.page(core)
+    qtbot.addWidget(page)
+    page.undo.click()
     assert not (game / USER_CONFIG).exists()
+    before_launch(core, core.installs.launch, pytest.fail)
+    assert core.installs.launched == 3 and not (game / USER_CONFIG).exists()
 
 
 def test_entry_selector_skips_relay_and_keeps_other_servers(tmp_path):
@@ -140,3 +135,74 @@ def test_accidental_self_route_is_rejected_before_writing(tmp_path):
     with pytest.raises(ValueError, match="itself"):
         install_entry(storage, install, target)
     assert not install.path(USER_CONFIG).exists()
+
+
+def test_launch_recalls_the_duel_endpoint_for_servers_sharing_a_room_list(tmp_path, qtbot):
+    from dataclasses import replace
+
+    first, second = EU, replace(EU, name="Second", duelport=5555)
+    install = Install(tmp_path / "game")
+    install.path("config").mkdir(parents=True)
+    install.path("config/configs.json").write_text(json.dumps({"servers": [first.__dict__, second.__dict__]}))
+    core = make_core(install.root, tmp_path / "packs", tmp_path / "profile")
+    tracker = get_runtime(core)
+    qtbot.addWidget(tracker.overlay)
+    tracker.prepare(server="Second")
+    assert tracker.info[2] == second
+    tracker.inspect()
+    assert tracker.info[2] == second
+    tracker.prepare()
+    assert tracker.info[2] == second
+
+
+def test_early_launch_waits_for_enable_and_error_can_retry(tmp_path, qtbot, monkeypatch):
+    from edopal.core.jobs import JobContext
+    from edopal.plugins.decktracker import runtime as tracker_module
+    from edopal.plugins.decktracker.relay import bind_loopback
+
+    class DeferredJobs:
+        def __init__(self):
+            self.queue = []
+
+        def run(self, work, on_done, on_error):
+            self.queue.append((work, on_done, on_error))
+
+        def finish(self):
+            work, done, failed = self.queue.pop(0)
+            try:
+                value = work(JobContext())
+            except Exception as exc:
+                failed(exc)
+            else:
+                done(value)
+
+    install = Install(tmp_path / "game")
+    install.path("config").mkdir(parents=True)
+    install.path("config/configs.json").write_text(json.dumps({"servers": [EU.__dict__]}))
+    core = make_core(install.root, tmp_path, tmp_path / "profile")
+    core.jobs = DeferredJobs()
+    core.settings.set("plugins", PLUGIN_ID, True)
+    errors = []
+    on_enabled_changed(core, True)
+    before_launch(core, core.installs.launch, errors.append)
+    assert len(core.jobs.queue) == 1 and not install.path(USER_CONFIG).exists()
+    core.jobs.finish()
+    assert install.path(USER_CONFIG).exists() and core.installs.launched == 0
+
+    def occupied():
+        raise OSError("Port already in use")
+
+    monkeypatch.setattr(tracker_module, "bind_loopback", occupied)
+    core.jobs.finish()
+    assert errors and "Port already in use" in errors[0] and core.installs.launched == 0
+    monkeypatch.setattr(tracker_module, "bind_loopback", lambda: bind_loopback(0))
+    before_launch(core, core.installs.launch, errors.append)
+    core.jobs.finish()
+    core.jobs.finish()
+    qtbot.waitUntil(lambda: core.installs.launched == 1)
+    tracker = get_runtime(core)
+    qtbot.addWidget(tracker.overlay)
+    service = tracker.service
+    on_enabled_changed(core, False)
+    qtbot.waitUntil(lambda: not service.thread.is_alive())
+    assert not tracker.overlay.isVisible() and service.retired.is_set()

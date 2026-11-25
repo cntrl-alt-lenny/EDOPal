@@ -1,4 +1,4 @@
-"""Open the bundled owner build directly while the gallery package awaits publication."""
+"""Developer-only standalone settings preview."""
 
 import argparse
 import sys

@@ -11,6 +11,7 @@ import struct
 from collections.abc import Mapping
 
 from .model import DeckState, LostHistory
+from .zones import ZoneLedger
 
 CTOS_UPDATE_DECK, CTOS_CREATE_GAME, CTOS_JOIN_GAME = 0x02, 0x11, 0x12
 STOC_GAME_MSG, STOC_ERROR_MSG, STOC_CHANGE_SIDE = 0x01, 0x02, 0x07
@@ -29,7 +30,7 @@ LOCATION = struct.Struct("<BBII")
 PASSIVE = frozenset((
     1, 2, 3, 6, 7, 8,                              # hints and UI refreshes
     10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26,  # decisions
-    31, 33, 36, 39, 40, 41, 42, 53, 54, 56,        # confirmations, non-deck zones and phases
+    31, 40, 41, 42, 53, 54, 56,        # confirmations, non-deck zones and phases
     60, 61, 62, 63, 64, 65, 70, 71, 72, 73, 74, 75, 76, 80, 81, 83,  # summons and chains
     91, 92, 93, 94, 95, 96, 97, 100, 101, 102, 110, 111, 112, 113, 114,  # stats and combat
     120, 121, 122, 123, 130, 131, 132, 133, 140, 141, 142, 143, 160, 163, 164, 165, 170,
@@ -66,7 +67,7 @@ def _visible(loc, seat):
     player, zone, _, pos = loc
     if zone == GRAVE or zone & OVERLAY:
         return True
-    if zone in (HAND, 4, 8, EXTRA) and player == seat:
+    if zone in (HAND, 4, 8, REMOVED, EXTRA) and player == seat:
         return True
     return bool(zone in (4, 8, REMOVED, EXTRA) and pos & 5)
 
@@ -176,6 +177,8 @@ class Session:
         if not self.original:
             self.original = self.submitted
         self.deck = DeckState.start(self.submitted[:main], shuffled=self.shuffled)
+        self.ledger = ZoneLedger(seat, (e0, e1))
+        self.opposing_pile_size = (m1, m0)[seat]
         self.status = "Live"
         self.revision += 1
 
@@ -196,10 +199,15 @@ class Session:
             row = struct.Struct("<II" if msg == MSG_DRAW else "<IBBI")
             _size(body, 5 + count * row.size)
             if player != self.seat:
+                if msg == MSG_DRAW:
+                    self.opposing_pile_size -= count
+                    for _ in range(count):
+                        self.ledger.put((player, HAND, 0, 0), 0)
                 return False
             for offset, (code, *_) in enumerate(row.iter_unpack(body[5:])):
                 if msg == MSG_DRAW:
                     deck.remove(code, drawn=True)
+                    self.ledger.put((player, HAND, 0, 0), self.ledger.departure(deck, code))
                 else:
                     deck.reveal(offset, code)
             if msg == MSG_DRAW:
@@ -208,9 +216,17 @@ class Session:
             _size(body, 28)
             before, after = LOCATION.unpack_from(body, 4), LOCATION.unpack_from(body, 14)
             leaving, entering = before[:2] == (self.seat, DECK), after[:2] == (self.seat, DECK)
+            opposing = (1 - self.seat, DECK)
+            self.opposing_pile_size += int(after[:2] == opposing) - int(before[:2] == opposing)
+            shown = _visible(before, self.seat) or _visible(after, self.seat)
+            visible_code = struct.unpack_from("<I", body)[0] if shown else 0
+            tracked = self.ledger.take(before, visible_code)
+            self.ledger.move_materials(before, after)
             if not (leaving or entering):
-                return False
-            if leaving and entering:
+                self.ledger.put(after, tracked)
+                if not tracked and self.ledger.totals() == deck.zones:
+                    return False
+            elif leaving and entering:
                 # Private sorts encode the original indices. Never reconstruct them.
                 self.pending_top = None
                 if body[:4] == bytes(4) and after[2] == deck.total - 1:
@@ -223,13 +239,31 @@ class Session:
                 if leaving:
                     was_top = before[2] == deck.total - 1
                     deck.remove(code)
+                    self.ledger.put(after, self.ledger.departure(deck, code))
                     if was_top:
                         self._consumed(1)
                     else:
                         self.pending_top = None
                 else:
                     self.pending_top = None
-                    deck.insert(code, after[2])
+                    deck.insert(code or tracked, after[2])
+                    if not tracked:
+                        self.ledger.mixed_deck.add(code)
+        elif msg == 33:  # MSG_SHUFFLE_HAND
+            player, count = struct.unpack_from("<BI", body)
+            _size(body, 5 + 4 * count)
+            if player != self.seat:
+                return False
+            self.ledger.shuffle_hand(player, struct.unpack_from(f"<{count}I", body, 5))
+        elif msg == 36:  # MSG_SHUFFLE_SET_CARD: private permutations are not player-visible.
+            _, count = struct.unpack_from("<BB", body)
+            _size(body, 2 + 2 * count * LOCATION.size)
+            self.ledger.shuffle_field(list(LOCATION.iter_unpack(body[2 : 2 + count * LOCATION.size])))
+        elif msg == 39:  # MSG_SHUFFLE_EXTRA: preserve the face-up pendulum pile.
+            player, count = struct.unpack_from("<BI", body)
+            _size(body, 5 + count * 4)
+            pile = self.ledger.extra[player]
+            pile[:] = [(code if up else 0, up) for code, up in pile]
         elif msg == MSG_DECK_TOP:
             player, offset, code, pos = struct.unpack("<BIII", body)
             if player != self.seat:
@@ -255,17 +289,32 @@ class Session:
             self._reset("Duel finished")
         elif msg == MSG_SWAP:
             _size(body, 28)
-            if all(LOCATION.unpack_from(body, i)[:2] != (self.seat, DECK) for i in (4, 18)):
-                return False
-            self._reset("Tracking paused after a deck swap")
+            a, b = (LOCATION.unpack_from(body, i) for i in (4, 18))
+            if (self.seat, DECK) in (a[:2], b[:2]):
+                self._reset("Tracking paused after a deck swap")
+            else:
+                codes = tuple(
+                    struct.unpack_from("<I", body, i)[0] if _visible(loc, self.seat) else 0 for i, loc in ((0, a), (14, b))
+                )
+                self.ledger.swap(a, b, codes)
         elif msg == MSG_REMOVE_CARDS:
             (count,) = struct.unpack_from("<I", body)
             _size(body, 4 + count * LOCATION.size)
-            if all(loc[:2] != (self.seat, DECK) for loc in LOCATION.iter_unpack(body[4:])):
-                return False
-            self._reset("Tracking paused after an unidentified removal")
+            locations = sorted(LOCATION.iter_unpack(body[4:]), reverse=True)
+            if any(loc[:2] == (self.seat, DECK) for loc in locations):
+                self._reset("Tracking paused after an unidentified removal")
+            else:
+                for loc in locations:
+                    if loc[:2] == (1 - self.seat, DECK):
+                        self.opposing_pile_size -= 1
+                    self.ledger.take(loc)
+                    self.ledger.attached.pop(loc[:3], None)
         elif msg == MSG_SWAP_GRAVE_DECK and body and body[0] != self.seat:
-            return False
+            new_size, mask_bytes = struct.unpack_from("<II", body, 1)
+            _size(body, 9 + mask_bytes)
+            self.ledger.piles[body[0], GRAVE] = [0] * max(0, min(self.opposing_pile_size, 65535))
+            self.opposing_pile_size = new_size
         else:
             self._reset("Tracking paused after an unsupported deck event")
+        deck.zones = self.ledger.totals()
         return True

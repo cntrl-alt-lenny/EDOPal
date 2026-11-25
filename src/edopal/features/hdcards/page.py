@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -19,22 +20,22 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
 from edopal.core.install import RunState
 from edopal.ui.widgets import PrimaryButton
-from edopal.ui.widgets.card_detail import CardDetail, show_card_detail
 
-from .card_info import read_card_info
 from .controller import ViewState
-from .gallery import BG, FG, GOLD, PANEL, SUB, Banner, Filmstrip, curated, font, load_banner, pix
+from .gallery import BG, FG, GOLD, PANEL, SUB, Filmstrip, curated, font, showcase_rows
 from .library import Run
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+PANEL_HEIGHT = 236
 
 
 def layout(kind, parent=None, gap=0):
@@ -85,6 +86,19 @@ def sync_icon():
     return QIcon(im)
 
 
+def panel_layout(panel, title):
+    box = layout(QVBoxLayout, panel)
+    box.setContentsMargins(16, 12, 16, 12)
+    header = layout(QHBoxLayout)
+    heading = label(title, 17, FG, True)
+    heading.setFixedHeight(26)
+    header.addWidget(heading)
+    header.addStretch()
+    box.addLayout(header)
+    box.addSpacing(6)
+    return box, header
+
+
 class Switch(QCheckBox):
     def __init__(self, title, description):
         super().__init__()
@@ -92,14 +106,14 @@ class Switch(QCheckBox):
         self.setAccessibleName(title)
         self.setAccessibleDescription(description)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.copy = layout(QVBoxLayout, self, 2)
-        self.copy.setContentsMargins(14, 8, 54, 8)
-        self.title = label(title, 14)
-        self.description = label(description, 12, SUB)
-        for w in (self.title, self.description):
-            w.setWordWrap(True)
-            w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            self.copy.addWidget(w)
+        self.setToolTip(description)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setFixedHeight(25)
+        copy = layout(QHBoxLayout, self)
+        copy.setContentsMargins(0, 0, 40, 0)
+        title_label = label(title, 13)
+        title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        copy.addWidget(title_label)
 
     def hitButton(self, pos):
         return self.rect().contains(pos)
@@ -107,34 +121,129 @@ class Switch(QCheckBox):
     def paintEvent(self, event):
         with QPainter(self) as p:
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            p.setPen(QPen(QColor(GOLD if self.hasFocus() else "#38383b"), 1))
-            p.setBrush(QColor("#303033" if self.isEnabled() and self.underMouse() else PANEL))
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6)
-            x = self.width() - 14 - 30
+            x = self.width() - 32
             y = self.height() / 2
-            p.setPen(Qt.PenStyle.NoPen)
+            accent = self.hasFocus() or (self.isEnabled() and self.underMouse())
+            p.setPen(QPen(QColor(GOLD), 1) if accent else Qt.PenStyle.NoPen)
             on = self.isChecked()
             p.setBrush(QColor("#9d8251" if on else "#4c4c50"))
             p.drawRoundedRect(QRectF(x, y - 8, 30, 16), 8, 8)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setOpacity(1 if self.isEnabled() else 0.55)
             p.setBrush(QColor("#fff0d1" if on else "#c8c8cb"))
             p.drawEllipse(QRectF(x + (16 if on else 3), y - 5.5, 11, 11))
+
+
+class SyncPanel(QFrame):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("syncPanel")
+        box, header = panel_layout(self, "Sync")
+        self.undo = link("Undo Last Sync")
+        effect = "Restores previous artwork and removes files added by the last sync. Keeps later edits."
+        self.undo.setToolTip(effect)
+        self.undo.setAccessibleDescription(effect)
+        header.addWidget(self.undo)
+
+        facts = layout(QGridLayout)
+        facts.setHorizontalSpacing(8)
+        facts.setColumnStretch(1, 1)
+        self.counts = {}
+        for i, (key, title, tip) in enumerate(
+            (
+                ("ready", "Ready To Sync", "Verified HD artwork is available from an enabled source and can be installed."),
+                (
+                    "elsewhere",
+                    "Available Elsewhere Or Previously Installed",
+                    "Verified HD art has been seen elsewhere or was previously installed. Sync can’t install it "
+                    "with the current sources and options.",
+                ),
+                (
+                    "pending",
+                    "Awaiting HD Evidence",
+                    "These cards have no verified HD source yet. Unmeasured community listings stay in this group.",
+                ),
+            )
+        ):
+            count = label("", 13, GOLD if key == "ready" else FG)
+            count.setAlignment(RIGHT)
+            text = label(title, 13)
+            count.setToolTip(tip)
+            text.setToolTip(tip)
+            info = link("i")
+            info.setAccessibleName(f"About {title}")
+            info.setAccessibleDescription(tip)
+            info.setToolTip(tip)
+            info.setFixedSize(16, 16)
+            info.setStyleSheet(
+                "QPushButton {border:1px solid #828185;border-radius:8px;color:#c4c3c3;"
+                " background:transparent;padding:0;font-size:11px;}"
+                f"QPushButton:hover, QPushButton:focus {{border-color:{GOLD};color:{GOLD};}}"
+            )
+            info.clicked.connect(
+                lambda checked=False, w=info: QToolTip.showText(
+                    w.mapToGlobal(w.rect().bottomLeft()), w.toolTip(), w, w.rect()
+                )
+            )
+            facts.setRowMinimumHeight(i, 22)
+            fact = layout(QHBoxLayout, gap=7)
+            fact.addWidget(text)
+            fact.addWidget(info, alignment=CENTER)
+            fact.addStretch()
+            facts.addWidget(count, i, 0)
+            facts.addLayout(fact, i, 1)
+            self.counts[key] = count
+        box.addLayout(facts)
+        box.addSpacing(6)
+        rule = QFrame()
+        rule.setFixedHeight(1)
+        rule.setStyleSheet("background:#3b3b3e;border:0;")
+        box.addWidget(rule)
+        box.addSpacing(4)
+
+        self.deck = Switch("Only Cards In My Decks", "Use cards listed in this installation’s decks.")
+        self.original = Switch("Original GOAT / Pre-Errata Wording", "Prefer the original wording on historical cards.")
+        self.rush = Switch("Rush Duel HD (Community)", "English Rush art and Over Rush Rare prints.")
+        for switch in (self.deck, self.original, self.rush):
+            box.addWidget(switch)
+
+        credit = QLabel()
+        credit.setOpenExternalLinks(True)
+        credit.setTextInteractionFlags(
+            Qt.TextInteractionFlag.LinksAccessibleByKeyboard | Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+        credit.setWordWrap(True)
+        style_text(credit, 11, SUB)
+        credit.setText(
+            f'Rush art by <a style="color:{GOLD}" href="https://github.com/Yoshi80/Rush-HD-Pictures">Yoshi80</a>'
+            f' · Masaki2709 · KogaDiamond1080 · <a style="color:{GOLD}" '
+            'href="https://github.com/Yoshi80/Rush-HD-ORR-Extension">ORR Extension</a>'
+        )
+        box.addWidget(credit)
+        box.addStretch()
+
+    def display(self, state):
+        for key, count in self.counts.items():
+            count.setText(f"{getattr(state, key):,}" if state.total else "—")
 
 
 class Metric(QFrame):
     def __init__(self):
         super().__init__()
         self.setObjectName("metric")
-        box = layout(QVBoxLayout, self, 1)
-        box.setAlignment(CENTER)
+        box, _ = panel_layout(self, "HD Coverage")
+        metric = layout(QVBoxLayout, gap=1)
+        metric.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.percent = label("", 40, GOLD, True)
         self.summary = label("", 13)
         self.caption = label("cards with known HD art", 13, SUB)
         for w in (self.percent, self.summary, self.caption):
             w.setAlignment(CENTER)
-            box.addWidget(w)
+            w.setWordWrap(True)
+            metric.addWidget(w)
+        box.addLayout(metric, 1)
 
     def display(self, s):
-        self.summary.setWordWrap(not s.known)
         self.caption.setVisible(bool(s.known))
         if s.known:
             fraction = s.hd / s.known
@@ -146,7 +255,6 @@ class Metric(QFrame):
             self.summary.setText(f"HD installed for {s.hd:,} of {s.known:,}")
         else:
             self.percent.setText("—")
-            self.summary.setWordWrap(True)
             self.summary.setText(
                 {"checking": "Checking artwork…", "no-install": "Select a game folder", "error": "Coverage unavailable"}.get(
                     s.phase, "No known HD faces in this selection."
@@ -158,19 +266,18 @@ class Groups(QFrame):
     def __init__(self):
         super().__init__()
         self.setObjectName("groups")
-        box = layout(QVBoxLayout, self, 2)
-        box.setContentsMargins(17, 7, 17, 7)
-        self.heading = label("Installed HD By Group", 12, "#aaaaae")
-        box.addWidget(self.heading)
+        box, _ = panel_layout(self, "Installed HD By Group")
         self.rows = []
         for name in ("Official", "Rush Duel", "Anime/Custom"):
+            group = layout(QVBoxLayout, gap=8)
+            group.setAlignment(Qt.AlignmentFlag.AlignVCenter)
             line = layout(QHBoxLayout)
             text = label(name)
             value = label("", 12, SUB)
             line.addWidget(text)
             line.addStretch()
             line.addWidget(value)
-            box.addLayout(line)
+            group.addLayout(line)
             bar = QProgressBar()
             bar.setTextVisible(False)
             bar.setRange(0, 1000)
@@ -180,7 +287,8 @@ class Groups(QFrame):
                 f"QProgressBar {{border:0;border-radius:1px;background:#555150;}}"
                 f"QProgressBar::chunk {{background:{GOLD};border-radius:1px;}}"
             )
-            box.addWidget(bar)
+            group.addWidget(bar)
+            box.addLayout(group, 1)
             self.rows.append((text, value, bar))
 
     def display(self, values):
@@ -287,8 +395,8 @@ class HDCardPage(QWidget):
         self._cancelling = False
         self.setObjectName("hdPage")
         self.setStyleSheet(
-            f"QWidget#hdPage,QWidget#hdContent {{background:{BG};}} QFrame#metric,QFrame#groups,QFrame#firstSync "
-            f"{{background:{PANEL};border-radius:6px;}}"
+            f"QWidget#hdPage,QWidget#hdContent {{background:{BG};}} "
+            f"QFrame#metric,QFrame#groups,QFrame#syncPanel,QFrame#firstSync {{background:{PANEL};border-radius:6px;}}"
         )
         scroll = QScrollArea()
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -331,23 +439,15 @@ class HDCardPage(QWidget):
         self.panels = layout(QHBoxLayout, gap=12)
         self.headline = Metric()
         self.groups = Groups()
-        self.banner = Banner()
-        for w, weight in ((self.headline, 30), (self.groups, 34), (self.banner, 36)):
+        self.sync_panel = SyncPanel()
+        self.undo = self.sync_panel.undo
+        self.deck, self.original, self.rush = self.sync_panel.deck, self.sync_panel.original, self.sync_panel.rush
+        for w in (self.headline, self.groups, self.sync_panel):
             w.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-            self.panels.addWidget(w, weight)
+            w.setFixedHeight(PANEL_HEIGHT)
+            self.panels.addWidget(w)
         box.addLayout(self.panels)
-        note = layout(QHBoxLayout, gap=6)
-        self.about = link("i")
-        self.about.setStyleSheet("border:1px solid #aaa9ac;border-radius:8px;color:#c4c3c3; padding:0; font-size:11px;")
-        self.about.setFixedHeight(16)
-        self.about.setAccessibleName("About HD coverage")
-        self.about.setFixedWidth(16)
-        self.about.clicked.connect(self._explain)
-        self.note = label("", 12, SUB)
-        note.addWidget(self.about)
-        note.addWidget(self.note, 1)
-        self.note.setMinimumHeight(32)
-        box.addLayout(note)
+        box.addSpacing(8)
         showcase = layout(QHBoxLayout, gap=20)
         self.show_title = label("HD Showcase", 22, FG, True)
         self.compare = label("Original 177 × 254    /    HD 813 × 1,185", 12, SUB)
@@ -355,43 +455,13 @@ class HDCardPage(QWidget):
         showcase.addWidget(self.compare, 1)
         box.addLayout(showcase)
         box.addSpacing(5)
-        self.rows = [Filmstrip(1), Filmstrip(-1)]
+        self.rows = [Filmstrip(1, 1), Filmstrip(2, -1), Filmstrip(3, 1)]
         self.curated = curated()
-        box.addWidget(self.rows[0])
-        box.addSpacing(7)
-        box.addWidget(self.rows[1])
-        box.addSpacing(10)
-        optbox = layout(QVBoxLayout, gap=5)
-        opt_header = layout(QHBoxLayout)
-        self.opt_title = label("Sync Options", 22, FG, True)
-        self.undo = link("Undo Last Sync")
-        self.undo.setMinimumHeight(28)
-        effect = "Restores previous artwork and removes files added by the last sync. Keeps later edits."
-        self.undo.setToolTip(effect)
-        self.undo.setAccessibleDescription(effect)
-        opt_header.addWidget(self.opt_title)
-        opt_header.addStretch()
-        opt_header.addWidget(self.undo)
-        optbox.addLayout(opt_header)
-
-        options = layout(QHBoxLayout, gap=10)
-        self.deck = Switch("Only Cards in My Decks", "Use cards listed in this installation’s decks.")
-        self.original = Switch("Original GOAT / Pre-Errata Wording", "Prefer the original wording on historical cards.")
-        self.rush = Switch("Rush Duel HD (Community)", "English Rush art and Over Rush Rare prints.")
-        for w in (self.deck, self.original, self.rush):
-            options.addWidget(w, 1)
-        optbox.addLayout(options)
-        self.credit = QLabel()
-        self.credit.setOpenExternalLinks(True)
-        self.credit.setStyleSheet(f"color:{SUB};font-size:11px;")
-        self.credit.setText(
-            f'Rush art by <a style="color:{GOLD}" href="https://github.com/Yoshi80/Rush-HD-Pictures">Yoshi80</a>'
-            f' · Masaki2709 · KogaDiamond1080 · <a style="color:{GOLD}" '
-            'href="https://github.com/Yoshi80/Rush-HD-ORR-Extension">ORR extension</a>'
-        )
-        optbox.addWidget(self.credit)
-        box.addLayout(optbox)
-        box.addSpacing(8)
+        strips = layout(QVBoxLayout, gap=7)
+        for row in self.rows:
+            strips.addWidget(row)
+        box.addLayout(strips)
+        box.addSpacing(12)
         head = layout(QHBoxLayout)
         self.hist_title = label("Sync History", 22, FG, True)
         head.addWidget(self.hist_title)
@@ -404,8 +474,6 @@ class HDCardPage(QWidget):
         box.addWidget(self.first_sync, 1)
         self.table = History()
         box.addWidget(self.table, 1)
-        self.banner.clicked.connect(self._open_card_detail)
-        self.banner.reroll.clicked.connect(self._reroll_banner)
         self.sync.clicked.connect(lambda: self._request_write())
         self.new_action.clicked.connect(lambda: self._request_write(new_only=True))
         self.retry.clicked.connect(lambda: self._request_write(retry_failed=True))
@@ -416,56 +484,7 @@ class HDCardPage(QWidget):
                 lambda: controller.set_options(self.deck.isChecked(), self.original.isChecked(), self.rush.isChecked())
             )
         controller.subscribe(self.render_state)
-        self._load_banner()
         self._size()
-
-    def _load_banner(self, preview=False, *, previous=None):
-        self.banner.reroll.setEnabled(False)
-        self.core.jobs.run(
-            lambda ctx: load_banner(self.core, ctx, preview, previous=previous),
-            key="hdcards-banner",
-            on_done=self.banner.display,
-            on_error=lambda exc: self.banner.display(None),
-        )
-
-    def _reroll_banner(self):
-        self._load_banner(previous=self.banner.record["id"])
-
-    def _open_card_detail(self):
-        record = self.banner.record
-        if not record:
-            return
-        game = self.core.installs.current()
-
-        def show(info):
-            if not self.isVisible() or game != self.core.installs.current() or record is not self.banner.record:
-                return
-            name, kind, text, image, status = info
-            facts = (
-                ("First Set", f"{record['set_name']} ({record['set_code']})"),
-                ("Card ID", f"{record['id']:08d}"),
-                ("HD Status", status),
-            )
-            show_card_detail(self.banner, CardDetail(record["id"], name, kind, text, image, facts))
-
-        self.core.jobs.run(
-            lambda ctx: read_card_info(game, self.core.paths.cache, record, ctx),
-            key="hdcards-card-detail",
-            on_done=show,
-        )
-
-    def _explain(self):
-        s = self.state
-        QMessageBox.information(
-            self,
-            "About HD Coverage",
-            f"{s.hd:,} installed · {s.known:,} known · {s.pending:,} awaiting evidence\n\n"
-            "Each card counts once. Installed HD includes visible full faces at least 400 × 580 pixels. "
-            "Known art includes installed faces, previously observed HD and individually verified sources. "
-            "Unmeasured community listings stay pending. A failed transfer keeps its evidence.\n\n"
-            f"{s.ready:,} ready to sync · {s.elsewhere:,} known elsewhere or previously installed. "
-            "Source audit: 25 November 2026. Field artwork is counted separately.",
-        )
 
     def _cancel(self):
         self._cancelling = True
@@ -529,11 +548,9 @@ class HDCardPage(QWidget):
         self.mode = mode
         pad = 36 if wide else 16 if small else 32
         self.box.setContentsMargins(pad, 22 if wide else 16, pad, 33 if wide else 18)
-        h = 174 if wide else 108 if mode[2] else 120
-        for w in (self.headline, self.groups, self.banner):
-            w.setFixedHeight(h)
-        self.panels.setStretch(0, 29 if wide else 30)
-        self.panels.setStretch(2, 37 if wide else 35)
+        weights = (27, 34, 39) if wide else (26, 25, 49) if small else (27, 27, 46)
+        for i, weight in enumerate(weights):
+            self.panels.setStretch(i, weight)
         style_text(self.headline.percent, 51 if wide else 40, GOLD, True)
         style_text(self.headline.summary, 16 if wide else 13)
         style_text(self.headline.caption, 16 if wide else 13, SUB)
@@ -543,23 +560,13 @@ class HDCardPage(QWidget):
             bar.setFixedHeight(4 if wide else 3)
         for r in self.rows:
             r.wide = wide
-            r.setFixedHeight(145 if wide else 72 if mode[2] else 86)
+            r.setFixedHeight(137 if wide else 72 if mode[2] else 86)
+        self.first_sync.setMinimumHeight(84 if wide else 64)
         style_text(self.show_title, 26 if wide else 22, FG, True)
         style_text(self.hist_title, 26 if wide else 22, FG, True)
-        self.note.setFixedHeight(43 if wide else 30)
         self.show_title.setMinimumHeight(44 if wide else 32)
         self.hist_title.setMinimumHeight(36 if wide else 29)
-        self.opt_title.setMinimumHeight(35 if wide else 28)
-        for switch in (self.deck, self.original, self.rush):
-            switch.setFixedHeight(78 if small else 62 if wide else 58)
-            switch.title.setMinimumHeight(32 if small else 0)
-            switch.title.setAlignment(Qt.AlignmentFlag.AlignTop if small else LEFT)
-            style_text(switch.title, 15 if wide else 13)
-            style_text(switch.description, 13 if wide else 12, SUB)
-        style_text(self.opt_title, 23 if wide else 20, FG, True)
-        style_text(self.groups.heading, 14 if wide else 12, "#aaaaae")
         style_text(self.compare, 14 if wide else 12, SUB)
-        style_text(self.note, 14 if wide else 12, SUB)
         style_text(self.status, 13 if wide else 12, "#aaaaae")
         self.table.horizontalHeader().setFixedHeight(34 if wide else 26)
         self.table.verticalHeader().setDefaultSectionSize(35 if wide else 27)
@@ -576,6 +583,7 @@ class HDCardPage(QWidget):
             w.setEnabled(not busy)
         self.headline.display(state)
         self.groups.display(state.groups)
+        self.sync_panel.display(state)
         self.failed.setText(f"{len(state.failures):,} failed · retried twice ·")
         self.failed.setVisible(bool(state.failures))
         self.retry.setVisible(bool(state.failures))
@@ -610,25 +618,21 @@ class HDCardPage(QWidget):
         elif state.detail:
             top += "   ·   " + state.detail
         checked = datetime.fromtimestamp(state.checked, UTC).strftime("%d %b %Y, %H:%M UTC") if state.checked else ""
-        if checked:
-            self.headline.setToolTip(f"Last complete measurement · {checked}")
-            if state.phase in ("checking", "error"):
-                top += f"   ·   Last measured {checked}"
+        self.headline.setToolTip(
+            "Each card counts once. Installed HD faces measure at least 400 × 580 pixels. "
+            "Known HD art includes installed faces, previously observed HD and verified sources."
+            + (f"\n\nLast complete measurement · {checked}" if checked else "")
+        )
+        if checked and state.phase in ("checking", "error"):
+            top += f"   ·   Last measured {checked}"
         self.status.setText(top)
         self.status.setToolTip(top)
-        self.note.setText(
-            f"{state.ready:,} ready to sync   ·   {state.elsewhere:,} available elsewhere or previously installed"
-            f"   ·   {state.pending:,} awaiting HD evidence"
-            if state.total
-            else "Coverage includes installed HD faces and cards with verified HD artwork."
-        )
         if prior is None or state.pairs is not prior.pairs:
-            items = [(name, pix(a), pix(b)) for name, a, b in state.pairs] or self.curated
-            for r in self.rows:
-                r.items = items
-                r.update()
+            for row, items in zip(self.rows, showcase_rows(state.pairs, self.curated), strict=True):
+                row.items = items
+                row.update()
             self.compare.setText(
-                "Original and HD from your synced cards" if state.pairs else "Original 177 × 254    /    HD 813 × 1,185"
+                "Original and HD comparisons" if state.pairs else "Original 177 × 254    /    HD 813 × 1,185"
             )
         if prior is None or state.history != prior.history:
             self.table.display(state.history)
@@ -666,4 +670,3 @@ class HDCardPage(QWidget):
             "no-install": ViewState(phase="no-install"),
         }
         self.render_state(states[name])
-        self._load_banner(preview=True)

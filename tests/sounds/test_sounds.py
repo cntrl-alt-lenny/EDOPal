@@ -2,6 +2,7 @@ import json
 from datetime import date
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLabel
 
@@ -69,6 +70,36 @@ def test_sound_picker_displays_regional_dates_sorts_and_filters(qapp, qtbot, tmp
     assert page.date_labels["JP"].text() == "23 Jul 1998"
     assert page.date_labels["NA"].text() == page.date_labels["EU"].text() == "—"
     assert page.state.text() == "Not Yet Available"
+
+
+def test_pack_art_arriving_while_picker_is_open(qtbot, tmp_path):
+    core = make_core(None, tmp_path / "packs", tmp_path / "home")
+    page = SoundsPage(core)
+    qtbot.addWidget(page)
+    page.resize(1280, 800)
+    page.show()
+    page.game_tile.widget.click()
+    game = page.game.slug
+    (tmp_path / "banners").mkdir()
+    (tmp_path / "logos").mkdir()
+    path = tmp_path / "banners" / f"{game}.png"
+    background = QImage(160, 50, QImage.Format.Format_RGB32)
+    background.fill(QColor("#123456"))
+    assert background.save(str(path))
+    logo = QImage(40, 20, QImage.Format.Format_RGB32)
+    logo.fill(QColor("#ebc987"))
+    assert logo.save(str(tmp_path / "logos" / f"{game}.png"))
+    page._banners_ready({"music-" + game: path})
+
+    for widget in (page.details_art, page.picker.covers[game]):
+        rendered = widget.grab().toImage()
+        mid = rendered.height() // 2
+        assert rendered.pixelColor(rendered.width() // 8, mid).name() == "#ebc987"
+        assert rendered.pixelColor(rendered.width() * 3 // 4, mid).name() == "#123456"
+    page.picker.reject()
+    page._select_ambient("rain-room")
+    assert page.details_art.isHidden()
+    assert page.details_art.logo.isNull()
 
 
 def test_sound_download_progress_failure_retry_and_cache(qtbot, monkeypatch, tmp_path):

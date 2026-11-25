@@ -19,6 +19,7 @@ class DeckState:
     random_order: bool
     known: dict[int, int] = field(default_factory=dict)
     private_prefix: int = 0
+    zones: dict[str, Counter[int]] = field(default_factory=dict)
 
     @classmethod
     def start(cls, cards: Iterable[int], *, shuffled: bool = True) -> DeckState:

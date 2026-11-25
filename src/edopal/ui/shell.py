@@ -398,6 +398,8 @@ class ShellWindow(QMainWindow):
             self.stack.removeWidget(page)
             page.deleteLater()
         self._refresh_plugin_nav()
+        if changed_hook := getattr(self.specs[key], "on_enabled_changed", None):
+            changed_hook(self.core, enabled)
         if gallery := self.pages.get("plugins"):
             gallery.refresh()
         self._refresh_badges()
@@ -624,12 +626,27 @@ class ShellWindow(QMainWindow):
             self._display_launch()
             self.notify(message, "success" if success else "error")
 
-        self.core.jobs.run(
-            lambda _: launch(),
-            on_done=lambda result: finished(result, True),
-            on_error=lambda exc: finished(f"Couldn’t launch EDOPro. {exc}", False),
-            key="shell.launch",
-        )
+        tracker = self.plugins.specs.get("deck-tracker") if self.plugins.is_enabled("deck-tracker") else None
+
+        def launch_failed(exc):
+            if generation == self._generation and not self._closed and tracker and tracker.on_game_exited:
+                tracker.on_game_exited(self.core)
+            finished(f"Couldn’t launch EDOPro. {exc}", False)
+
+        def dispatch():
+            if generation == self._generation and not self._closed:
+                self.core.jobs.run(
+                    lambda _: launch(),
+                    on_done=lambda result: finished(result, True),
+                    on_error=launch_failed,
+                    key="shell.launch",
+                )
+
+        hook = getattr(tracker, "before_launch", None)
+        if hook:
+            hook(self.core, dispatch, lambda message: finished(message, False))
+        else:
+            dispatch()
 
     def _poll(self):
         if self._closed:
@@ -709,6 +726,9 @@ class ShellWindow(QMainWindow):
         self.poll_timer.stop()
         if self.picker:
             self.picker.done(FolderPicker.DialogCode.Rejected)
+        if spec := self.plugins.specs.get("deck-tracker"):
+            if stop_tracker := getattr(spec, "on_shutdown", None):
+                stop_tracker(self.core)
         if shutdown := getattr(self.core.jobs, "shutdown", None):
             shutdown()
         self.core.notify, self.core.navigate = self._old_notify, self._old_navigate

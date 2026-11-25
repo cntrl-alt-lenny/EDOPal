@@ -139,7 +139,8 @@ class DeckBanner(ArtPanel):
         if self.summary:
             self.summary.setFixedWidth(min(320, round(self.width() * 0.23)))
         if self.shape:
-            self.shape.setFixedWidth(min(226, max(148, round(self.width() * 0.16))))
+            width = min(398, max(264, round(self.width() * 0.29)))
+            self.shape.setFixedWidth(max(width, self.shape.plot.minimumWidth()))
 
 
 class CardGrid(QWidget):

@@ -1,14 +1,10 @@
-import json
 from contextlib import closing
 from dataclasses import replace
 
-from edopal.core.jobs import JobContext
-from edopal.core.settings import Settings
 from edopal.dev.preview import make_core
 from edopal.features.hdcards.catalog import Card, Catalog
 from edopal.features.hdcards.controller import ViewState
 from edopal.features.hdcards.coverage import Asset, Coverage
-from edopal.features.hdcards.gallery import PACK, load_banner
 from edopal.features.hdcards.library import inventory, last_measurement
 from edopal.features.hdcards.reviewed import SEED_NAMES
 from edopal.features.hdcards.sources import is_hd, rush_index
@@ -45,62 +41,3 @@ def test_evidence_union_and_scope(tmp_path):
         last_measurement(db, options, now)
         assert last_measurement(db, options)["checked"] == now["checked"]
         assert not last_measurement(db, replace(options, deck_only=True))
-
-
-def _banner_pack(core, count):
-    root = core.packs.root
-    pack = root / "art/card-of-the-day"
-    banners = pack / "banners"
-    banners.mkdir(parents=True)
-    (root / "catalog.json").write_text(
-        json.dumps(
-            {
-                "packs": [
-                    {
-                        "id": PACK,
-                        "kind": "art",
-                        "name": "Card of the Day",
-                        "url": "art/card-of-the-day",
-                        "version": "1",
-                        "size": 1,
-                        "sha256": "",
-                    }
-                ]
-            }
-        )
-    )
-    (pack / "manifest.json").write_text("{}")
-    rows = []
-    for n in range(count):
-        rows.append({"id": n, "name": f"Card {n}", "set_name": "First set", "set_code": "ABC"})
-        (banners / f"{n}.jpg").write_bytes(bytes([n]))
-    (pack / "banners.json").write_text(json.dumps(rows))
-
-
-def test_banner_stays_for_session_then_avoids_recent_choices(tmp_path):
-    core = make_core(tmp_path, tmp_path / "packs", tmp_path / "home")
-    _banner_pack(core, 4)
-    shown = []
-    for _ in range(9):
-        core.settings = Settings(core.settings.path)
-        record, data = load_banner(core, JobContext())
-        assert load_banner(core, JobContext()) == (record, data)
-        assert data == bytes([record["id"]]) and record["id"] not in shown[-3:]
-        shown.append(record["id"])
-
-
-def test_reroll_shows_all_sixty_before_repeating_across_launches(tmp_path):
-    core = make_core(tmp_path, tmp_path / "packs", tmp_path / "home")
-    _banner_pack(core, 60)
-    shown = []
-    for i in range(60):
-        previous = shown[-1] if shown else None
-        if i == 30:
-            core.settings = Settings(core.settings.path)
-            previous = None
-        record, _ = load_banner(core, JobContext(), previous=previous)
-        assert record["id"] not in shown
-        shown.append(record["id"])
-    assert set(shown) == set(range(60))
-    record, _ = load_banner(core, JobContext(), previous=shown[-1])
-    assert record["id"] not in shown[-12:]

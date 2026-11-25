@@ -57,7 +57,7 @@ _PANEL_STYLE = f"""
     QPushButton#soundPlay:hover, QPushButton#soundPlay:focus {{ border-color: {t.GOLD}; }}
     QLabel[role="soundAssignment"] {{
         background: {t.PANEL}; color: {t.TEXT}; border: 1px solid {t.EDGE};
-        border-radius: 4px; padding: 4px 8px; font-size: 12px;
+        border-radius: 4px; padding: 3px 12px; font-size: 12px;
     }}
     QLabel[role="soundDate"] {{ font-size: 12px; }}
     QFrame#selectedSoundPack {{ border: 1px solid {t.EDGE}; border-radius: 5px; }}
@@ -206,6 +206,7 @@ class SoundsPage(ShellPage):
                 assignment = QHBoxLayout(assigned_cell)
                 assignment.setContentsMargins(0, 0, 0, 0)
                 assigned = label("", "muted")
+                assigned.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 assigned.setMaximumWidth(207)
                 assigned.setFixedHeight(28)
                 assignment.addWidget(assigned, 1)

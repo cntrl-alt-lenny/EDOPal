@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QVBoxLayout,
     QWidget,
 )
 from shiboken6 import isValid
@@ -98,7 +100,16 @@ class ThemesPage(QWidget):
         self._load_catalog()
 
     def _build(self):
-        self.column = page_layout(self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        layout.addWidget(self.scroll)
+        content = QWidget()
+        self.column = page_layout(content)
+        self.column.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll.setWidget(content)
         header = PageHeader("", "Themes")
         header.kicker.hide()
         self.undo_button = QPushButton("Undo")
@@ -182,11 +193,10 @@ class ThemesPage(QWidget):
         self.modes["menu"].setChecked(True)
         heading.addWidget(segment)
         self.column.addLayout(heading)
-        self.canvas = PreviewCanvas()
-        self.column.addWidget(self.canvas, 1)
-
         self.status = label("", "muted")
         self.column.addWidget(self.status)
+        self.canvas = PreviewCanvas()
+        self.column.addWidget(self.canvas)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setFixedSize(160, 5)

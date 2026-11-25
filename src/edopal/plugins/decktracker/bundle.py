@@ -9,16 +9,14 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 PACK_ID = "plugin-deck-tracker"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 
 def build(destination: Path):
     """Create an isolated local catalog. Refuse to replace an existing catalog or archive."""
     root = Path(__file__).resolve().parent
-    payload = {
-        f"decktracker/{name}": (root / name).read_bytes()
-        for name in ("__init__.py", "__main__.py", "model.py", "page.py", "protocol.py", "relay.py", "setup.py")
-    }
+    payload = {f"decktracker/{p.name}": p.read_bytes() for p in root.glob("*.py") if p.name != "bundle.py"}
+    payload.update({f"decktracker/{p.name}": p.read_bytes() for p in root.glob("*.webp")})
     payload["LICENSE"] = (root.parents[3] / "LICENSE").read_bytes()
     identity = dict(id=PACK_ID, name="Deck Tracker", kind="plugin", version=VERSION)
     manifest = dict(schema=1, **identity, files={name: hashlib.sha256(data).hexdigest() for name, data in payload.items()})

@@ -44,7 +44,7 @@ excluded += [f"PySide6.{module}" for module in PySide6.__all__ if module not in 
 datas = [(str(root / "LICENSE"), "licenses/edopal")]
 # Formats uses generated Python summaries. The pack builder's historical source
 # databases and instructions are development inputs.
-app_data = collect_data_files("edopal", includes=["assets", "features"], excludes=["features/formats/builder"])
+app_data = collect_data_files("edopal", includes=["assets", "features", "plugins/decktracker/*.webp"], excludes=["features/formats/builder"])
 datas += app_data
 print(f"Bundling {sum(Path(source).stat().st_size for source, _ in app_data):,} bytes of EDOPal assets and feature data")
 for package in ("PySide6-Essentials", "shiboken6"):
