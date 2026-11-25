@@ -37,6 +37,7 @@ class Preview:
     stale: bool = False
     limits: dict = field(default_factory=dict)
     composition: tuple = ()
+    cards: dict[int, ydk.CardRecord] = field(default_factory=dict)
 
 
 def _filename_part(text: str) -> str:
@@ -106,7 +107,8 @@ class FormatsService:
         detail = self.client.preview(deck)
         stale = self.client.stale
         status = profile.get("status", "historical")
-        card_data = ydk.read_cards(install.root) if install else ({}, [])
+        codes = {code for section in detail.printings for code, _ in section}
+        card_data = ydk.read_cards(install.root, details_for=codes) if install else ({}, [])
         changes, issues = (), ()
         try:
             limits = self._limits(ctx, profile, install)
@@ -119,7 +121,8 @@ class FormatsService:
                 install, limits, source, detail, stock_tcg=status == "stock", sizes=profile["host"], card_data=card_data
             )
             changes, issues = prepared.changes, prepared.issues
-        return Preview(detail, changes, issues, stale, caps, counts)
+        records = {code: card_data[0][code] for code in codes & card_data[0].keys()}
+        return Preview(detail, changes, issues, stale, caps, counts, records)
 
     def _limits(self, ctx, profile, install):
         status = profile.get("status", "historical")

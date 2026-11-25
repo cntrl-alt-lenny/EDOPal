@@ -212,12 +212,13 @@ class ArtPanel(QFrame):
             clip.addRoundedRect(area, 6, 6)
             p.setClipPath(clip)
             p.fillRect(area, QColor("#28282b"))
-            width = min(550, area.width() * 0.49) if self.deck else area.width() * 0.58
-            left = area.width() * 0.52 - width / 2 if self.deck else area.width() - width
-            rect = QRectF(left, 0, width, area.height())
+            width = self.art_width if self.deck else area.width() * 0.58
+            # Align the illustration and its fade to the same device-pixel edge.
+            left = round((self.width() - width) * self.devicePixelRatioF()) / self.devicePixelRatioF()
+            rect = QRectF(left, 0, self.width() - left, self.height())
             cover(p, rect, self.pix, 0 if self.deck else 0.10)
             stops = (
-                ((0, 255), (0.17, 205), (0.38, 49), (0.62, 38), (0.79, 100), (1, 255))
+                ((0, 255), (0.18, 185), (0.40, 45), (0.70, 13), (0.88, 81), (1, 255))
                 if self.deck
                 else ((0, 255), (0.08, 250), (0.26, 193), (0.43, 76), (0.63, 9), (1, 0))
             )

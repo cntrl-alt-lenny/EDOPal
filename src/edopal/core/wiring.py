@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 from edopal.core import Core
 from edopal.core.fakes import DirectStorage, LocalPacks, StaticInstalls
-from edopal.core.packs import PACK_KINDS
 from edopal.core.paths import Paths
 from edopal.core.settings import Settings
 
@@ -45,10 +43,6 @@ def make_core() -> Core:
             raise
         packs = LocalPacks(local or Path(__file__).resolve().parents[3] / "packs", paths.cache)
     else:
-        # Bridge the client's legacy validator until it imports the shared contract.
-        pack_client = sys.modules["edopal.core.pack_client"]
-        if hasattr(pack_client, "_KINDS"):
-            pack_client._KINDS = PACK_KINDS
         packs = GitHubPacks(paths, local_dir=local)
 
     return Core(paths, settings, installs, storage, packs, QtJobRunner())

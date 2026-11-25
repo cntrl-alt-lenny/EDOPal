@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol, get_args
 
-PackKind = Literal["theme", "cardback", "music", "format", "art", "icons"]
+PackKind = Literal["theme", "cardback", "music", "format", "art", "icons", "sound", "plugin"]
 PACK_KINDS = get_args(PackKind)
 Progress = Callable[[int, int], None]  # (done_bytes, total_bytes)
 

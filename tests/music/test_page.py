@@ -319,3 +319,14 @@ def test_existing_track_in_native_pool_is_remembered_and_restored(page, library,
     page._switch_setup("Default")
     assert page.roles["deck"].active
     assert not list(install.root.rglob("edopal-*.wav"))
+
+
+def test_favorites_show_game_title_alongside_soundtrack(page):
+    album = next(album for album in page._all_albums() if album.name == "Sample Day")
+    page.library.toggle(album, album.tracks[0])
+    page.tabs[FAVORITES].click()
+
+    row = page.fav_list.itemAt(0).widget()
+    captions = [label.text() for label in row.findChildren(QLabel)]
+    assert "Sample Day" in captions
+    assert "Yu-Gi-Oh! Sample Day" in captions

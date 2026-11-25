@@ -5,6 +5,7 @@ from __future__ import annotations
 import weakref
 from functools import partial
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import quote
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, QUrl, Signal
@@ -429,7 +430,8 @@ class FormatsPage(QWidget):
         self._catalog_icons()
         self._deck_icons()
         if self.mode == "deck" and self.preview:
-            self._preview_view()
+            pair = art.archetypes.get(self.deck.name.casefold())
+            self.banner.set_art(pair[1] if pair else None)
 
     def _illustration(self):
         if self.profile:
@@ -666,12 +668,19 @@ class FormatsPage(QWidget):
         else:
             self.detail_layout.addLayout(row)
         row.addWidget(button("‹  Back to Standings", "back", self._return_events, "browserBack"))
-        row.addStretch()
+        if mode == "deck" and self.preview:
+            row.addSpacing(10)
+            hint = label("Click a card for details", "muted")
+            hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            row.addWidget(hint, 1)
+        else:
+            row.addStretch()
         return row
 
     def _load_preview(self, deck):
         self.deck, self.preview = deck, None
         self.faces = {}
+        self.temporary_faces = None
         self._detail("deck")
         self.detail_layout.addWidget(label("Loading Deck Preview…", "muted"))
         self.detail_layout.addStretch()
@@ -711,6 +720,10 @@ class FormatsPage(QWidget):
         if self.preview and self.mode == "deck" and not self.previewing:
             missing = [code for section in self.preview.detail.printings for code, _ in section if code not in faces]
             if missing:
+                try:
+                    self.temporary_faces = TemporaryDirectory(prefix="edopal-deck-")
+                except OSError:
+                    self.temporary_faces = None
                 self._fetch_missing(tuple(dict.fromkeys(missing)))
 
     def _fetch_missing(self, codes):
@@ -721,7 +734,7 @@ class FormatsPage(QWidget):
             if rest:
                 self._fetch_missing(rest)
 
-        self._job("faces", media.load_faces, (batch, None, self.service.client), ready, lambda _: None)
+        self._job("faces", media.load_faces, (batch, None, self.service.client, self.temporary_faces), ready, lambda _: None)
 
     def _faces_ready(self, faces):
         if self.preview and self.mode == "deck":
@@ -746,9 +759,9 @@ class FormatsPage(QWidget):
                 summary.addWidget(Marker(n))
                 summary.addWidget(label(name, "muted"))
         pair = self.art.archetypes.get(self.deck.name.casefold())
-        banner = DeckBanner(self.profile, self.selected_event, self.deck, p.composition, pair[1] if pair else None)
-        self.summary_box.addWidget(banner)
-        self.grid = CardGrid(p)
+        self.banner = DeckBanner(self.profile, self.selected_event, self.deck, p, pair[1] if pair else None)
+        self.summary_box.addWidget(self.banner)
+        self.grid = CardGrid(p, self.profile.get("banlist", ""))
         self.grid.set_faces(self.faces)
         self.detail_layout.addWidget(self.grid, 1)
 

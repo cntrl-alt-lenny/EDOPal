@@ -47,6 +47,7 @@ class ThemeState:
     has_font: bool = False
     can_undo: bool = False
     unknown_back_slots: frozenset[str] = frozenset()
+    installed_themes: frozenset[str] = frozenset()
 
 
 def _relative(value: str) -> PurePosixPath:
@@ -234,8 +235,15 @@ class ThemeService:
         cards = {**DEFAULT_BACKS, **managed.get("defaults", {}), **record.get("choices", {})}
         images = _back_images(install, conf.get("skin", ""))
         hashes = record.get("back_hashes", {})
+        skin_dir = _inside(install.root, "skin")
+        installed = frozenset(
+            f"theme-{skin.name.removeprefix('EDOPal-')}"
+            for skin in skin_dir.glob("EDOPal-*")
+            if re.fullmatch(rf"EDOPal-{_SLUG}", skin.name) and (skin / "skin.xml").is_file()
+        )
         return ThemeState(
             active_theme=active,
+            installed_themes=installed,
             cardbacks=cards,
             back_images=images,
             unknown_back_slots=frozenset(
@@ -409,7 +417,7 @@ class ThemeService:
         return self.state()
 
     def apply_cardback(
-        self, slot: str, pack: PackInfo, ctx: JobContext | None = None, *, confirmed_closed=False
+        self, slot: str, pack: PackInfo, ctx: JobContext | None = None, *, confirmed_closed=False, feature="themes"
     ) -> ThemeState:
         if slot not in _COVERS:
             raise ValueError("Select You or Opponent.")
@@ -417,7 +425,7 @@ class ThemeService:
         source = self._back(self._ensure(pack, "cardback", ctx), pack.id)
         self._ready(install, ctx)
         title = f"Set {slot} card back to {pack.name}"
-        with self.core.storage.changeset(install, "themes", title, confirmed_closed=confirmed_closed) as cs:
+        with self.core.storage.changeset(install, feature, title, confirmed_closed=confirmed_closed) as cs:
             record = _record(install)
             dest = _texture_dir(_skin_id(_conf(install)))
             cs.copy_in(source, f"{dest}/{_COVERS[slot]}.png")

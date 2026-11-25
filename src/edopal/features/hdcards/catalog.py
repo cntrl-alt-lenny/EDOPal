@@ -123,6 +123,30 @@ def _rows(db, name):
     }
 
 
+def card_sources(root: Path, cat: Catalog) -> list[Path]:
+    """Collect databases and register the image sources the client also mounts."""
+    base = root / "cards.cdb"
+    cat._stamps[base] = file_stamp(base)
+    loose = [base] if cat._stamps[base] and base.resolve().is_relative_to(root) else []
+    expansions = root / "expansions"
+    for path in _entries(expansions, 2, root, cat):
+        if path.suffix.lower() == ".cdb":
+            loose.append(path)
+        elif path.parent == expansions and path.suffix.lower() == ".zip":
+            cat.archives.append(path)
+    loose.sort(key=lambda p: (p != base, p.relative_to(root).as_posix().casefold()))
+    repos = list(_repo_sources(root, cat))
+    # Stable definitions take precedence over provisional DeltaBagooska rows.
+    provisional = [
+        p
+        for p in repos
+        if p.parent.name == "delta-bagooska"
+        and p.name.startswith(("prerelease-", "release-"))
+        and not p.name.endswith(".delta.cdb")
+    ]
+    return list(dict.fromkeys([*provisional, *loose, *cat.archives, *repos]))
+
+
 def read_catalog(game: Install, *, cancelled: Callable[[], bool] = lambda: False) -> Catalog:
     root = game.root.resolve()
     cat = Catalog()
@@ -133,25 +157,7 @@ def read_catalog(game: Install, *, cancelled: Callable[[], bool] = lambda: False
 
     try:
         base = root / "cards.cdb"
-        cat._stamps[base] = file_stamp(base)
-        loose = [base] if cat._stamps[base] and base.resolve().is_relative_to(root) else []
-        expansions = root / "expansions"
-        for path in _entries(expansions, 2, root, cat):
-            if path.suffix.lower() == ".cdb":
-                loose.append(path)
-            elif path.parent == expansions and path.suffix.lower() == ".zip":
-                cat.archives.append(path)
-        loose.sort(key=lambda p: (p != base, p.relative_to(root).as_posix().casefold()))
-        repos = list(_repo_sources(root, cat))
-        # Stable definitions take precedence over provisional DeltaBagooska rows.
-        provisional = [
-            p
-            for p in repos
-            if p.parent.name == "delta-bagooska"
-            and p.name.startswith(("prerelease-", "release-"))
-            and not p.name.endswith(".delta.cdb")
-        ]
-        for path in dict.fromkeys([*provisional, *loose, *cat.archives, *repos]):
+        for path in card_sources(root, cat):
             if cancelled():
                 raise CancelledError
             try:

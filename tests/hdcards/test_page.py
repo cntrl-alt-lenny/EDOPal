@@ -1,7 +1,11 @@
+import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
+from PIL import Image
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 
 from edopal.core.install import RunState
@@ -44,7 +48,11 @@ def test_scope_controls_and_actions(page):
 
 
 def test_results_progress_and_cancel(page):
+    assert page.first_sync.isVisible() and not page.table.isVisible()
+    assert page.first_sync.title.text() == "No Syncs Yet"
+    assert page.first_sync.cards.text() == "20"
     page.preview_state("syncing")
+    assert page.table.isVisible() and not page.first_sync.isVisible()
     assert page.progress.value() == 624
     assert "3.2 cards/s" in page.status.text()
     assert page.cancel.isVisible()
@@ -62,6 +70,8 @@ def test_results_progress_and_cancel(page):
     page.preview_state("no-install")
     assert not page.sync.isEnabled()
     assert "game folder" in page.headline.summary.text()
+    assert page.first_sync.title.text() == "No Game Folder Selected"
+    assert page.first_sync.metrics.isHidden()
 
 
 def test_running_install_blocks_write(page, monkeypatch):
@@ -97,8 +107,6 @@ def test_confirmation_applies_to_the_checked_game(page, monkeypatch, tmp_path):
 
 
 def test_retry_and_scrolling_accessibility(page, qtbot):
-    from PySide6.QtCore import Qt
-
     page.preview_state("idle")
     page.retry.click()
     page.controller.start_sync.assert_called_once_with(retry_failed=True, confirmed_closed=False)
@@ -112,3 +120,47 @@ def test_retry_and_scrolling_accessibility(page, qtbot):
     assert top.offset >= before + 0.24
     assert page.table.rowCount() == 3 and page.table.horizontalHeaderItem(3).text() == "Cards Downloaded"
     assert page.headline.summary.text() == "HD installed for 20,384 of 20,668"
+
+
+def test_banner_and_dice_are_distinct_actions(page, qtbot, monkeypatch):
+    root = page.core.installs.current().root
+    expansions = root / "expansions"
+    expansions.mkdir()
+    code = 14087893
+    with closing(sqlite3.connect(expansions / "cards.cdb")) as db, db:
+        db.execute("CREATE TABLE datas (id INTEGER PRIMARY KEY, type INTEGER)")
+        db.execute("CREATE TABLE texts (id INTEGER PRIMARY KEY, name TEXT, desc TEXT)")
+        db.execute("INSERT INTO datas VALUES (?, ?)", (code, 0x10002))
+        db.execute("INSERT INTO texts VALUES (?, ?, ?)", (code, "Book of Moon", "Flip a monster face-down."))
+    image = root / "pics" / f"{code}.jpg"
+    image.parent.mkdir()
+    Image.new("RGB", (421, 614)).save(image)
+
+    first = {"id": 55144522, "name": "Pot of Greed", "set_name": "Legend of Blue Eyes White Dragon", "set_code": "LOB-119"}
+    next_card = {"id": code, "name": "Banner Name", "set_name": "Pharaonic Guardian", "set_code": "PGD-035"}
+    page.banner.display((first, b""))
+    open_detail = Mock()
+    monkeypatch.setattr("edopal.features.hdcards.page.show_card_detail", open_detail)
+    reroll = Mock(return_value=(next_card, b""))
+    monkeypatch.setattr("edopal.features.hdcards.page.load_banner", reroll)
+
+    qtbot.mouseClick(page.banner.reroll, Qt.MouseButton.LeftButton)
+    assert reroll.call_args.kwargs["previous"] == first["id"]
+    open_detail.assert_not_called()
+    assert page.banner.record == next_card
+
+    qtbot.mouseClick(page.banner, Qt.MouseButton.LeftButton)
+    parent, detail = open_detail.call_args.args
+    assert parent is page.banner
+    assert (detail.code, detail.name, detail.kind, detail.text, detail.image) == (
+        code,
+        "Book of Moon",
+        "Spell · Quick-Play",
+        "Flip a monster face-down.",
+        image,
+    )
+    assert dict(detail.facts) == {
+        "First Set": "Pharaonic Guardian (PGD-035)",
+        "Card ID": str(code),
+        "HD Status": "HD Installed",
+    }

@@ -60,10 +60,7 @@ def test_real_wiring_verifies_art_and_icon_packs(monkeypatch, tmp_path, qapp):
     import hashlib
     import json
 
-    from edopal.core import pack_client
 
-    # Record the pre-wiring allowance for the other tests that import this module.
-    monkeypatch.setattr(pack_client, "_KINDS", pack_client._KINDS)
     packs = tmp_path / "packs"
     entries = []
     for kind in ("art", "icons"):

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
@@ -24,7 +25,9 @@ from PySide6.QtWidgets import (
 
 from edopal.core.install import RunState
 from edopal.ui.widgets import PrimaryButton
+from edopal.ui.widgets.card_detail import CardDetail, show_card_detail
 
+from .card_info import read_card_info
 from .controller import ViewState
 from .gallery import BG, FG, GOLD, PANEL, SUB, Banner, Filmstrip, curated, font, load_banner, pix
 from .library import Run
@@ -83,30 +86,38 @@ def sync_icon():
 
 
 class Switch(QCheckBox):
-    def __init__(self, title, tip):
-        super().__init__(title)
+    def __init__(self, title, description):
+        super().__init__()
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(tip)
-        self.setAccessibleDescription(tip)
-        self._style = (
-            "QCheckBox {spacing:7px; color:#f4f3f0; font-size:12px;}"
-            "QCheckBox::indicator {width:28px;height:16px;background:transparent;border:0;}"
-        )
+        self.setAccessibleName(title)
+        self.setAccessibleDescription(description)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.copy = layout(QVBoxLayout, self, 2)
+        self.copy.setContentsMargins(14, 8, 54, 8)
+        self.title = label(title, 14)
+        self.description = label(description, 12, SUB)
+        for w in (self.title, self.description):
+            w.setWordWrap(True)
+            w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self.copy.addWidget(w)
 
-    def set_wide(self, wide):
-        self.setStyleSheet(self._style.replace("12px", "15px") if wide else self._style)
+    def hitButton(self, pos):
+        return self.rect().contains(pos)
 
     def paintEvent(self, event):
-        super().paintEvent(event)
         with QPainter(self) as p:
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(QPen(QColor(GOLD if self.hasFocus() else "#38383b"), 1))
+            p.setBrush(QColor("#303033" if self.isEnabled() and self.underMouse() else PANEL))
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6)
+            x = self.width() - 14 - 30
             y = self.height() / 2
             p.setPen(Qt.PenStyle.NoPen)
             on = self.isChecked()
             p.setBrush(QColor("#9d8251" if on else "#4c4c50"))
-            p.drawRoundedRect(QRectF(0, y - 7.5, 28, 15), 7.5, 7.5)
+            p.drawRoundedRect(QRectF(x, y - 8, 30, 16), 8, 8)
             p.setBrush(QColor("#fff0d1" if on else "#c8c8cb"))
-            p.drawEllipse(QRectF(15 if on else 2, y - 5.5, 11, 11))
+            p.drawEllipse(QRectF(x + (16 if on else 3), y - 5.5, 11, 11))
 
 
 class Metric(QFrame):
@@ -149,7 +160,7 @@ class Groups(QFrame):
         self.setObjectName("groups")
         box = layout(QVBoxLayout, self, 2)
         box.setContentsMargins(17, 7, 17, 7)
-        self.heading = label("Installed HD by group", 12, "#aaaaae")
+        self.heading = label("Installed HD By Group", 12, "#aaaaae")
         box.addWidget(self.heading)
         self.rows = []
         for name in ("Official", "Rush Duel", "Anime/Custom"):
@@ -195,6 +206,7 @@ class History(QTableWidget):
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMinimumHeight(64)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.setAccessibleName("Sync History · times in UTC")
         for i in range(7):
             self.horizontalHeaderItem(i).setTextAlignment(RIGHT if i in (3, 4, 5) else LEFT)
@@ -205,11 +217,7 @@ class History(QTableWidget):
         )
 
     def display(self, history):
-        self.clearSpans()
-        self.setRowCount(max(1, len(history)))
-        if not history:
-            self.setSpan(0, 0, 1, 7)
-            self.setItem(0, 0, QTableWidgetItem("Completed syncs will appear here."))
+        self.setRowCount(len(history))
         for row, run in enumerate(history):
             for col, text in enumerate(run.cells()):
                 item = QTableWidgetItem(("•  " if col == 6 else "") + text)
@@ -226,6 +234,51 @@ class History(QTableWidget):
             self.setColumnWidth(i, edges[i + 1] - edges[i])
 
 
+class FirstSync(QFrame):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("firstSync")
+        self.setMinimumHeight(64)
+        box = layout(QHBoxLayout, self, 24)
+        box.setContentsMargins(18, 12, 18, 12)
+        copy = layout(QVBoxLayout, gap=4)
+        copy.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.title = label("", 16, FG, True)
+        self.description = label("", 12, SUB)
+        self.description.setWordWrap(True)
+        copy.addWidget(self.title)
+        copy.addWidget(self.description)
+        box.addLayout(copy, 2)
+        self.metrics = QWidget()
+        metrics = layout(QHBoxLayout, self.metrics, 20)
+        self.cards = self._metric(metrics, "Cards in Game")
+        self.check = self._metric(metrics, "Last Artwork Check")
+        box.addWidget(self.metrics, 2)
+
+    @staticmethod
+    def _metric(row, title):
+        column = layout(QVBoxLayout, gap=4)
+        column.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        column.addWidget(label(title, 12, SUB))
+        value = label("", 14)
+        value.setWordWrap(True)
+        column.addWidget(value)
+        row.addLayout(column, 1)
+        return value
+
+    def display(self, state, checked):
+        title, description = {
+            "no-install": ("No Game Folder Selected", "Choose your EDOPro folder to see its sync history."),
+            "checking": ("Checking Artwork", "Looking for installed cards and field artwork."),
+            "syncing": ("First Sync in Progress", "This run will appear in Sync History when it finishes."),
+        }.get(state.phase, ("No Syncs Yet", "Start a sync to record downloads and any failed transfers here."))
+        self.title.setText(title)
+        self.description.setText(description)
+        self.metrics.setVisible(bool(state.total or checked))
+        self.cards.setText(f"{state.total:,}" if state.total else "Pending")
+        self.check.setText(checked or "Pending")
+
+
 class HDCardPage(QWidget):
     def __init__(self, core, controller):
         super().__init__()
@@ -234,9 +287,18 @@ class HDCardPage(QWidget):
         self._cancelling = False
         self.setObjectName("hdPage")
         self.setStyleSheet(
-            f"QWidget#hdPage {{background:{BG};}} QFrame#metric,QFrame#groups {{background:{PANEL};border-radius:6px;}}"
+            f"QWidget#hdPage,QWidget#hdContent {{background:{BG};}} QFrame#metric,QFrame#groups,QFrame#firstSync "
+            f"{{background:{PANEL};border-radius:6px;}}"
         )
-        box = self.box = layout(QVBoxLayout, self)
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidgetResizable(True)
+        contents = QWidget()
+        contents.setObjectName("hdContent")
+        box = self.box = layout(QVBoxLayout, contents)
+        scroll.setWidget(contents)
+        layout(QVBoxLayout, self).addWidget(scroll)
         self.top = layout(QHBoxLayout, gap=8)
         self.title = label("HD Cards", 38, FG, True)
         self.top.addWidget(self.title)
@@ -299,52 +361,51 @@ class HDCardPage(QWidget):
         box.addSpacing(7)
         box.addWidget(self.rows[1])
         box.addSpacing(10)
-        opts = QFrame()
-        opts.setObjectName("options")
-        opts.setStyleSheet("QFrame#options {border-top:1px solid #363639;border-bottom:1px solid #363639;}")
-        self.optbox = layout(QVBoxLayout, opts, 0)
-        self.optbox.setContentsMargins(0, 3, 0, 4)
-        self.options = layout(QHBoxLayout, gap=12)
-        self.opt_title = label("Sync Options", 17, FG, True)
+        optbox = layout(QVBoxLayout, gap=5)
+        opt_header = layout(QHBoxLayout)
+        self.opt_title = label("Sync Options", 22, FG, True)
+        self.undo = link("Undo Last Sync")
+        self.undo.setMinimumHeight(28)
+        effect = "Restores previous artwork and removes files added by the last sync. Keeps later edits."
+        self.undo.setToolTip(effect)
+        self.undo.setAccessibleDescription(effect)
+        opt_header.addWidget(self.opt_title)
+        opt_header.addStretch()
+        opt_header.addWidget(self.undo)
+        optbox.addLayout(opt_header)
+
+        options = layout(QHBoxLayout, gap=10)
         self.deck = Switch("Only Cards in My Decks", "Use cards listed in this installation’s decks.")
         self.original = Switch("Original GOAT / Pre-Errata Wording", "Prefer the original wording on historical cards.")
-        self.rush = Switch(
-            "Rush Duel HD (community)", "Download English community renders, including Over Rush Rare extension prints."
-        )
-        self.undo = link("Undo Last Sync")
-        self.effect = "Restores previous artwork and removes files added by the last sync. Keeps later edits."
-        self.undo.setToolTip(self.effect)
-        self.undo.setAccessibleDescription(self.effect)
-        for w in (self.opt_title, self.deck, self.original, self.rush):
-            self.options.addWidget(w)
-        self.options.addStretch(1)
-        self.options.addWidget(self.undo)
-        self.optbox.addLayout(self.options)
-        foot = layout(QHBoxLayout)
+        self.rush = Switch("Rush Duel HD (Community)", "English Rush art and Over Rush Rare prints.")
+        for w in (self.deck, self.original, self.rush):
+            options.addWidget(w, 1)
+        optbox.addLayout(options)
         self.credit = QLabel()
         self.credit.setOpenExternalLinks(True)
-        self.credit.setStyleSheet(f"color:{SUB};font-size:10px;")
+        self.credit.setStyleSheet(f"color:{SUB};font-size:11px;")
         self.credit.setText(
             f'Rush art by <a style="color:{GOLD}" href="https://github.com/Yoshi80/Rush-HD-Pictures">Yoshi80</a>'
             f' · Masaki2709 · KogaDiamond1080 · <a style="color:{GOLD}" '
             'href="https://github.com/Yoshi80/Rush-HD-ORR-Extension">ORR extension</a>'
         )
-        self.undo_effect = label("Undo restores previous artwork and removes new files.", 10, SUB)
-        foot.addWidget(self.credit)
-        foot.addStretch()
-        foot.addWidget(self.undo_effect)
-        self.optbox.addLayout(foot)
-        box.addWidget(opts)
+        optbox.addWidget(self.credit)
+        box.addLayout(optbox)
         box.addSpacing(8)
         head = layout(QHBoxLayout)
         self.hist_title = label("Sync History", 22, FG, True)
         head.addWidget(self.hist_title)
         head.addStretch()
-        head.addWidget(label("Times in UTC", 12, "#aaaaae"))
+        self.history_clock = label("Times in UTC", 12, "#aaaaae")
+        head.addWidget(self.history_clock)
         box.addLayout(head)
         box.addSpacing(4)
+        self.first_sync = FirstSync()
+        box.addWidget(self.first_sync, 1)
         self.table = History()
         box.addWidget(self.table, 1)
+        self.banner.clicked.connect(self._open_card_detail)
+        self.banner.reroll.clicked.connect(self._reroll_banner)
         self.sync.clicked.connect(lambda: self._request_write())
         self.new_action.clicked.connect(lambda: self._request_write(new_only=True))
         self.retry.clicked.connect(lambda: self._request_write(retry_failed=True))
@@ -358,12 +419,39 @@ class HDCardPage(QWidget):
         self._load_banner()
         self._size()
 
-    def _load_banner(self, preview=False):
+    def _load_banner(self, preview=False, *, previous=None):
+        self.banner.reroll.setEnabled(False)
         self.core.jobs.run(
-            lambda ctx: load_banner(self.core, ctx, preview),
+            lambda ctx: load_banner(self.core, ctx, preview, previous=previous),
             key="hdcards-banner",
             on_done=self.banner.display,
-            on_error=lambda exc: self.banner.setToolTip("Card-of-the-day pack unavailable."),
+            on_error=lambda exc: self.banner.display(None),
+        )
+
+    def _reroll_banner(self):
+        self._load_banner(previous=self.banner.record["id"])
+
+    def _open_card_detail(self):
+        record = self.banner.record
+        if not record:
+            return
+        game = self.core.installs.current()
+
+        def show(info):
+            if not self.isVisible() or game != self.core.installs.current() or record is not self.banner.record:
+                return
+            name, kind, text, image, status = info
+            facts = (
+                ("First Set", f"{record['set_name']} ({record['set_code']})"),
+                ("Card ID", f"{record['id']:08d}"),
+                ("HD Status", status),
+            )
+            show_card_detail(self.banner, CardDetail(record["id"], name, kind, text, image, facts))
+
+        self.core.jobs.run(
+            lambda ctx: read_card_info(game, self.core.paths.cache, record, ctx),
+            key="hdcards-card-detail",
+            on_done=show,
         )
 
     def _explain(self):
@@ -440,8 +528,8 @@ class HDCardPage(QWidget):
             return
         self.mode = mode
         pad = 36 if wide else 16 if small else 32
-        self.box.setContentsMargins(pad, 16 if not wide else 22, pad, 33 if wide else 24)
-        h = 174 if wide else 108 if mode[2] else 125
+        self.box.setContentsMargins(pad, 22 if wide else 16, pad, 33 if wide else 18)
+        h = 174 if wide else 108 if mode[2] else 120
         for w in (self.headline, self.groups, self.banner):
             w.setFixedHeight(h)
         self.panels.setStretch(0, 29 if wide else 30)
@@ -455,25 +543,26 @@ class HDCardPage(QWidget):
             bar.setFixedHeight(4 if wide else 3)
         for r in self.rows:
             r.wide = wide
-            r.setFixedHeight(145 if wide else 72 if mode[2] else 90)
+            r.setFixedHeight(145 if wide else 72 if mode[2] else 86)
         style_text(self.show_title, 26 if wide else 22, FG, True)
         style_text(self.hist_title, 26 if wide else 22, FG, True)
-        self.note.setFixedHeight(43 if wide else 32)
-        self.show_title.setMinimumHeight(44 if wide else 33)
-        self.hist_title.setMinimumHeight(36 if wide else 30)
-        self.opt_title.setVisible(not small)
-        self.options.setSpacing(42 if wide else 5 if small else 25)
-        self.opt_title.setFixedWidth(143 if wide else 105)
+        self.note.setFixedHeight(43 if wide else 30)
+        self.show_title.setMinimumHeight(44 if wide else 32)
+        self.hist_title.setMinimumHeight(36 if wide else 29)
+        self.opt_title.setMinimumHeight(35 if wide else 28)
         for switch in (self.deck, self.original, self.rush):
-            switch.set_wide(wide)
-        style_text(self.opt_title, 20 if wide else 17, FG, True)
+            switch.setFixedHeight(78 if small else 62 if wide else 58)
+            switch.title.setMinimumHeight(32 if small else 0)
+            switch.title.setAlignment(Qt.AlignmentFlag.AlignTop if small else LEFT)
+            style_text(switch.title, 15 if wide else 13)
+            style_text(switch.description, 13 if wide else 12, SUB)
+        style_text(self.opt_title, 23 if wide else 20, FG, True)
         style_text(self.groups.heading, 14 if wide else 12, "#aaaaae")
         style_text(self.compare, 14 if wide else 12, SUB)
         style_text(self.note, 14 if wide else 12, SUB)
         style_text(self.status, 13 if wide else 12, "#aaaaae")
-        self.optbox.setContentsMargins(0, 10 if wide else 4, 0, 8 if wide else 4)
         self.table.horizontalHeader().setFixedHeight(34 if wide else 26)
-        self.table.verticalHeader().setDefaultSectionSize(49 if wide else 39)
+        self.table.verticalHeader().setDefaultSectionSize(35 if wide else 27)
 
     def render_state(self, state):
         prior = getattr(self, "state", None)
@@ -543,6 +632,11 @@ class HDCardPage(QWidget):
             )
         if prior is None or state.history != prior.history:
             self.table.display(state.history)
+            self.table.setVisible(bool(state.history))
+            self.history_clock.setVisible(bool(state.history))
+            self.first_sync.setVisible(not state.history)
+        if not state.history:
+            self.first_sync.display(state, checked)
 
     def preview_state(self, name):
         sample = ViewState(

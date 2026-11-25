@@ -1,4 +1,4 @@
-"""Theme gallery and independent card-back selection."""
+"""Theme gallery and customization."""
 
 from edopal.core.feature import FeatureSpec
 
@@ -10,4 +10,4 @@ def _page(core):
 
 
 def register(core) -> FeatureSpec:
-    return FeatureSpec("themes", "Themes", "themes", 20, _page, "Game themes and card backs")
+    return FeatureSpec("themes", "Themes", "themes", 20, _page, "Preview and apply game themes")

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from math import ceil
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QTransform
-from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
 from edopal.ui import theme as t
+from edopal.ui.widgets.card_detail import CardDetail, show_card_detail
 
+from .deck_shape import TYPE_COLORS, DeckShape
 from .widgets import ArtPanel, image, label, layout, pretty_date
 
 ASPECT = 1185 / 813
@@ -55,27 +57,39 @@ class Marker(QWidget):
 
 
 class DeckBanner(ArtPanel):
-    def __init__(self, profile, event, deck, counts, source):
+    def __init__(self, profile, event, deck, preview, source):
         super().__init__(deck=True)
         self.summary = None
+        self.shape = None
         self.setFixedHeight(84)
         self.set_art(source)
         row = layout(self, QHBoxLayout, margin=0)
         row.setContentsMargins(18, 6, 18, 6)
-        title = QVBoxLayout()
-        title.setSpacing(0)
-        title.addWidget(label(f"{profile['name']}  /  {event.name}", "deckKicker"))
-        name = label(deck.name, "heading")
-        name.setStyleSheet("font-size:32px;")
-        title.addWidget(name)
+        row.setSpacing(16)
+        self.identity = QWidget()
+        title = layout(self.identity, spacing=0)
+        self.kicker = label(f"{profile['name']}  /  {event.name}", "deckKicker")
+        title.addWidget(self.kicker)
+        self.name = label(deck.name, "heading")
+        self.name.setStyleSheet("font-size:32px;")
+        title.addWidget(self.name)
         meta = [deck.builder]
         if n := deck.place:
             suffix = "th" if 10 < n % 100 < 14 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
             meta.append(f"{n}{suffix}" + (f" of {event.players}" if event.players else ""))
         meta.append(pretty_date(event.date))
-        title.addWidget(label("   ·   ".join(meta), "muted"))
-        row.addLayout(title, 1)
-        if counts:
+        self.result = label("   ·   ".join(meta), "muted")
+        title.addWidget(self.result)
+        for field in (self.kicker, self.name, self.result):
+            field.setToolTip(field.text())
+            field.setAccessibleName(field.text())
+            field.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        row.addWidget(self.identity)
+        if counts := preview.composition:
+            divider = QFrame()
+            divider.setFixedSize(1, 58)
+            divider.setProperty("role", "line")
+            row.addWidget(divider)
             self.summary = summary = QWidget()
             summary.setFixedWidth(247)
             stats = layout(summary, spacing=0)
@@ -83,9 +97,8 @@ class DeckBanner(ArtPanel):
             values = QHBoxLayout()
             bars = QHBoxLayout()
             bars.setSpacing(2)
-            for name, count, color in zip(
-                ("Monsters", "Spells", "Traps"), counts, ("#ddac7b", "#82bba9", "#cc92ae"), strict=True
-            ):
+            for name, count in zip(("Monsters", "Spells", "Traps"), counts, strict=True):
+                color = TYPE_COLORS[name[:-1]]
                 col = QVBoxLayout()
                 col.setSpacing(0)
                 number = label(str(count), "subheading")
@@ -104,28 +117,47 @@ class DeckBanner(ArtPanel):
             stats.addSpacing(3)
             stats.addLayout(bars)
             row.addWidget(summary)
+        if preview.detail.printings and preview.cards:
+            self.shape = DeckShape(preview.detail.printings[0], preview.cards)
+            row.addWidget(self.shape)
+        row.addStretch(1)
+
+    @property
+    def art_width(self):
+        last = self.shape or self.summary or self.identity
+        return max(0, min(self.width() * 0.45, self.width() - last.geometry().right() - 10))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         wide = self.width() >= 1350
         self.setFixedHeight(89 if wide else 84)
+        self.identity.setFixedWidth(min(320, round(self.width() * 0.24)))
+        for field in (self.kicker, self.name, self.result):
+            field.setText(
+                field.fontMetrics().elidedText(field.toolTip(), Qt.TextElideMode.ElideRight, self.identity.width())
+            )
         if self.summary:
-            self.summary.setFixedWidth(320 if wide else 247)
+            self.summary.setFixedWidth(min(320, round(self.width() * 0.23)))
+        if self.shape:
+            self.shape.setFixedWidth(min(226, max(148, round(self.width() * 0.16))))
 
 
 class CardGrid(QWidget):
-    def __init__(self, preview):
+    def __init__(self, preview, banlist=""):
         super().__init__()
         self.setObjectName("deckCards")
         self.sections = preview.detail.printings or tuple(
             tuple((0, name) for name, n in group for _ in range(n)) for group in preview.detail.sections
         )
         self.limits = preview.limits
+        self.records = preview.cards
+        self.banlist = banlist
+        self.paths = {}
         self.faces = {}
         self.small = {}
         self.tiles = []
         self.headers = []
-        self.active = None
+        self.active = self.pressed = self.open_index = None
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -138,7 +170,9 @@ class CardGrid(QWidget):
         )
 
     def set_faces(self, faces):
-        self.faces.update({code: image(data) for code, data in faces.items()})
+        for code, (data, path) in faces.items():
+            self.faces[code] = image(data)
+            self.paths[code] = path
         self.small.clear()
         self.update()
 
@@ -150,38 +184,47 @@ class CardGrid(QWidget):
     def _arrange(self):
         self.tiles, self.headers = [], []
         wide = self.width() > 1400
-        gy, gutter, top = (7, 28, 39) if wide else (4, 21, 35)
-        w, h = self.width() - 2, max(1, self.height() - top - 1)
+        gap, gutter, top, pad = (7, 28, 36, 7) if wide else (4, 21, 34, 5)
+        h = max(1, self.height() - top - 2 * pad)
         present = [(title, section) for title, section in zip(HEADINGS, self.sections, strict=True) if section]
+        if not present:
+            return
         counts = [len(section) for _, section in present]
-        available = w - (len(present) - 1) * gutter
+        available = self.width() - (len(present) - 1) * gutter - 2 * pad * len(present)
 
-        # Try row counts against both dimensions. Five rows at 8/3/3 columns fit
-        # a 40/15/15 list; larger decks automatically get additional rows.
+        # Choose the largest complete set of card faces that fits both axes.
         def fit(rows):
-            cols = [max(1, ceil(n / rows)) for n in counts]
-            width = (available - (sum(cols) - len(cols)) * gy) / sum(cols)
-            return min((h - (rows - 1) * gy) / rows / ASPECT, width)
+            columns = sum(ceil(n / rows) for n in counts)
+            width = (available - (columns - len(counts)) * gap) / columns
+            return min((h - (rows - 1) * gap) / rows / ASPECT, width, 155)
 
-        rows = max(range(1, max(counts, default=1) + 1), key=fit)
+        rows = max(range(1, max(counts) + 1), key=fit)
         cw = max(1, fit(rows))
         ch = cw * ASPECT
-        cols = [max(1, ceil(n / rows)) for n in counts]
-        gx = (available - sum(cols) * cw) / max(1, sum(cols) - len(cols))
-        gy = (h - rows * ch) / max(1, rows - 1)
-        x = 1
+        cols = [ceil(n / rows) for n in counts]
+        free = max(0, available - sum(cols) * cw)
+        spaces = sum(cols) - len(cols)
+        gx = min(26, free / max(1, spaces))
+        surplus = max(0, free - gx * spaces) / len(cols)
+        gy = min(12, (h - rows * ch) / max(1, rows - 1))
+        x = pad
         for (heading, section), ncol in zip(present, cols, strict=True):
-            sw = ncol * cw + (ncol - 1) * gx
-            self.headers.append((QRectF(x, 0, sw, top), heading, section))
+            sw = ncol * cw + (ncol - 1) * gx + surplus
+            self.headers.append((QRectF(x, pad, sw, top), heading, section))
             for i, (code, name) in enumerate(section):
-                pos = QRectF(x + i % ncol * (cw + gx), top + i // ncol * (ch + gy), cw, ch)
+                pos = QRectF(x + i % ncol * (cw + gx), pad + top + i // ncol * (ch + gy), cw, ch)
                 self.tiles.append((pos, code, name))
-            x += sw + gutter
+            x += sw + gutter + 2 * pad
 
     def paintEvent(self, event):
         with QPainter(self) as p:
             p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
             for box, heading, section in self.headers:
+                pad = 7 if self.width() > 1400 else 5
+                panel = QRectF(box.x() - pad + 0.5, 0.5, box.width() + 2 * pad - 1, self.height() - 1)
+                p.setPen(QPen(QColor("#3b3b3e"), 1))
+                p.setBrush(QColor(t.PANEL if heading == "Main Deck" else "#1a1a1d"))
+                p.drawRoundedRect(panel, 5, 5)
                 head = box.adjusted(0, 0, 0, -8)
                 font = t.font(20, bold=True)
                 font.setFamilies(["Outfit", t.UI])
@@ -226,34 +269,64 @@ class CardGrid(QWidget):
                         p.drawRoundedRect(box.adjusted(j + 0.5, j + 0.5, -j - 0.5, -j - 0.5), 1, 1)
                     size = max(13, min(29, round(box.width() * 0.29)))
                     badge(p, QRectF(box.right() - size - 2, box.top() + 2, size, size), limit)
-                if i == self.active:
+                if i == (self.open_index if self.open_index is not None else self.active):
                     p.setBrush(Qt.BrushStyle.NoBrush)
                     p.setPen(QPen(QColor(t.GOLD), 2))
                     p.drawRoundedRect(box.adjusted(-1, -1, 1, 1), 2, 2)
-            if self.active is not None and self.active < len(self.tiles):
-                self._zoom(p)
 
-    def _zoom(self, p):
-        box, code, name = self.tiles[self.active]
-        pix = self.faces.get(code)
-        if not pix or pix.isNull():
-            return
-        height = min(self.height() - 12, round((350 if self.width() > 1350 else 292) * ASPECT))
-        width = height / ASPECT
-        x = box.right() + 12
-        if x + width + 4 > self.width():
-            x = box.left() - width - 12
-        y = max(5, min(box.center().y() - height / 2, self.height() - height - 5))
-        zoom = QRectF(max(5, x), y, width, height)
-        p.setBrush(QColor("#242326"))
-        p.setPen(QPen(QColor("#a59169"), 1))
-        p.drawRoundedRect(zoom.adjusted(-3, -3, 3, 3), 4, 4)
-        p.drawPixmap(zoom, pix, QRectF(pix.rect()))
+    def open_card(self, index):
+        box, code, name = self.tiles[index]
+        record = self.records.get(code)
+        facts = []
+        if (limit := self.limits.get(code)) in MARKS:
+            status = ("Forbidden", "Limited", "Semi-Limited")[limit]
+            facts.append((self.banlist + " Banlist" if self.banlist else "Status", status))
+        for title, section in zip(HEADINGS, self.sections, strict=True):
+            copies = section.count((code, name))
+            if copies:
+                facts.append((title, f"{copies} {'copy' if copies == 1 else 'copies'}"))
+        if code:
+            facts.append(("Card ID", str(code)))
+        detail = CardDetail(
+            code, name, record.type_line if record else "", record.text if record else "", self.paths.get(code), tuple(facts)
+        )
+        rect = box.toAlignedRect()
+        self.open_index = index
+        popup = show_card_detail(self, detail, QRect(self.mapToGlobal(rect.topLeft()), rect.size()))
+        popup.installEventFilter(self)
+        self.update()
+        return popup
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Hide:
+            self.open_index = None
+            self.update()
+        return super().eventFilter(watched, event)
+
+    def _index_at(self, point):
+        return next((i for i, (box, _, _) in enumerate(self.tiles) if box.contains(point)), None)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.pressed = self._index_at(event.position())
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            index = self.pressed
+            self.pressed = None
+            if index is not None and index == self._index_at(event.position()):
+                self.active = index
+                self.open_card(index)
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
-        index = next((i for i, (box, _, _) in enumerate(self.tiles) if box.contains(event.position())), None)
+        index = self._index_at(event.position())
         if index != self.active:
             self.active = index
+            self.setCursor(Qt.CursorShape.PointingHandCursor if index is not None else Qt.CursorShape.ArrowCursor)
             self.update()
 
     def leaveEvent(self, event):
@@ -264,6 +337,8 @@ class CardGrid(QWidget):
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
             self.active = None
+        elif event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Space) and self.tiles:
+            self.open_card(self.active if self.active is not None else 0)
         elif event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right) and self.tiles:
             step = 1 if event.key() == Qt.Key.Key_Right else -1
             self.active = (self.active + step) % len(self.tiles) if self.active is not None else 0

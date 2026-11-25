@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QShortcut
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QProgressBar, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from edopal import __version__
 from edopal.features.plugins import PluginEntry, PluginRegistry
@@ -117,6 +119,7 @@ class _Scrim(QWidget):
 class _Drawer(QFrame):
     dismissed = Signal()
     toggled = Signal(str, bool)
+    install_requested = Signal(str)
 
     def __init__(self, registry, parent):
         super().__init__(parent)
@@ -143,16 +146,31 @@ class _Drawer(QFrame):
         column.addWidget(self.scroll, 1)
         column.addWidget(rule())
         footer = QWidget()
-        footer.setFixedHeight(36)
-        self.footer = QHBoxLayout(footer)
-        self.footer.setContentsMargins(0, 0, 0, 0)
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.setSpacing(8)
+        self.progress = QProgressBar()
+        self.progress.setAccessibleName("Plugin Download Progress")
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(6)
+        self.progress.hide()
+        footer_layout.addWidget(self.progress)
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
         self.state = label("", "muted", wrap=True)
-        self.footer.addWidget(self.state, 1)
+        self.state.setMinimumHeight(36)
+        actions.addWidget(self.state, 1)
+        self.install = PrimaryButton("Install")
+        self.install.setObjectName("pluginInstall")
+        self.install.setFixedSize(96, 36)
+        self.install.clicked.connect(self._install)
+        actions.addWidget(self.install)
         self.enable = PrimaryButton("Enable")
         self.enable.setObjectName("pluginEnable")
         self.enable.setFixedSize(96, 36)
         self.enable.clicked.connect(self._toggle)
-        self.footer.addWidget(self.enable)
+        actions.addWidget(self.enable)
+        footer_layout.addLayout(actions)
         column.addWidget(footer)
 
         escape = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
@@ -180,13 +198,18 @@ class _Drawer(QFrame):
 
         facts = QHBoxLayout()
         facts.setContentsMargins(0, 6, 0, 3)
-        available = entry.id in self.registry.specs
-        for title, text in (("Version", __version__) if available else ("Status", entry.stage), ("Author", "EDOPal")):
-            fact = QVBoxLayout()
-            fact.setSpacing(6)
-            fact.addWidget(label(title, "muted"))
-            fact.addWidget(label(text, "pluginFact"))
-            facts.addLayout(fact, 1)
+        first = QVBoxLayout()
+        first.setSpacing(6)
+        self.fact_title = label("", "muted")
+        self.fact_value = label("", "pluginFact")
+        first.addWidget(self.fact_title)
+        first.addWidget(self.fact_value)
+        facts.addLayout(first, 1)
+        author = QVBoxLayout()
+        author.setSpacing(6)
+        author.addWidget(label("Author", "muted"))
+        author.addWidget(label("EDOPal", "pluginFact"))
+        facts.addLayout(author, 1)
         column.addLayout(facts)
         column.addWidget(rule())
         screenshots = entry.screenshots or (((entry.artwork, f"{entry.title} Concept"),) if entry.artwork else ())
@@ -199,19 +222,37 @@ class _Drawer(QFrame):
                 column.addWidget(shot)
                 column.addWidget(label(caption, "small"))
         column.addStretch()
-        self.refresh()
         self.scroll.verticalScrollBar().setValue(0)
 
-    def refresh(self):
-        enabled = self.registry.is_enabled(self.entry.id)
-        available = self.entry.id in self.registry.specs
-        self.enable.setVisible(available)
+    def refresh(self, pack, transfer, error):
+        plugin_id = self.entry.id
+        installed = self.registry.is_installed(plugin_id)
+        enabled = self.registry.is_enabled(plugin_id)
+        self.fact_title.setText("Version" if installed else "Status")
+        self.fact_value.setText((pack.version if pack else __version__) if installed else self.entry.stage)
+        self.enable.setVisible(installed)
         self.enable.setText("Disable" if enabled else "Enable")
-        if available:
-            message = "Enabled in the sidebar." if enabled else f"Adds {self.entry.title} to the sidebar."
+        self.install.setVisible(not installed and (bool(pack) or self.entry.stage == "In Development"))
+        self.install.setEnabled(bool(pack) and transfer is None)
+        self.progress.setVisible(transfer is not None)
+        if transfer is not None:
+            done, total = transfer
+            self.progress.setRange(0, 100 if total else 0)
+            if total:
+                self.progress.setValue(min(100, round(done * 100 / total)))
+            message = "Verifying…" if total and done >= total else "Downloading…"
+        elif error:
+            message = "Download Failed"
+        elif installed:
+            message = "Installed · Enabled" if enabled else "Installed · Disabled"
         else:
-            message = "Beta Preview · Coming Soon" if self.entry.stage == "Coming Soon" else "Planned"
+            message = "Not Installed" if pack else self.entry.stage
         self.state.setText(message)
+        if not installed and pack:
+            self.fact_value.setText("Available")
+
+    def _install(self):
+        self.install_requested.emit(self.entry.id)
 
     def _toggle(self):
         self.toggled.emit(self.entry.id, not self.registry.is_enabled(self.entry.id))
@@ -220,9 +261,14 @@ class _Drawer(QFrame):
 class PluginsPage(ShellPage):
     toggle_requested = Signal(str, bool)
 
-    def __init__(self, registry: PluginRegistry):
+    def __init__(self, registry: PluginRegistry, core=None):
         super().__init__("Plugins")
         self.registry = registry
+        self.core = core
+        self.packs = {}
+        self.downloads = {}
+        self.errors = set()
+        self._loaded = False
         self.setStyleSheet(
             f"""
             QFrame#pluginCard {{ background: {t.PANEL}; border: 1px solid #444447; border-radius: 6px; }}
@@ -266,6 +312,7 @@ class PluginsPage(ShellPage):
         self.drawer = _Drawer(registry, self)
         self.drawer.dismissed.connect(self.close_details)
         self.drawer.toggled.connect(self.toggle_requested)
+        self.drawer.install_requested.connect(self._install)
         self.drawer.hide()
         self.refresh()
 
@@ -274,10 +321,79 @@ class PluginsPage(ShellPage):
         self.count.setText(f"{len(self.cards)} Plugins  ·  {enabled} Enabled")
         for entry in self.registry.entries:
             active = self.registry.is_enabled(entry.id)
-            status = "✓  Enabled" if active else "Available" if entry.id in self.registry.specs else entry.stage
+            if active:
+                status = "✓  Enabled"
+            elif self.registry.is_installed(entry.id):
+                status = "Installed"
+            else:
+                status = "Available" if entry.id in self.packs else entry.stage
             self.cards[entry.id].set_status(status, active)
         if self.selected:
-            self.drawer.refresh()
+            self._refresh_drawer()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # The shell constructs the gallery with its registry before adding it to the stack.
+        if self.core is None:
+            self.core = getattr(self.window(), "core", None)
+        if self._loaded or not self.core or not self.registry.packages:
+            return
+        self._loaded = True
+        self.core.jobs.run(
+            partial(_find_packages, self.core.packs, dict(self.registry.packages)),
+            key="plugins.catalog",
+            on_done=self._packages_ready,
+            on_error=self._catalog_failed,
+        )
+
+    def _packages_ready(self, result):
+        self.packs, installed = result
+        for plugin_id in installed:
+            self._mark_installed(plugin_id)
+        self.refresh()
+
+    def _catalog_failed(self, exc):
+        self._loaded = False
+        self.core.notify(f"Couldn’t load plugin packages. {exc}", "error")
+
+    def _refresh_drawer(self):
+        plugin_id = self.selected
+        self.drawer.refresh(self.packs.get(plugin_id), self.downloads.get(plugin_id), plugin_id in self.errors)
+
+    def _install(self, plugin_id):
+        pack = self.packs.get(plugin_id)
+        if not pack or plugin_id in self.downloads or self.registry.is_installed(plugin_id):
+            return
+        self.errors.discard(plugin_id)
+        self._progress(plugin_id, 0, 0)
+        self.core.jobs.run(
+            partial(_download_package, self.core.packs, pack),
+            key=f"plugins.install.{plugin_id}",
+            on_done=lambda _: self._installed(plugin_id),
+            on_error=lambda exc: self._install_failed(plugin_id, exc),
+            on_progress=lambda done, total, _text: self._progress(plugin_id, done, total),
+        )
+
+    def _progress(self, plugin_id, done, total):
+        self.downloads[plugin_id] = (done, total)
+        if self.selected == plugin_id:
+            self._refresh_drawer()
+
+    def _mark_installed(self, plugin_id):
+        self.registry.record_install(plugin_id)
+        if self.registry.preferred_enabled(plugin_id) and not self.registry.is_enabled(plugin_id):
+            self.toggle_requested.emit(plugin_id, True)
+
+    def _installed(self, plugin_id):
+        self.downloads.pop(plugin_id, None)
+        self._mark_installed(plugin_id)
+        self.refresh()
+
+    def _install_failed(self, plugin_id, exc):
+        self.downloads.pop(plugin_id, None)
+        self.errors.add(plugin_id)
+        self.core.notify(f"Couldn’t install the plugin. {exc}", "error")
+        self.refresh()
 
     def show_details(self, entry):
         if self.selected:
@@ -285,6 +401,7 @@ class PluginsPage(ShellPage):
         self.selected = entry.id
         self._mark(entry.id, True)
         self.drawer.display(entry)
+        self._refresh_drawer()
         self.scrim.setGeometry(self.rect())
         self.drawer.setGeometry(self.width() - min(self.width(), 479), 0, min(self.width(), 479), self.height())
         self.scrim.show()
@@ -318,3 +435,20 @@ class PluginsPage(ShellPage):
     def preview_state(self, name):
         if entry := next((entry for entry in self.registry.entries if entry.id == name), None):
             self.show_details(entry)
+
+
+def _find_packages(service, package_ids, ctx):
+    catalogue = {pack.id: pack for pack in service.catalog("plugin")}
+    packs, installed = {}, set()
+    for plugin_id, pack_id in package_ids.items():
+        if ctx.cancelled:
+            break
+        if pack := catalogue.get(pack_id):
+            packs[plugin_id] = pack
+        if service.cached(pack_id):
+            installed.add(plugin_id)
+    return packs, installed
+
+
+def _download_package(service, pack, ctx):
+    return service.ensure(pack, progress=lambda done, total: ctx.progress(done, total), cancel=lambda: ctx.cancelled)

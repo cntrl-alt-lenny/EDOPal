@@ -7,11 +7,13 @@ Field and gear textures are © 2020 Icematoro (GNU AGPLv3 or later).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageQt
+from PySide6.QtCore import QEasingCurve, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QPushButton, QScrollArea, QSizePolicy, QWidget
 
 from edopal.ui import theme
 
@@ -45,15 +47,55 @@ def _centered(rect: QRectF, aspect: float) -> QRectF:
     return QRectF(rect.center().x() - width / 2, rect.center().y() - height / 2, width, height)
 
 
+def _reflected_edge(image: Image.Image) -> Image.Image:
+    """Extend the right edge, matching the scene at the join and softening it outward."""
+    width, height = image.size
+    band_width = width // 2
+    band = ImageOps.mirror(image.crop((width - band_width, 0, width, height)))
+    softened = ImageEnhance.Brightness(band.filter(ImageFilter.GaussianBlur(16))).enhance(0.63)
+    # Suppress reflected game controls close to the join before fading into the darker fill.
+    near = band.filter(ImageFilter.GaussianBlur(5))
+    for sharpness, blend_width in ((near, 20), (band, 5)):
+        fade = Image.new("L", (band_width, 1))
+        fade.putdata([round(255 * min(1, offset / blend_width)) for offset in range(band_width)])
+        softened = Image.composite(softened, sharpness, fade.resize(band.size))
+    return softened
+
+
+@dataclass(frozen=True)
+class _Scene:
+    capture: QPixmap
+    ambient: QPixmap
+
+    @classmethod
+    def from_capture(cls, capture: QPixmap):
+        reduced = capture.scaled(
+            QSize(480, 300), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+        )
+        image = ImageQt.fromqpixmap(reduced).convert("RGB")
+        ambient = Image.new("RGB", (960, 600))
+        ambient.paste(image, (240, 150))
+        right = _reflected_edge(image)
+        left = ImageOps.mirror(_reflected_edge(ImageOps.mirror(image)))
+        ambient.paste(left, (0, 150))
+        ambient.paste(right, (720, 150))
+        vertical = image.transpose(Image.Transpose.TRANSPOSE)
+        bottom = _reflected_edge(vertical).transpose(Image.Transpose.TRANSPOSE)
+        top = ImageOps.mirror(_reflected_edge(ImageOps.mirror(vertical))).transpose(Image.Transpose.TRANSPOSE)
+        ambient.paste(top, (240, 0))
+        ambient.paste(bottom, (240, 450))
+        return cls(capture, ImageQt.toqpixmap(ambient))
+
+
 class PreviewCanvas(QWidget):
-    """Fit the complete game view into a 16:10 window and crossfade scene changes."""
+    """Show the complete 16:10 capture and fill the margins from the same scene."""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setAccessibleName("Game preview")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._image = QPixmap()
-        self._previous = QPixmap()
+        self._scene: _Scene | None = None
+        self._previous: _Scene | None = None
         self._label = "Preview unavailable"
         self._loading = False
         self._opacity = 1.0
@@ -72,22 +114,24 @@ class PreviewCanvas(QWidget):
         self.set_loading(False)
         next_image = _pixmap(image)
         self.setAccessibleDescription(label)
-        if next_image.cacheKey() == self._image.cacheKey() and label == self._label:
+        if self._scene and next_image.cacheKey() == self._scene.capture.cacheKey() and label == self._label:
             if not animate:
                 self._fade.stop()
                 self._finish_fade()
             return
-        previous = self._image
-        if animate and not self._previous.isNull() and self._opacity < 1:
+        previous = self._scene
+        if animate and self._previous and self._opacity < 1:
             frame = self._frame()
-            previous = QPixmap(frame.size().toSize())
-            previous.fill(QColor(theme.RAIL))
-            with QPainter(previous) as painter:
+            snapshot = QPixmap(frame.size().toSize())
+            snapshot.fill(QColor(theme.RAIL))
+            with QPainter(snapshot) as painter:
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                self._draw_images(painter, QRectF(previous.rect()))
+                self._draw_images(painter, QRectF(snapshot.rect()), ambient=False)
+            previous = _Scene.from_capture(snapshot)
         self._fade.stop()
-        self._image, self._label = next_image, label
-        if animate and self.isVisible() and not previous.isNull() and not next_image.isNull():
+        self._scene = None if next_image.isNull() else _Scene.from_capture(next_image)
+        self._label = label
+        if animate and self.isVisible() and previous and self._scene:
             self._previous, self._opacity = previous, 0.0
             self._fade.start()
         else:
@@ -106,24 +150,38 @@ class PreviewCanvas(QWidget):
         self.update()
 
     def _finish_fade(self):
-        self._previous = QPixmap()
+        self._previous = None
         self._set_opacity(1.0)
 
-    def _draw_images(self, painter: QPainter, frame: QRectF):
-        for pixmap, opacity in ((self._previous, 1.0), (self._image, self._opacity)):
-            if not pixmap.isNull():
-                painter.setOpacity(opacity)
-                painter.drawPixmap(_centered(frame, pixmap.width() / pixmap.height()), pixmap, QRectF(pixmap.rect()))
+    def _draw_images(self, painter: QPainter, frame: QRectF, *, ambient=True):
+        for scene, opacity in ((self._previous, 1.0), (self._scene, self._opacity)):
+            if scene is None:
+                continue
+            capture = scene.capture
+            target = _centered(frame, capture.width() / capture.height())
+            painter.setOpacity(opacity)
+            if ambient:
+                # The middle half of the padded image lines up with the sharp capture.
+                pad_x, pad_y = target.width() / 2, target.height() / 2
+                surround = target.adjusted(-pad_x, -pad_y, pad_x, pad_y)
+                margin = QPainterPath()
+                margin.addRect(surround)
+                margin.addRect(target)
+                painter.save()
+                painter.setClipPath(margin, Qt.ClipOperation.IntersectClip)
+                painter.drawPixmap(surround, scene.ambient, QRectF(scene.ambient.rect()))
+                painter.restore()
+            painter.drawPixmap(target, capture, QRectF(capture.rect()))
         painter.setOpacity(1.0)
 
     def paintEvent(self, event):
         with QPainter(self) as painter:
             painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
             frame = self._frame()
-            outline = _rounded(frame, theme.R_SMALL)
+            outline = _rounded(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), theme.R_PANEL)
             painter.fillPath(outline, QColor(theme.RAIL))
             painter.setClipPath(outline)
-            if self._image.isNull():
+            if self._scene is None:
                 painter.setFont(theme.font(theme.SMALL))
                 painter.setPen(QColor(theme.MUTED))
                 painter.drawText(frame, Qt.AlignmentFlag.AlignCenter, self._label)
@@ -143,10 +201,20 @@ class PreviewCanvas(QWidget):
             painter.drawPath(outline)
 
 
+class ThemeShelf(QScrollArea):
+    def wheelEvent(self, event):
+        bar = self.horizontalScrollBar()
+        pixels, steps = event.pixelDelta(), event.angleDelta()
+        distance = pixels.x() or pixels.y() or (steps.x() or steps.y()) * bar.singleStep() / 40
+        bar.setValue(bar.value() - round(distance))
+        event.accept()
+
+
 class ThemeTile(QPushButton):
     """Keyboard-accessible theme tile with an independent preview-on-hover signal."""
 
     hovered = Signal(str)
+    navigate = Signal(int)
 
     def __init__(self, pack_id: str, name: str, tagline: str, parent: QWidget | None = None):
         super().__init__(name, parent)
@@ -161,13 +229,13 @@ class ThemeTile(QPushButton):
         self.setProperty("role", "scope")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def sizeHint(self):
-        return QSize(208, 146)
+        return QSize(225, 76)
 
     def minimumSizeHint(self):
-        return QSize(104, 94)
+        return QSize(205, 54)
 
     def set_thumbnail(self, image: ImageSource):
         self._thumbnail = _pixmap(image)
@@ -197,75 +265,42 @@ class ThemeTile(QPushButton):
     def nextCheckState(self):
         self.setChecked(True)
 
-    def _draw_badge(self, painter: QPainter, image_rect: QRectF):
-        if not self._badge:
-            return
-        active = self._badge.casefold() == "active"
-        downloaded = self._badge.casefold() in {"downloaded", "built-in"}
-        face = theme.font(11, bold=True)
-        painter.setFont(face)
-        metrics = QFontMetrics(face)
-        label = metrics.elidedText(self._badge, Qt.TextElideMode.ElideRight, max(20, int(image_rect.width()) - 43))
-        width = metrics.horizontalAdvance(label) + 29
-        rect = QRectF(image_rect.right() - width - 8, image_rect.top() + 7, width, 20)
-        fill = QColor(theme.RAIL)
-        fill.setAlpha(230)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(fill)
-        painter.drawRoundedRect(rect, 10, 10)
-        fg = QColor(theme.GREEN if active else theme.INK)
-        painter.setPen(QPen(fg, 1.3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        x, y = rect.x() + 11, rect.center().y()
-        if active:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(fg)
-            painter.drawEllipse(QPointF(x, y), 2.7, 2.7)
-        elif downloaded:
-            painter.drawPolyline([QPointF(x - 3, y), QPointF(x - 1, y + 2), QPointF(x + 3.5, y - 2.5)])
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            self.navigate.emit(1 if event.key() == Qt.Key.Key_Right else -1)
+            event.accept()
         else:
-            painter.drawLine(QPointF(x, y - 3.5), QPointF(x, y + 2.5))
-            painter.drawPolyline([QPointF(x - 2.5, y), QPointF(x, y + 2.5), QPointF(x + 2.5, y)])
-        painter.setPen(fg)
-        painter.drawText(rect.adjusted(19, 0, -5, 0), Qt.AlignmentFlag.AlignVCenter, label)
+            super().keyPressEvent(event)
 
     def paintEvent(self, event):
         with QPainter(self) as painter:
             painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
             rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
             outline = _rounded(rect, theme.R_PANEL)
-            previewing = self.underMouse() or self._previewed
-            painter.fillPath(outline, QColor(theme.HOVER if previewing else theme.PANEL))
+            painter.fillPath(outline, QColor(theme.ACTIVE if self.isChecked() else theme.PANEL))
             painter.setClipPath(outline)
-            compact = self.height() < 110
-            caption_height = 30 if compact else 54
-            photo = rect.adjusted(0, 0, 0, -caption_height)
-            painter.fillRect(photo, QColor(theme.RAIL))
+            photo = QRectF(5, 5, min(rect.width() * 0.41, (rect.height() - 8) * 1.9), rect.height() - 8)
             if not self._thumbnail.isNull():
-                source = _centered(QRectF(self._thumbnail.rect()), photo.width() / max(1, photo.height()))
+                source = _centered(QRectF(self._thumbnail.rect()), photo.width() / photo.height())
                 painter.drawPixmap(photo, self._thumbnail, source)
-            self._draw_badge(painter, photo)
-            left = rect.left() + 12
-            room = int(rect.width() - 24)
-            for text, top, size, bold, color in (
-                (self.text(), photo.bottom() + 5, 16, True, theme.INK),
-                (self._tagline, photo.bottom() + 26, theme.SMALL, False, theme.MUTED),
+            left = photo.right() + 12
+            width = int(rect.right() - left - 6)
+            status = self._badge
+            if self.isChecked() and status != "Active":
+                status = "Selected · " + status
+            for text, top, font, color in (
+                (self.text(), rect.center().y() - 22, theme.font(17, serif=True), theme.INK),
+                (status, rect.center().y() + 2, theme.font(11), theme.GOLD if self.isChecked() else theme.MUTED),
             ):
-                # The preview already shows the tagline. Give short tiles room for their artwork.
-                if compact and not bold:
-                    continue
-                face = theme.font(size, bold=bold)
-                painter.setFont(face)
+                painter.setFont(font)
                 painter.setPen(QColor(color))
-                label = QFontMetrics(face).elidedText(text, Qt.TextElideMode.ElideRight, room)
-                painter.drawText(QRectF(left, top, room, 20), Qt.AlignmentFlag.AlignVCenter, label)
+                painter.drawText(
+                    QRectF(left, top, width, 20),
+                    Qt.AlignmentFlag.AlignVCenter,
+                    QFontMetrics(font).elidedText(text, Qt.TextElideMode.ElideRight, width),
+                )
             painter.setClipping(False)
-            border = theme.TEXT if previewing else theme.EDGE
-            border_width = 1.5 if previewing else 1.0
-            if self.isChecked():
-                border = theme.GOLD
-            focused = self.property("keyboardFocus")
-            if focused:
-                border = theme.PALE
-            painter.setPen(QPen(QColor(border), 2 if focused or self.isChecked() else border_width))
+            border = theme.GOLD if self.isChecked() else theme.TEXT if self._previewed else theme.EDGE
+            painter.setPen(QPen(QColor(theme.PALE if self.hasFocus() else border), 1.5 if self.isChecked() else 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(outline)

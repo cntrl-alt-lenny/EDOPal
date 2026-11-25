@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QImageReader, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QIcon, QImageReader, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from edopal.ui import theme as t
 
@@ -117,45 +117,3 @@ class CardSlot(QPushButton):
         self.portrait.set_image(path)
         self.setAccessibleName(f"Choose card back for {self.slot}. {name}")
         self.setToolTip(f"{name} · {caption}" if caption else name)
-
-
-class Hero(QFrame):
-    """A softly lit surround sampled from the selected pack's tile artwork."""
-
-    def __init__(self):
-        super().__init__()
-        self._art = QPixmap()
-        self._path = None
-
-    def set_art(self, path: Path | str | None):
-        if path == self._path:
-            return
-        self._path = path
-        source = thumbnail(path, QSize(160, 100))
-        self._art = (
-            source.scaled(22, 14, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            if not source.isNull()
-            else source
-        )
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        outline = QPainterPath()
-        outline.addRoundedRect(rect, t.R_PANEL, t.R_PANEL)
-        painter.setClipPath(outline)
-        painter.fillRect(rect, QColor(t.PANEL))
-        if not self._art.isNull():
-            painter.setOpacity(0.68)
-            painter.drawPixmap(rect, self._art, QRectF(self._art.rect()))
-            painter.setOpacity(1)
-        shade = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        for stop, alpha in ((0, 115), (0.58, 135), (1, 35)):
-            color = QColor(t.RAIL)
-            color.setAlpha(alpha)
-            shade.setColorAt(stop, color)
-        painter.fillRect(rect, shade)
-        painter.setPen(QColor(t.EDGE))
-        painter.drawPath(outline)

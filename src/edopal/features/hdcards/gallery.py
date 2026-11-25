@@ -1,4 +1,4 @@
-"""Card-of-the-day pack and the two independently scrollable comparison strips."""
+"""Random card banners and the two independently scrollable comparison strips."""
 
 import json
 import random
@@ -6,9 +6,9 @@ import time
 from threading import Lock
 from weakref import WeakKeyDictionary
 
-from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPixmap
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QAbstractButton, QSizePolicy, QWidget
 
 from .showcase_art import atlas_bytes
 
@@ -23,7 +23,7 @@ _launch = WeakKeyDictionary()
 _lock = Lock()
 
 
-def load_banner(core, ctx, preview=False):
+def load_banner(core, ctx, preview=False, *, previous=None):
     folder = core.packs.cached(PACK)
     if folder is None:
         pack = next((p for p in core.packs.catalog("art") if p.id == PACK), None)
@@ -36,13 +36,24 @@ def load_banner(core, ctx, preview=False):
         return None
     with _lock:
         cid = 38033121 if preview and 38033121 in records else _launch.get(core.settings)
-        if cid not in records:
-            history = core.settings.get("hdcards", "recent_banners", [])
+        if cid not in records or previous is not None:
+            rotation = core.settings.get("hdcards", "banner_rotation", {})
+            seen = records.keys() & set(rotation.get("seen", ()))
+            recent = rotation.get("recent", core.settings.get("hdcards", "recent_banners", []))
+            if previous in records:
+                seen.add(previous)
+                recent = [*recent, previous] if not recent or recent[-1] != previous else recent
+            if seen == records.keys():
+                seen.clear()
+            remaining = records.keys() - seen
             window = min(12, len(records) - 1)
-            recent = history[-window:] if window else []
-            cid = random.choice(sorted(records.keys() - set(recent)))
-            core.settings.set("hdcards", "recent_banners", [*recent, cid])
+            choices = remaining - set(recent[-window:]) if window else remaining
+            choices = choices or remaining
+            cid = random.choice(sorted(choices))
+            data = (folder / "banners" / f"{cid}.jpg").read_bytes()
+            core.settings.set("hdcards", "banner_rotation", {"seen": sorted(seen | {cid}), "recent": [*recent[-11:], cid]})
             _launch[core.settings] = cid
+            return records[cid], data
     return records[cid], (folder / "banners" / f"{cid}.jpg").read_bytes()
 
 
@@ -81,20 +92,68 @@ def badge(p, x, y, text, color=FG, height=18):
     p.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
 
 
-class Banner(QWidget):
+class DiceButton(QAbstractButton):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFixedSize(32, 32)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("Reroll Random Card")
+        self.setToolTip("Reroll Random Card")
+        self.setEnabled(False)
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, event):
+        with QPainter(self) as p:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor("#3a3428" if self.isDown() else "#222225"))
+            p.drawRoundedRect(QRectF(self.rect()), 5, 5)
+            color = QColor(GOLD if self.isEnabled() and (self.underMouse() or self.hasFocus()) else FG)
+            if not self.isEnabled():
+                color = QColor("#aaa9ac")
+            p.setPen(QPen(color, 1.45))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(QRectF(8, 8, 16, 16), 3, 3)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(color)
+            for x, y in ((12, 12), (20, 12), (16, 16), (12, 20), (20, 20)):
+                p.drawEllipse(QPointF(x, y), 1.15, 1.15)
+
+
+class Banner(QAbstractButton):
     def __init__(self):
         super().__init__()
         self.record = {}
         self.image = QPixmap()
-        self.setAccessibleName("Card of the Day")
+        self.setAccessibleName("Random Card")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.reroll = DiceButton(self)
 
     def display(self, result):
         if result:
             self.record, data = result
             self.image = pix(data)
-            self.setToolTip(f"{self.record['name']} · {self.record['set_name']} ({self.record['set_code']})")
-            self.setAccessibleDescription(self.toolTip())
+            caption = f"{self.record['name']} · {self.record['set_name']} ({self.record['set_code']})"
+            self.setToolTip(f"View Card Details · {caption}")
+            self.setAccessibleDescription(caption)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        else:
+            self.setToolTip("Random card artwork is unavailable.")
+        self.reroll.setEnabled(bool(self.record))
         self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.reroll.move(self.width() - self.reroll.width() - 10, 10)
 
     def paintEvent(self, event):
         with QPainter(self) as p:
@@ -125,7 +184,11 @@ class Banner(QWidget):
                         Qt.AlignmentFlag.AlignVCenter,
                         p.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, width),
                     )
-            badge(p, 10, 10, "Card of the Day", height=22)
+            badge(p, 10, 15, "Random Card", height=22)
+            if self.hasFocus():
+                p.setPen(QPen(QColor(GOLD), 2))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawRoundedRect(box.adjusted(1, 1, -1, -1), 5, 5)
 
 
 def curated():

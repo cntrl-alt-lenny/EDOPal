@@ -9,7 +9,7 @@ import sys
 from edopal import APP_NAME, __version__
 from edopal.core.feature import FeatureSpec
 
-FEATURES = ["hdcards", "themes", "music", "formats"]
+FEATURES = ["hdcards", "themes", "music", "formats", "cosmetics"]
 
 # Keep development builds navigable while the feature packages land independently.
 _PREVIEWS = {
@@ -21,6 +21,7 @@ _PREVIEWS = {
 
 
 def load_features(core):
+    from edopal.plugins.decktracker import register as decktracker_spec
     from edopal.ui.sounds_page import sounds_spec
 
     specs = []
@@ -39,7 +40,7 @@ def load_features(core):
 
         label, summary = _PREVIEWS[name]
         specs.append(FeatureSpec(name, label, name, (order + 1) * 10, unavailable_page(label, summary), summary))
-    return sorted([*specs, sounds_spec()], key=lambda s: s.order)
+    return sorted([*specs, sounds_spec(), decktracker_spec(core)], key=lambda s: s.order)
 
 
 def build_window(core, start=None):

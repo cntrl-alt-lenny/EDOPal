@@ -1,8 +1,12 @@
+from dataclasses import replace
+
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPixmap, QWheelEvent
+from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton
 
 from edopal.features.themes import register
+from edopal.features.themes.gallery import PreviewCanvas
 from edopal.features.themes.service import ThemeService
 
 
@@ -29,38 +33,37 @@ def test_browse_preview_select_then_apply_and_undo(core, page, qtbot):
 
     qtbot.mouseClick(page.apply_button, Qt.MouseButton.LeftButton)
     assert ThemeService(core).state().active_theme == "theme-abyss"
+    assert "theme-abyss" in page.state.installed_themes
     assert page.undo_button.isEnabled()
     qtbot.mouseClick(page.undo_button, Qt.MouseButton.LeftButton)
     assert ThemeService(core).state().active_theme is None
 
 
-@pytest.mark.parametrize("slot", ["you", "opponent"])
-def test_inline_cardback_choice_applies_in_one_click(core, page, qtbot, slot):
-    qtbot.mouseClick(page.slots[slot], Qt.MouseButton.LeftButton)
-    picker = page.drawer
-    assert picker and page.isAncestorOf(picker) and picker.isVisible()
-    labels = {label.text() for label in picker.findChildren(QLabel)}
-    assert {"TCG / OCG", "ANIME", "Yu-Gi-Oh! ZEXAL anime (2011)"} <= labels
-    choice = picker.findChild(QPushButton, "pick-cardback-zexal-anime")
-    assert choice and choice.isVisible()
-    qtbot.mouseClick(choice, Qt.MouseButton.LeftButton)
-    assert ThemeService(core).state().cardbacks[slot] == "cardback-zexal-anime"
-    assert page.slots["you"].isVisible() and page.slots["opponent"].isVisible()
-
-
-def test_changing_the_same_slot_twice_refreshes_its_portrait(core, page, qtbot):
-    slot = page.slots["you"]
-
-    def choose(pack_id):
-        qtbot.mouseClick(slot, Qt.MouseButton.LeftButton)
-        choice = page.drawer.findChild(QPushButton, f"pick-{pack_id}")
-        qtbot.mouseClick(choice, Qt.MouseButton.LeftButton)
-        assert ThemeService(core).state().cardbacks["you"] == pack_id
-        return slot.portrait.grab().toImage()
-
-    first = choose("cardback-zexal-anime")
-    second = choose("cardback-ocg-1998")
-    assert first != second
+@pytest.mark.parametrize("modifiers", [Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier])
+def test_horizontal_library_overflow_wheel_and_arrow_navigation(page, qtbot, modifiers):
+    base = page.packs["theme-abyss"]
+    for n in range(15):
+        pack = replace(base, id=f"theme-study-{n}", name=f"Study {n}")
+        page.packs[pack.id] = pack
+    page._build_tiles()
+    QApplication.processEvents()
+    bar = page.shelf.horizontalScrollBar()
+    assert bar.isVisible() and bar.maximum() > 0
+    pos = QPointF(30, 20)
+    wheel = QWheelEvent(
+        pos, pos, QPoint(), QPoint(0, -120), Qt.MouseButton.NoButton, modifiers, Qt.ScrollPhase.ScrollUpdate, False
+    )
+    QApplication.sendEvent(page.shelf.viewport(), wheel)
+    assert bar.value() > 0
+    keys = list(page.tiles)
+    page.tiles[keys[-2]].setFocus()
+    qtbot.keyClick(page.tiles[keys[-2]], Qt.Key.Key_Right)
+    assert page.selected == keys[-1] and page.tiles[keys[-1]].hasFocus()
+    assert bar.value() == bar.maximum()
+    qtbot.keyClick(page.tiles[keys[-1]], Qt.Key.Key_Left)
+    assert page.selected == keys[-2]
+    assert page.shelf.geometry().bottom() < page.canvas.geometry().top()
+    assert abs(page.canvas._frame().width() / page.canvas._frame().height() - 1.6) < 0.001
 
 
 def test_customize_active_theme_from_inline_drawer(core, page, qtbot):
@@ -75,8 +78,29 @@ def test_customize_active_theme_from_inline_drawer(core, page, qtbot):
     font = drawer.findChild(QCheckBox)
     assert font.isChecked()
     qtbot.mouseClick(font, Qt.MouseButton.LeftButton)
-    save = next(button for button in buttons if button.text() == "Save changes")
+    save = next(button for button in buttons if button.text() == "Save Changes")
     qtbot.mouseClick(save, Qt.MouseButton.LeftButton)
     state = ThemeService(core).state()
     assert state.accent == f"#{gold.objectName().removeprefix('swatch-')}"
     assert not state.theme_font
+
+
+def test_preview_keeps_capture_edges_and_fills_both_margins(qtbot):
+    preview = PreviewCanvas()
+    qtbot.addWidget(preview)
+    preview.resize(720, 300)
+    capture = QPixmap(480, 300)
+    left, right = QColor("#299eb1"), QColor("#d49629")
+    capture.fill(left)
+    with QPainter(capture) as painter:
+        painter.fillRect(240, 0, 240, 300, right)
+    preview.set_preview(capture, animate=False)
+    image = preview.grab().toImage()
+    frame = preview._frame()
+    left_edge, right_edge = round(frame.left()), round(frame.right())
+    assert image.pixelColor(left_edge + 2, 150) == left
+    assert image.pixelColor(right_edge - 2, 150) == right
+    for margin, original in ((45, left), (675, right)):
+        tinted = image.pixelColor(margin, 150)
+        assert 0.58 < tinted.value() / original.value() < 0.68
+        assert abs(tinted.hue() - original.hue()) <= 2

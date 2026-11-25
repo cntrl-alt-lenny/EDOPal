@@ -43,14 +43,19 @@ def apply_state(page, name):
         page._status_ready("installed")
         page._undo_ready(True)
         page._notice("HAT banlist installed.")
-    elif name in ("deck", "preview", "deck-preview", "hover"):
+    elif name in ("deck", "preview", "deck-preview", "hover", "level", "attribute"):
         page.deck = next(deck for deck in decks if deck.id == 88767)
         detail = parse_preview(recorded("88767.json"), page.deck.id)
         limits = page.service.pack.whitelist("hat", ctx).limits
         install = page.core.installs.current()
-        cards = read_cards(install.root)[0] if install else {}
+        codes = {code for section in detail.printings for code, _ in section}
+        cards = read_cards(install.root, details_for=codes)[0] if install else {}
         caps, counts = preview_metadata(detail, limits, cards)
-        page._preview_ready(Preview(detail, limits=caps, composition=counts))
+        page._preview_ready(
+            Preview(detail, limits=caps, composition=counts, cards={code: cards[code] for code in codes & cards.keys()})
+        )
+        if name in ("level", "attribute") and page.banner.shape:
+            next(b for b in page.banner.shape.selector.buttons() if b.text().lower() == name).click()
         if name == "hover":
             page.grid.active = next(i for i, (code, _) in enumerate(detail.printings[0]) if code == 14087893)
     elif name == "empty":

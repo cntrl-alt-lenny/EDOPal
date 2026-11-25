@@ -63,7 +63,15 @@ def test_page_navigation_clipboard_install_and_download(qtbot, formats_service, 
     assert len(page.grid.tiles) == 70
     assert all(page.grid.rect().contains(box.toRect()) for box, _, _ in page.grid.tiles)
     qtbot.mouseMove(page.grid, pos=page.grid.tiles[7][0].center().toPoint())
-    assert page.grid.active == 7
+    assert page.grid.active == 7 and QApplication.activePopupWidget() is None
+    qtbot.mouseClick(page.grid, Qt.MouseButton.LeftButton, pos=page.grid.tiles[7][0].center().toPoint())
+    popup = QApplication.activePopupWidget()
+    assert popup.windowTitle() == page.grid.tiles[7][2]
+    qtbot.keyClick(popup, Qt.Key.Key_Escape)
+    qtbot.keyClick(page.grid, Qt.Key.Key_Right)
+    qtbot.keyClick(page.grid, Qt.Key.Key_Return)
+    assert QApplication.activePopupWidget().windowTitle() == page.grid.tiles[page.grid.open_index][2]
+    qtbot.keyClick(QApplication.activePopupWidget(), Qt.Key.Key_Escape)
     for action in page.save_menu.actions():
         ext = action.data()
         path = tmp_path / ("my deck." + ext)

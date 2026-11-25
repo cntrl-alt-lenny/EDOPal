@@ -1,4 +1,4 @@
-"""Built-in plugin discovery and per-profile activation."""
+"""Plugin discovery, verified installation and per-profile activation."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ class PluginEntry:
     detail: str = ""
     screenshots: tuple[tuple[str, str], ...] = ()
     stage: str = "Planned"
+    pack_id: str = ""
 
 
 _CONCEPTS = (
@@ -28,7 +29,8 @@ _CONCEPTS = (
         "deck-tracker.png",
         "See your remaining Main Deck cards and the odds of drawing each one in a duel.",
         (("deck-tracker.png", "Deck Tracker Concept"),),
-        "Coming Soon",
+        "In Development",
+        "plugin-deck-tracker",
     ),
     PluginEntry(
         "replay-library",
@@ -69,18 +71,30 @@ class PluginRegistry:
     def __init__(self, specs: Iterable[FeatureSpec], settings: Settings):
         self._settings = settings
         self.specs = {spec.id: spec for spec in specs if spec.kind == "plugin"}
-        self._enabled = {key for key in self.specs if settings.get("plugins", key) is True}
         entries = {entry.id: entry for entry in _CONCEPTS}
         for spec in self.specs.values():
             if spec.id not in entries:
                 entries[spec.id] = PluginEntry(spec.id, spec.label, spec.summary)
         self.entries = tuple(entries.values())
+        self.packages = {entry.id: entry.pack_id for entry in self.entries if entry.pack_id and entry.id in self.specs}
+        self._installed = self.specs.keys() - self.packages.keys()
+        self._enabled = {key for key in self._installed if self.preferred_enabled(key)}
+
+    def is_installed(self, plugin_id: str) -> bool:
+        return plugin_id in self._installed
+
+    def record_install(self, plugin_id: str) -> None:
+        if plugin_id in self.packages:
+            self._installed.add(plugin_id)
+
+    def preferred_enabled(self, plugin_id: str) -> bool:
+        return self._settings.get("plugins", plugin_id) is True
 
     def is_enabled(self, plugin_id: str) -> bool:
         return plugin_id in self._enabled
 
     def set_enabled(self, plugin_id: str, enabled: bool) -> bool:
-        if plugin_id not in self.specs or self.is_enabled(plugin_id) == enabled:
+        if not self.is_installed(plugin_id) or self.is_enabled(plugin_id) == enabled:
             return False
         self._settings.set("plugins", plugin_id, enabled)
         if enabled:

@@ -125,28 +125,90 @@ def database_paths(root: Path, unreadable: list[str] | None = None) -> list[Path
 
 
 @dataclass(frozen=True)
-class _Card:
+class CardRecord:
     name: str
     alias: int | None
     scope: int | None
     kind: int | None
 
+    level: int | None = None
+    attribute: int | None = None
+    text: str = ""
 
-def read_cards(root: Path) -> tuple[dict[int, _Card], list[str]]:
+    @property
+    def category(self):
+        for bit, name in ((1, "Monster"), (2, "Spell"), (4, "Trap")):
+            if (self.kind or 0) & bit:
+                return name
+        return "Unknown"
+
+    @property
+    def level_or_rank(self):
+        if self.category != "Monster" or self.kind & 0x4000000 or self.level is None:
+            return None
+        # EDOPro stores Pendulum scales above the low byte of level.
+        level = self.level & 0xFF
+        return level if 1 <= level <= 12 else None
+
+    @property
+    def type_line(self):
+        category = self.category
+        if category == "Unknown":
+            return ""
+        flags = (
+            (
+                (0x40, "Fusion"),
+                (0x2000, "Synchro"),
+                (0x800000, "Xyz"),
+                (0x4000000, "Link"),
+                (0x1000000, "Pendulum"),
+                (0x80, "Ritual"),
+                (0x1000, "Tuner"),
+                (0x200000, "Flip"),
+                (0x200, "Spirit"),
+                (0x400, "Union"),
+                (0x800, "Gemini"),
+                (0x400000, "Toon"),
+                (0x10, "Normal"),
+                (0x20, "Effect"),
+            )
+            if category == "Monster"
+            else (
+                (0x10000, "Quick-Play"),
+                (0x20000, "Continuous"),
+                (0x40000, "Equip"),
+                (0x80000, "Field"),
+                (0x100000, "Counter"),
+                (0x80, "Ritual"),
+            )
+        )
+        subtypes = [name for bit, name in flags if self.kind & bit]
+        if not subtypes and category != "Monster":
+            subtypes.append("Normal")
+        return " · ".join([category, *subtypes])
+
+
+def read_cards(root: Path, *, details_for=()) -> tuple[dict[int, CardRecord], list[str]]:
     cards, unreadable = {}, []
+    wanted = set(details_for)
     for path in database_paths(root, unreadable):
         try:
             with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
                 columns = {column[1] for column in db.execute("PRAGMA table_info(datas)")}
-                alias = "datas.alias" if "alias" in columns else "NULL"
-                scope = "datas.ot" if "ot" in columns else "NULL"
-                kind = "datas.type" if "type" in columns else "NULL"
-                sql = f"SELECT datas.id, texts.name, {alias}, {scope}, {kind} FROM datas JOIN texts USING (id)"
-                for code, name, family, scope, kind in db.execute(sql):
+                fields = [f"datas.{name}" if name in columns else "NULL" for name in ("alias", "ot", "type")]
+                if wanted:
+                    fields.extend(f"datas.{name}" if name in columns else "NULL" for name in ("level", "attribute"))
+                    text_columns = {column[1] for column in db.execute("PRAGMA table_info(texts)")}
+                    fields.append("texts.desc" if "desc" in text_columns else "NULL")
+                sql = f"SELECT datas.id, texts.name, {', '.join(fields)} FROM datas JOIN texts USING (id)"
+                for code, name, family, scope, kind, *detail in db.execute(sql):
                     if isinstance(name, str):
-                        cards[code] = _Card(
-                            name, family if isinstance(family, int) and 0 <= family <= 0xFFFFFFFF else None, scope, kind
-                        )
+                        alias = family if isinstance(family, int) and 0 <= family <= 0xFFFFFFFF else None
+                        if code in wanted:
+                            level, attribute, text = detail
+                            cards[code] = CardRecord(name, alias, scope, kind, level, attribute, text or "")
+                        else:
+                            cards[code] = CardRecord(name, alias, scope, kind)
         except sqlite3.Error:
             unreadable.append(path.name)
     return cards, unreadable
@@ -185,7 +247,7 @@ def _deckable(kind: int | None) -> bool:
     return kind is None or bool(kind & 7 and not kind & 0x4000)
 
 
-def _match_artwork(sections: Sections, cards: dict[int, _Card], preview: DeckPreview | None) -> dict[int, int]:
+def _match_artwork(sections: Sections, cards: dict[int, CardRecord], preview: DeckPreview | None) -> dict[int, int]:
     if not preview or preview.original != sections or len(preview.printings) != len(sections):
         return {}
     confirmed: dict[int, set[int]] = defaultdict(set)
@@ -200,7 +262,7 @@ def _identity(name: str) -> str:
     return HISTORICAL.sub("", name).casefold()
 
 
-def _versions(limits: dict[int, int], cards: dict[int, _Card]) -> dict[tuple[int, str], list[int]]:
+def _versions(limits: dict[int, int], cards: dict[int, CardRecord]) -> dict[tuple[int, str], list[int]]:
     versions = defaultdict(list)
     for code, cap in limits.items():
         card = cards.get(code)
@@ -217,7 +279,7 @@ def prepare(
     *,
     stock_tcg: bool = False,
     sizes: dict | None = None,
-    card_data: tuple[dict[int, _Card], list[str]] | None = None,
+    card_data: tuple[dict[int, CardRecord], list[str]] | None = None,
 ) -> PreparedDeck:
     """Return the candidate YDK and every substitution or unresolved legality issue; leave all writes to storage."""
     sections = read_ydk(source)

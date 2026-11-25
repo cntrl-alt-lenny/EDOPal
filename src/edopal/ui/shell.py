@@ -109,12 +109,33 @@ class _NavButton(QuietButton):
         self.toggled.connect(self._tint)
         self._tint(False)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_title()
+
+    def _fit_title(self):
+        """Drop leading words ("Card Backs & Icons" -> "Backs & Icons") before eliding a long label."""
+        label, room = self.accessibleName(), self.title.width()
+        words = label.split()
+        metrics = self.title.fontMetrics()
+        for start in range(len(words)):
+            candidate = " ".join(words[start:])
+            if candidate.startswith("&"):
+                continue
+            if metrics.horizontalAdvance(candidate) <= room:
+                break
+        else:
+            candidate = metrics.elidedText(label, Qt.TextElideMode.ElideRight, room)
+        if self.title.text() != candidate:
+            self.title.setText(candidate)
+
     def _tint(self, checked):
         color = t.GOLD if checked else t.TEXT
         self.mark.setPixmap(
             t.icon(self.glyph, t.GOLD if checked else t.MUTED).pixmap(QSize(19, 19), self.devicePixelRatioF())
         )
         self.title.setStyleSheet(f"color: {color}; font-weight: {650 if checked else 500};")
+        self._fit_title()
 
     def paintEvent(self, event):
         super().paintEvent(event)

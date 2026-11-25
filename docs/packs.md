@@ -115,9 +115,21 @@ Use `--pics /path/to/EDOPro/pics` to select a local scan directory. Then run
 
 ### Icons
 
-Icon packs use `kind: "icons"` and IDs starting with `icons-`. A game icon set
-can store its PNGs under `textures/`. The builder inventories and hashes the payload like every
-other pack. Icon manifests may omit `credits` for compatibility with the original icon exports.
+Icon packs use `kind: "icons"` and the common inventory and credits fields.
+
+| Pack ID | Files |
+| --- | --- |
+| `icons-stock` | Original EDOPro PNGs in `textures/`, stock credits, and `previews/field.webp`, a 620 × 430 crop from a captured duel |
+| `icons-minimal`, `icons-minimal-gold`, `icons-minimal-glass` | Eleven replacement PNGs per preset in `textures/` |
+| `icons-candidates` | Five alternatives per supported slot in `candidates/<slot>/A.png` through `E.png` |
+
+Texture stems are `act`, `attack`, `chain`, `number`, `negated`, `target`, `chaintarget`, `equip`,
+`lim`, `lpf`, and `settings`. Chain, chain target, and settings use the preset designs.
+The editor displays a single cell from the number and restriction atlases.
+Apply copies the complete PNG for each slot, including its alpha channel and all atlas cells.
+
+From the EDOPal checkout, run `.venv/bin/python packs/tools/package_icons.py` to assemble the source packs.
+Run `.venv/bin/python packs/tools/build_catalog.py` to generate the catalog and release ZIPs.
 
 ### format
 ```json

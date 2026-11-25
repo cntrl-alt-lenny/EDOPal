@@ -7,6 +7,8 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass, field
 from io import BytesIO
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from PIL import Image
 
@@ -100,13 +102,14 @@ def load_art(ctx, packs, rows, install):
     return art
 
 
-def load_faces(ctx, codes, install, client=None):
+def load_faces(ctx, codes, install, client=None, temporary=None):
     faces = {}
     for code in dict.fromkeys(codes):
         if ctx.cancelled:
             break
-        if data := _image(_face(install, code), (740, 1080)):
-            faces[code] = data
+        path = _face(install, code)
+        if data := _image(path, (300, 438)):
+            faces[code] = (data, path)
         elif client and code:
             try:
                 data = _image(BytesIO(client.card_face(code)), (740, 1080))
@@ -115,5 +118,11 @@ def load_faces(ctx, codes, install, client=None):
             except (ValueError, OSError):
                 continue
             if data:
-                faces[code] = data
+                # Downloaded faces live with this preview, outside the game folder.
+                path = None
+                if temporary is not None:
+                    with suppress(OSError), NamedTemporaryFile(dir=temporary.name, suffix=".jpg", delete=False) as out:
+                        out.write(data)
+                        path = Path(out.name)
+                faces[code] = (data, path)
     return faces

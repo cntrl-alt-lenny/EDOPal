@@ -16,9 +16,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
-    QVBoxLayout,
     QWidget,
 )
 from shiboken6 import isValid
@@ -28,19 +25,19 @@ from edopal.core.storage import GameRunningError, UndoResult
 from edopal.ui import theme as t
 from edopal.ui.widgets import PageHeader, page_layout
 
-from .controls import CardSlot, Hero, icon, label
-from .drawers import CardPicker, CustomizeDrawer
-from .gallery import PreviewCanvas, ThemeTile, stock_preview
-from .media import artwork, card_label, download_size
+from .controls import icon, label
+from .drawers import CustomizeDrawer
+from .gallery import PreviewCanvas, ThemeShelf, ThemeTile, stock_preview
+from .media import artwork, download_size
 from .service import ThemeService, ThemeState
 
 DEFAULT = "default"
-ORIGINAL = "EDOPro default"
-SCENE_NAMES = {"menu": "Menu", "deck": "Deck editor", "duel": "Duel"}
+ORIGINAL = "EDOPro Default"
+SCENE_NAMES = {"menu": "Main Menu", "deck": "Deck Editor", "duel": "Duel"}
 
 
 def _catalog(packs, refresh, ctx):
-    rows = [p for p in packs.catalog(refresh=refresh) if p.kind in {"theme", "cardback"}]
+    rows = packs.catalog("theme", refresh=refresh)
     roots = {}
     for pack in rows:
         if ctx.cancelled:
@@ -73,7 +70,6 @@ class ThemesPage(QWidget):
         self.thumbnails = {}
         self.previews = {}
         self.tiles = {}
-        self.slots = {}
         self.modes = {}
         self.selected = DEFAULT
         self.hovered = ""
@@ -103,7 +99,8 @@ class ThemesPage(QWidget):
 
     def _build(self):
         self.column = page_layout(self)
-        header = PageHeader("Game appearance", "Themes")
+        header = PageHeader("", "Themes")
+        header.kicker.hide()
         self.undo_button = QPushButton("Undo")
         self.undo_button.setObjectName("undo-theme")
         self.undo_button.setProperty("role", "quiet")
@@ -119,10 +116,9 @@ class ThemesPage(QWidget):
             button.setIconSize(QSize(t.ICON, t.ICON))
             header.actions.addWidget(button)
         self.column.addWidget(header)
-        self._build_hero()
 
         library_head = QHBoxLayout()
-        library_head.addWidget(label("Theme library", "subheading"))
+        library_head.addWidget(label("Theme Library", "subheading"))
         library_head.addStretch()
         self.hint = label("Hover to preview  ·  Click to select", "muted")
         library_head.addWidget(self.hint)
@@ -133,7 +129,7 @@ class ThemesPage(QWidget):
         self.reload.hide()
         library_head.addWidget(self.reload)
         self.column.addLayout(library_head)
-        self.shelf = QScrollArea()
+        self.shelf = ThemeShelf()
         self.shelf.setWidgetResizable(True)
         self.shelf.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.shelf.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -145,35 +141,22 @@ class ThemesPage(QWidget):
         self.shelf.setWidget(self.shelf_body)
         self.column.addWidget(self.shelf)
 
-        self.column.addWidget(label("Card backs", "subheading"))
-        self.backs_row = QHBoxLayout()
-        self.backs_row.setSpacing(12)
-        for slot in ("you", "opponent"):
-            button = CardSlot(slot)
-            button.clicked.connect(partial(self._open_picker, slot))
-            self.backs_row.addWidget(button, 1)
-            self.slots[slot] = button
-        self.column.addLayout(self.backs_row)
+        self._build_hero()
+
+    def _navigate(self, key, direction):
+        keys = list(self.tiles)
+        index = max(0, min(len(keys) - 1, keys.index(key) + direction))
+        tile = self.tiles[keys[index]]
+        tile.setFocus(Qt.FocusReason.TabFocusReason)
+        self.shelf.ensureWidgetVisible(tile, 0, 0)
+        self._select(tile.pack_id)
 
     def _build_hero(self):
-        self.hero = Hero()
-        self.hero_layout = QHBoxLayout(self.hero)
-        self.hero_layout.setSpacing(14)
-        info = QWidget()
-        info.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        self.details = QVBoxLayout(info)
-        self.details.setContentsMargins(0, 0, 0, 0)
-        self.details.setSpacing(t.XS)
-        self.details.addStretch(2)
-        self.kicker = label("THEME PREVIEW", "goldKicker")
-        self.details.addWidget(self.kicker)
-        self.title = label("", "heroTitle")
-        self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.details.addWidget(self.title)
-        self.subtitle = label("", "body")
-        self.subtitle.setWordWrap(True)
-        self.details.addWidget(self.subtitle)
-
+        heading = QHBoxLayout()
+        self.title = label("", "heading")
+        heading.addWidget(self.title)
+        self.subtitle = label("", "muted")
+        heading.addWidget(self.subtitle, 1)
         segment = QFrame()
         segment.setObjectName("themeScenes")
         segment.setStyleSheet(
@@ -197,31 +180,25 @@ class ThemesPage(QWidget):
             segments.addWidget(button)
             self.modes[key] = button
         self.modes["menu"].setChecked(True)
-        self.details.addWidget(segment, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.details.addSpacing(t.XS)
+        heading.addWidget(segment)
+        self.column.addLayout(heading)
+        self.canvas = PreviewCanvas()
+        self.column.addWidget(self.canvas, 1)
 
-        self.apply_button = QPushButton("Apply theme")
+        self.status = label("", "muted")
+        self.column.addWidget(self.status)
+        self.progress = QProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.setFixedSize(160, 5)
+        heading.addWidget(self.progress)
+        self.progress.hide()
+        self.apply_button = QPushButton("Apply Theme")
         self.apply_button.setProperty("role", "primary")
         self.apply_button.setObjectName("apply-theme")
         self.apply_button.setMinimumSize(140, t.BUTTON_H)
         self.apply_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.apply_button.clicked.connect(self._apply)
-        self.details.addWidget(self.apply_button, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.status = label("", "small")
-        self.status.setWordWrap(True)
-        self.details.addWidget(self.status)
-        self.progress = QProgressBar()
-        self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(5)
-        self.progress.setMaximumWidth(254)
-        self.details.addWidget(self.progress)
-        self.progress.hide()
-        self.details.addStretch(2)
-        self.hero_layout.addWidget(info, 4)
-        self.canvas = PreviewCanvas()
-        self.canvas.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self.hero_layout.addWidget(self.canvas, 6)
-        self.column.addWidget(self.hero, 1)
+        heading.addWidget(self.apply_button)
 
     def _read_state(self):
         self._generation += 1
@@ -289,16 +266,20 @@ class ThemesPage(QWidget):
                 old.hide()
                 old.deleteLater()
         self.tiles.clear()
-        entries = [(DEFAULT, ORIGINAL, "Your original game skin")]
+        entries = [(DEFAULT, ORIGINAL, "Original game skin")]
         entries.extend((p.id, p.name, p.meta.get("tagline", "")) for p in self.packs.values() if p.kind == "theme")
         for key, name, tagline in entries:
             tile = ThemeTile(key, name, tagline)
             tile.setObjectName(f"tile-{key}")
-            tile.setMinimumWidth(132)
+            tile.setMinimumWidth(205)
+            tile.navigate.connect(partial(self._navigate, key))
             tile.hovered.connect(self._hover)
             tile.clicked.connect(partial(self._select, key))
             self.shelf_row.addWidget(tile, 1)
             self.tiles[key] = tile
+        self.shelf_body.setMinimumWidth(
+            sum(tile.minimumWidth() for tile in self.tiles.values()) + self.shelf_row.spacing() * (len(entries) - 1)
+        )
         self.tiles[DEFAULT].set_thumbnail(stock_preview("tile"))
         if len(entries) < 3:
             self.shelf_row.addStretch(3 - len(entries))
@@ -330,18 +311,7 @@ class ThemesPage(QWidget):
         pack = self.packs.get(key)
         name = pack.name if pack else ORIGINAL
         self.title.setText(name)
-        self.subtitle.setText(
-            pack.meta.get("tagline", "") if pack else "Stock EDOPro preview. Applying restores your original skin and fonts."
-        )
-        active = (self.state.active_theme or DEFAULT) == key
-        if self.hovered and self.hovered != self.selected:
-            heading = "HOVER PREVIEW"
-        elif active and self._ready and self.core.installs.current():
-            heading = "ACTIVE THEME"
-        else:
-            heading = "THEME PREVIEW"
-        self.kicker.setText(heading)
-        self.hero.set_art(self.thumbnails.get(key) if pack else stock_preview("tile"))
+        self.subtitle.setText(pack.meta.get("tagline", "") if pack else "Original skin and fonts")
         request = (key, self.scene)
         if self._media_request == request:
             return
@@ -389,13 +359,15 @@ class ThemesPage(QWidget):
                 badge = "Active"
             elif key == DEFAULT:
                 badge = "Built-in"
+            elif key in self.state.installed_themes:
+                badge = "Installed"
             elif key in self.roots:
                 badge = "Downloaded"
             else:
                 badge = download_size(self.packs[key].size)
             tile.set_badge(badge)
         self.apply_button.setEnabled(bool(install) and self._ready and not self._busy and self.selected != active)
-        self.apply_button.setText("Applied" if self.selected == active and install and self._ready else "Apply theme")
+        self.apply_button.setText("Applied" if self.selected == active and install and self._ready else "Apply Theme")
         self.apply_button.setIcon(icon("check", t.MUTED) if self.apply_button.text() == "Applied" else QIcon())
         self.apply_button.setVisible(not self._busy)
         self.undo_button.setEnabled(self._ready and self.state.can_undo and not self._busy)
@@ -406,19 +378,8 @@ class ThemesPage(QWidget):
         message = self._message or ("Choose a game folder to apply changes." if not install else "")
         self.status.setText(message)
         self.status.setVisible(bool(message))
-        for slot, button in self.slots.items():
-            key = self.state.cardbacks[slot]
-            pack = self.packs.get(key)
-            fallback = {"cardback-vortex-classic": "Classic Vortex", "cardback-ocg-1998": "1998 OCG"}
-            name = pack.name if pack else fallback.get(key, key.removeprefix("cardback-").replace("-", " ").title())
-            caption = card_label(pack) if pack else ""
-            if slot in self.state.unknown_back_slots:
-                name, caption = "Game card back", ""
-            path = self.state.back_images.get(slot) or self.thumbnails.get(key)
-            button.set_back(name, caption, path)
-            button.setEnabled(not self._busy)
         self._render_preview()
-        self._request_thumbnails([*self.tiles, *self.state.cardbacks.values()])
+        self._request_thumbnails(self.tiles)
 
     def _request_thumbnails(self, keys):
         for key in dict.fromkeys(keys):
@@ -432,13 +393,6 @@ class ThemesPage(QWidget):
                 self.thumbnails[key] = image
                 if key in self.tiles:
                     self.tiles[key].set_thumbnail(image)
-                for slot, active in self.state.cardbacks.items():
-                    if active == key and slot not in self.state.back_images:
-                        self.slots[slot].portrait.set_image(image)
-                if isinstance(self.drawer, CardPicker) and key in self.drawer.images:
-                    self.drawer.images[key].set_image(image)
-                if (self.hovered or self.selected) == key:
-                    self.hero.set_art(image)
 
             self.core.jobs.run(
                 lambda ctx, p=pack, client=packs, r=root: artwork(client, p, root=r),
@@ -454,10 +408,6 @@ class ThemesPage(QWidget):
 
     def _undo(self):
         self._run_change(self.service.undo, (), "Last change undone.")
-
-    def _pick(self, slot, key):
-        self._close_drawer()
-        self._run_change(self.service.apply_cardback, (slot, self.packs[key]), f"{self.packs[key].name} set for {slot}.")
 
     def _customize(self, color, use_font):
         self._close_drawer()
@@ -556,27 +506,6 @@ class ThemesPage(QWidget):
         self._render()
         self.core.notify(self._message, "error")
 
-    def _open_picker(self, slot, *_):
-        if self._busy:
-            return
-        self._close_drawer()
-        self.hovered = ""
-        self._render_preview()
-        packs = [p for p in self.packs.values() if p.kind == "cardback"]
-        current = None if slot in self.state.unknown_back_slots else self.state.cardbacks[slot]
-        drawer = CardPicker(
-            self,
-            self.slots[slot],
-            slot,
-            packs,
-            current,
-            self.thumbnails,
-            bool(self.core.installs.current()) and self._ready,
-        )
-        drawer.picked.connect(partial(self._pick, slot))
-        self._show_drawer(drawer)
-        self._request_thumbnails([p.id for p in packs])
-
     def _open_customize(self):
         self._close_drawer()
         pack = self.packs.get(self.state.active_theme)
@@ -602,15 +531,11 @@ class ThemesPage(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        height = self.height()
-        compact = height < 700
-        roomy = height >= 950
-        self.column.setSpacing(t.SM if compact else t.MD)
-        self.title.setStyleSheet(f"font-size: {t.XXL if compact else t.HUGE}px;")
-        self.hero_layout.setContentsMargins(t.XL if compact else t.XXL, t.SM, t.LG, t.SM)
-        self.shelf.setFixedHeight(96 if compact else 142 if not roomy else 192)
-        for button in self.slots.values():
-            button.setFixedHeight(76 if compact else 84 if not roomy else 96)
+        compact = self.height() < 850
+        self.column.setContentsMargins(28 if compact else 36, 16 if compact else 20, 28 if compact else 36, 20)
+        self.column.setSpacing(8 if compact else 12)
+        self.title.setStyleSheet(f"font-size: {22 if compact else 26}px;")
+        self.shelf.setFixedHeight(74 if compact else 86)
         if self.drawer:
             self.layout().activate()
             self.drawer.place()
@@ -641,6 +566,4 @@ class ThemesPage(QWidget):
             self.scene = "duel"
             self.modes["duel"].setChecked(True)
             self._message = f"{primary.name} applied. Ready on next launch."
-        elif name == "cardback-picker-open":
-            self._open_picker("you")
         self._render()

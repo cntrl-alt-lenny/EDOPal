@@ -31,7 +31,7 @@ import certifi
 
 from edopal import PACKS_REPO
 from edopal.core.locks import file_lock
-from edopal.core.packs import PackInfo, PackKind, Progress
+from edopal.core.packs import PACK_KINDS, PackInfo, PackKind, Progress
 from edopal.core.paths import Paths
 
 CATALOG_URL = f"https://github.com/{PACKS_REPO}/releases/download/catalog/catalog.json"
@@ -42,7 +42,6 @@ MAX_FILE_BYTES = 512 * 1024**2
 _MAX_JSON = 4 * 1024**2
 _MAX_THUMB = 1024**2
 _CHUNK = 128 * 1024
-_KINDS = ("theme", "cardback", "music", "format")
 _DIGEST = re.compile(r"[a-fA-F0-9]{64}")
 _INVALID = re.compile(r'[<>:"\\|?*\x00-\x1f]')
 _DEVICE = re.compile(r"(?:CON(?:IN\$|OUT\$)?|PRN|AUX|NUL|(?:COM|LPT)[1-9¹²³])", re.I)
@@ -104,7 +103,7 @@ class _HTTPSRedirects(HTTPRedirectHandler):
 
 def _check_pack(pack: PackInfo, local: bool):
     _id(pack.id)
-    if pack.kind not in _KINDS or not all(isinstance(s, str) and s for s in (pack.name, pack.version, pack.url)):
+    if pack.kind not in PACK_KINDS or not all(isinstance(s, str) and s for s in (pack.name, pack.version, pack.url)):
         raise ValueError("Invalid pack catalog entry")
     if type(pack.size) is not int or not 0 <= pack.size <= MAX_ARCHIVE_BYTES:
         raise ValueError("Invalid pack archive size")
@@ -339,7 +338,7 @@ def _contents(source, dest: Path | None, pack_id: str, pack: PackInfo | None, ca
     with member("manifest.json") as stream:
         raw = _read(stream, _MAX_JSON)
     manifest = _json(raw)
-    if manifest.get("schema") != 1 or manifest.get("id") != pack_id or manifest.get("kind") not in _KINDS:
+    if manifest.get("schema") != 1 or manifest.get("id") != pack_id or manifest.get("kind") not in PACK_KINDS:
         raise ValueError("Pack manifest identity mismatch")
     if pack is not None and (manifest["kind"], manifest.get("version")) != (pack.kind, pack.version):
         raise ValueError("Pack kind or version differs from the catalog")
